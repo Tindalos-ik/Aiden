@@ -368,7 +368,7 @@ def finish_assistant_message(
     content: str,
     status: MessageStatus,
 ) -> None:
-    """在短事务中按消息、会话和所有者三重条件更新回答及其状态。"""
+    """仅把仍在生成的助手行从 streaming 转为终态，并校验会话归属。"""
     now = utc_now_naive()
     with get_session_factory().begin() as session:
         message = session.scalar(
@@ -384,6 +384,10 @@ def finish_assistant_message(
         )
         if message is None:
             raise LookupError("会话不存在")
+        # Graph 保存完成答案后，SSE 取消收尾可能稍后尝试写 stopped；终态只能由
+        # create_message_pair 的显式重试重置，收尾写入不能覆盖已经落库的结果。
+        if message.status != "streaming":
+            return
         message.content = content
         message.status = status
         conversation = session.get(Conversation, conversation_id)

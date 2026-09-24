@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 
 from langchain_core.exceptions import OutputParserException
@@ -34,6 +35,21 @@ _TOOL_NODE_BY_NAME = {
     "search_faq": "run_search_faq",
 }
 _MIN_INTENT_CONFIDENCE = 0.55
+_ORDER_TOKEN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_-])([A-Za-z0-9][A-Za-z0-9_-]{1,62}[A-Za-z0-9])(?![A-Za-z0-9_-])"
+)
+_ORDER_MARKER_PATTERN = re.compile(
+    r"(?:订单(?:号|编号)?|单号|order(?:\s*(?:no\.?|number))?)\s*(?:是|为|[:：#])?\s*"
+    r"([A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?)",
+    re.IGNORECASE,
+)
+_SHORT_NUMERIC_CHOICE_PATTERN = re.compile(
+    r"(?<!\d)(\d{1,2})\s*(?:还是|或者|或是|或|和|与|及|、|/|[,，]|and\b|or\b)\s*"
+    r"(\d{1,2})(?!\d)",
+    re.IGNORECASE,
+)
+_ORDER_SUFFIX_PATTERN = re.compile(r"\s*(?:号(?:订单|物流|包裹)?|订单号|单号|运单号)")
+_CALENDAR_DATE_PATTERN = re.compile(r"^(?:19|20)\d{2}[-/]\d{1,2}(?:[-/]\d{1,2})?$")
 
 
 # FAQ 是当前唯一可用的常见问题依据；政策表、售后进度和工单没有接入本 Agent。
@@ -99,6 +115,65 @@ def _latest_user_text(messages: list[BaseMessage]) -> str:
     return ""
 
 
+def _contains_exact_order_no(text: str, order_no: str) -> bool:
+    """只认可用户原文中独立出现的订单号，避免把更长编号的子串当作来源。"""
+    if not text or not order_no:
+        return False
+    pattern = rf"(?<![A-Za-z0-9_-]){re.escape(order_no)}(?![A-Za-z0-9_-])"
+    return re.search(pattern, text) is not None
+
+
+def _order_candidates(text: str) -> set[str]:
+    """提取常见 ASCII 订单号形态，用于在服务端发现同一请求中的多个目标。"""
+    marked_values = set(_ORDER_MARKER_PATTERN.findall(text))
+    values = set(_ORDER_TOKEN_PATTERN.findall(text)) | marked_values
+    candidates: set[str] = set()
+    for value in values:
+        if not any(char.isdigit() for char in value):
+            continue
+        if _CALENDAR_DATE_PATTERN.fullmatch(value):
+            continue
+        has_letters = any(char.isalpha() for char in value)
+        # 短纯数字仅在订单标记直接指向它时作为单号候选，避免把普通数量当成订单号。
+        if has_letters or "_" in value or "-" in value or len(value) >= 3 or value in marked_values:
+            candidates.add(value.casefold())
+
+    for match in _SHORT_NUMERIC_CHOICE_PATTERN.finditer(text):
+        # 只在订单标记或订单/物流后缀能证明这是目标选项时，加入短数字两端。
+        has_order_marker = bool(_ORDER_MARKER_PATTERN.search(text))
+        has_order_suffix = bool(_ORDER_SUFFIX_PATTERN.match(text, match.end()))
+        if has_order_marker or has_order_suffix:
+            candidates.update(value.casefold() for value in match.groups())
+    return candidates
+
+
+def _order_no_source_status(order_no: str, messages: list[BaseMessage]) -> str:
+    """验证号码来自用户原文，并拒绝无法唯一确定的多订单上下文。"""
+    user_texts = [
+        _content_as_text(message.content).strip()
+        for message in messages
+        if isinstance(message, HumanMessage)
+    ]
+    if not user_texts or not order_no or len(order_no) > 64:
+        return "missing"
+
+    current_text = user_texts[-1]
+    if _contains_exact_order_no(current_text, order_no):
+        # 本轮明确写出的目标以本轮原文为准；同句出现其他订单号时必须澄清。
+        source_texts = [current_text]
+    else:
+        # 省略订单号的指代只能回溯用户自己曾写过的号码，不信任助手生成的文本。
+        source_texts = user_texts
+        if not any(_contains_exact_order_no(text, order_no) for text in source_texts):
+            return "missing"
+
+    candidates = set().union(*(_order_candidates(text) for text in source_texts))
+    candidates.add(order_no.casefold())
+    if len(candidates) > 1:
+        return "ambiguous"
+    return "valid"
+
+
 def _clarification_reply(result: dict[str, Any]) -> str:
     """使用受控追问模板，避免分类器把凭据或无关要求变成用户可见问题。"""
     intent = result.get("intent")
@@ -129,20 +204,28 @@ def _recognition_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
     return [SystemMessage(content=INTENT_RECOGNITION_PROMPT), *history]
 
 
-def _semantic_route(result: IntentRecognition) -> dict[str, Any]:
+def _semantic_route(
+    result: IntentRecognition, messages: list[BaseMessage]
+) -> dict[str, Any]:
     """把结构化语义结果收敛成服务端固定的意图与工具白名单。
 
-    低置信度和歧义只会导向澄清/兜底；订单归属仍由 InjectedState 和 SQL 的
-    user_id 条件验证，分类结果不能认证用户，也不能扩大其数据访问范围。
+    显式订单号须能在用户原文中逐字核验，且同一上下文不能包含多个候选；订单归属
+    仍由 InjectedState 和 SQL 的 user_id 条件验证，分类结果不能认证用户或扩大权限。
     """
     data = result.model_dump()
     entities = data["entities"]
     order_no = (entities.get("order_no") or "").strip() or None
     reference = entities.get("order_reference", "none")
     if order_no:
-        entities["order_no"] = order_no
-        reference = "explicit"
-        entities["order_reference"] = reference
+        source_status = _order_no_source_status(order_no, messages)
+        if source_status == "valid":
+            entities["order_no"] = order_no
+            reference = "explicit"
+            entities["order_reference"] = reference
+        else:
+            # 模型声称的号码若无法从用户输入唯一核验，不能降级成查最近订单。
+            entities["order_no"] = None
+            entities["order_reference"] = "ambiguous" if source_status == "ambiguous" else "none"
 
     base = {
         "semantic_result": data,
@@ -153,6 +236,22 @@ def _semantic_route(result: IntentRecognition) -> dict[str, Any]:
         "order_lookup_mode": "",
         "authorized_order_no": "",
     }
+
+    if (
+        data["intent"] in {"order_query", "logistics_query"}
+        and len(_order_candidates(_latest_user_text(messages))) > 1
+    ):
+        # 同一条用户消息出现多个订单目标时，分类器不能只靠置信度选中其中一个。
+        entities["order_no"] = None
+        entities["order_reference"] = "ambiguous"
+        base["direct_reply"] = _clarification_reply(data)
+        return base
+
+    if order_no and entities.get("order_no") is None and data["intent"] in {
+        "order_query", "logistics_query"
+    }:
+        base["direct_reply"] = _clarification_reply(data)
+        return base
 
     if not base["completed_question"]:
         base["direct_reply"] = _FALLBACK_REPLY
@@ -405,7 +504,7 @@ def build_support_graph():
             recognition = IntentRecognition.model_validate(raw)
         except ValidationError:
             return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
-        return _semantic_route(recognition)
+        return _semantic_route(recognition, state.get("messages", []))
 
     async def generate(state: SupportState) -> dict[str, Any]:
         """生成工具调用轮或最终回答；只有最终回答写入 answer 供 SSE 和保存节点使用。"""
@@ -453,7 +552,13 @@ def build_support_graph():
         has_tool_calls = bool(
             getattr(response, "tool_calls", []) or getattr(response, "invalid_tool_calls", [])
         )
-        answer = "" if has_tool_calls else _content_as_text(response.content).strip()
+        # SSE 只发送 generate.output.answer；工具白名单仍有效时，模型文本只能是待验证的
+        # 工具轮输出，不能先作为答案发出，再由后续拒绝节点撤回。
+        answer = (
+            ""
+            if has_tool_calls or allowed_names
+            else _content_as_text(response.content).strip()
+        )
         return {"messages": [response], "answer": answer}
 
     def route_after_generate(state: SupportState) -> str:
@@ -462,6 +567,9 @@ def build_support_graph():
         calls = getattr(message, "tool_calls", [])
         invalid_calls = getattr(message, "invalid_tool_calls", [])
         if not calls and not invalid_calls:
+            if state.get("allowed_tools"):
+                # 仍有业务工具权限时，模型的自然语言不能代替真实查询结果。
+                return "reject_tool_call"
             return "save_answer"
         if len(calls) != 1 or invalid_calls or not _arguments_are_authorized(calls[0], state):
             return "reject_tool_call"
