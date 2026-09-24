@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+.venv/
+.uv-cache/
+.tmp/
+__pycache__/
+*.py[cod]
+data/

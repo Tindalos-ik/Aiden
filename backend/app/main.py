@@ -1,0 +1,16 @@
+from fastapi import FastAPI
+
+from app.api.routes.auth import router as auth_router
+from app.api.routes.conversations import router as conversations_router
+
+
+# 应用导入阶段只注册路由；不连接 MySQL、不建表。表结构须先由 Alembic 升级。
+app = FastAPI(title="Aiden local support API", version="0.1.0")
+app.include_router(auth_router)
+app.include_router(conversations_router)
+
+
+@app.get("/api/health")
+def health() -> dict[str, str]:
+    """提供进程存活检查；该轻量端点不代表数据库或模型已经可用。"""
+    return {"status": "ok"}

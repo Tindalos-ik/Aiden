@@ -1,0 +1,4 @@
+# 单独安装 MySQL ORM、迁移器和纯 Python MySQL 驱动。
+SQLAlchemy>=2.0,<3.0
+alembic>=1.13,<2.0
+PyMySQL>=1.1,<2.0
