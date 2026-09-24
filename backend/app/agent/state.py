@@ -20,3 +20,18 @@ class SupportState(TypedDict, total=False):
     answer: str
     # 已认证用户 ID，供上下文查询和写回答时做归属校验。
     user_id: str
+    # 语义识别节点的结构化字段；只保留意图、补全问题、实体、澄清标记和置信度。
+    semantic_result: dict[str, object]
+    # 服务端依据固定意图集合选出的工具名；严禁直接采用模型返回的工具名。
+    allowed_tools: list[str]
+    # 传给最终回答模型的补全问题，不改写数据库中的原始用户消息。
+    completed_question: str
+    # 服务端可选的安全固定答复，经 generate 节点发送并保存。
+    direct_reply: str
+    # 物流查询需要先查本人订单时，标记该阶段是否尚待处理。
+    order_lookup_pending: bool
+    order_lookup_mode: str
+    # 只允许对本轮本人订单查询结果中确定的订单发起物流查询。
+    authorized_order_no: str
+    # 非法工具调用被拒绝后，防止模型重新尝试并确保最终走安全答复。
+    tool_rejected: bool

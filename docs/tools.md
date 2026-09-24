@@ -19,10 +19,13 @@ MySQL `DATETIME` 按 UTC 约定写入；工具把返回时间标为 ISO 8601 UTC
 ```mermaid
 graph TD
     auth["认证用户消息"] --> context["加载会话上下文"]
-    context --> model["绑定工具的模型节点"]
-    model -->|工具调用| tools["ToolNode 执行只读查询"]
-    tools -->|工具结果| model
-    model -->|最终回答| save["保存最终回答"]
+    context --> model["调用绑定工具的模型"]
+    model --> decision{"模型是否提出工具调用？"}
+    decision --> execute["有工具调用：ToolNode 执行只读查询"]
+    execute --> result["工具结果作为 ToolMessage 返回模型"]
+    result --> model
+    decision --> answer["没有工具调用：生成最终回答"]
+    answer --> save["保存最终回答"]
     save --> response["发送 SSE delta 和 done"]
 ```
 
