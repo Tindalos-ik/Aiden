@@ -28,10 +28,12 @@ class SupportState(TypedDict, total=False):
     completed_question: str
     # 服务端可选的安全固定答复，经 generate 节点发送并保存。
     direct_reply: str
-    # 物流查询需要先查本人订单时，标记该阶段是否尚待处理。
+    # 先列本人近期订单或核验跨轮选择时，标记前置订单查询是否尚待处理。
     order_lookup_pending: bool
     order_lookup_mode: str
-    # 只允许对本轮本人订单查询结果中确定的订单发起物流查询。
+    # 用户从最近订单列表中选择的候选；下一步必须由本人近期订单结果再次核验。
+    selection_order_no: str
+    # 只允许对本轮本人订单查询结果中确定的订单发起详情或物流查询。
     authorized_order_no: str
     # 非法工具调用被拒绝后，防止模型重新尝试并确保最终走安全答复。
     tool_rejected: bool

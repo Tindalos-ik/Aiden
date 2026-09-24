@@ -373,3 +373,30 @@ BGE-M3支持中英文，长文本，微调，生成环境用的多，向量库�
 
 每一条知识落库，不能知识一段正文，应该是一个结构化的 JSON
 
+不管是哪一类内容，送进去向量化的都是 category, questions, answer 三格拼起来的文本
+
+除了这几个字段，每条 chunk 还带四类元数据，它们都不进向量化
+
+`section_path`记录这块内容在文档里的章节路径
+
+`content_type`标出这块内容是文字，表格，还是图片
+
+`is_key_clause`标记块是不是退货，售后这类关键条款，留作检索排序时的一个加权信号
+
+`prev_chunk_id`和`next_chunk_id`记住相邻的块是谁，遇到语义不完整的情况能自动拉前后块补全
+
+于是一条chunk长这样
+
+```
+{
+  "category": "退换货",
+  "questions": ["买的鞋子能不能退", "七天无理由适用哪些商品"],
+  "answer": "支持 7 天无理由退货，商品需保持完好，定制类商品除外。",
+  "section_path": "退货政策 > 无理由退货",
+  "content_type": "text",
+  "is_key_clause": true,
+  "prev_chunk_id": "kb_00417",
+  "next_chunk_id": "kb_00419"
+}
+```
+

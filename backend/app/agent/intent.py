@@ -23,7 +23,7 @@ class RecognizedEntities(BaseModel):
         "explicit", "latest", "account_lookup", "ambiguous", "none"
     ] = Field(
         description=(
-            "订单指代类型：explicit 表示已识别出具体订单号；latest 表示用户明确指定最近一笔；"
+            "订单指代类型：explicit 表示已识别出具体订单号；latest 表示用户本轮明确指定最近一笔；"
             "account_lookup 表示用户要求先从本人订单中确定；ambiguous 表示多个可能订单；none 表示无订单指代。"
         )
     )
@@ -48,7 +48,10 @@ class IntentRecognition(BaseModel):
     )
     entities: RecognizedEntities
     needs_clarification: bool = Field(
-        description="目标仍有歧义或缺少必要信息时为 true；此时不能调用业务工具。"
+        description=(
+            "目标仍有歧义或缺少必要信息时为 true。高置信度订单/物流意图仅缺订单目标时，"
+            "服务端可先查询当前用户近期订单以列出选项；低置信度、unclear、FAQ 和 unsupported 不列单。"
+        )
     )
     clarification_question: str | None = Field(
         default=None,
@@ -66,7 +69,7 @@ INTENT_RECOGNITION_PROMPT = """你是客服问题的语义分类器。只输出�
 
 可选意图只有：order_query（查询订单及商品/状态）、logistics_query（查询包裹及物流）、faq（咨询常见问题）、unsupported（当前只读工具无法支持的请求）、unclear（无法判断）。不要创造其他类别。
 
-理解本轮用户问题时可以参考给出的会话历史。把“这个订单”“它到哪了”等指代补全成简洁、独立的问题；只有历史中有明确且唯一的订单号时，才把该号码填入 entities.order_no。不得猜测、改写或从外部知识补造订单号。order_reference 为 explicit 时必须填写订单号；latest 只用于用户明确说最近/最新一笔；account_lookup 只用于用户明确要求先从本人订单中确定目标；有多个可能订单时用 ambiguous 并要求澄清。缺少唯一订单目标时，物流请求必须 needs_clarification=true，除非用户明确指定最近一笔或要求先查本人订单。
+理解本轮用户问题时可以参考给出的会话历史。把“这个订单”“它到哪了”等指代补全成简洁、独立的问题；只有用户原文中明确出现且可唯一确认的订单号才填入 entities.order_no，不得从助手列出的选项、工具结果、模型推测或外部知识中补造订单号。用户在最近一条客服订单选项回复中按序号选择时，按上下文保持原有 order_query 或 logistics_query 意图；序号不能填入 order_no。order_reference 为 explicit 时必须填写用户明确提供的订单号；latest 只用于用户在本轮明确说最近/最新一笔，不能从历史指代或助手回复继承；account_lookup 只用于用户明确要求先从本人订单中确定目标；有多个可能订单时用 ambiguous。订单/物流意图明确但订单目标缺失或不唯一时，needs_clarification 可以为 true，服务端会先提供当前用户的近期订单选项；这不适用于低置信度、unclear、FAQ 或 unsupported。
 
 退货/退款进度、工单状态、创建工单、人工转接等当前没有对应工具，归为 unsupported。政策类问题仍可归为 faq 并交给 FAQ 查询；只有实际 FAQ 结果能作为答复依据，不能根据 policies 表名或记忆推断政策内容。身份、user_id、登录状态和数据访问范围不是分类内容，不得输出或决定这些内容。
 
