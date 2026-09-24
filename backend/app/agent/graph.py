@@ -170,6 +170,22 @@ def _order_candidates(text: str) -> set[str]:
     return candidates
 
 
+def _explicit_order_numbers(text: str) -> list[str]:
+    """从本轮原文保留唯一完整订单号的原始大小写，不依赖分类器抄录实体。"""
+    marked_values = set(_ORDER_MARKER_PATTERN.findall(text))
+    values = set(_ORDER_TOKEN_PATTERN.findall(text)) | marked_values
+    candidates: dict[str, str] = {}
+    for value in values:
+        if not any(char.isdigit() for char in value):
+            continue
+        if _CALENDAR_DATE_PATTERN.fullmatch(value):
+            continue
+        has_letters = any(char.isalpha() for char in value)
+        if has_letters or "_" in value or "-" in value or len(value) >= 3 or value in marked_values:
+            candidates.setdefault(value.casefold(), value)
+    return list(candidates.values())
+
+
 def _order_no_source_status(order_no: str, messages: list[BaseMessage]) -> str:
     """验证号码来自用户原文，并拒绝无法唯一确定的多订单上下文。"""
     user_texts = [
@@ -427,6 +443,15 @@ def _semantic_route(
     current_candidates = _order_candidates(current_text)
     recent_options = _previous_order_list(messages)
     current_order_no = entities.get("order_no")
+    if current_order_no is None:
+        explicit_order_nos = _explicit_order_numbers(current_text)
+        if len(explicit_order_nos) == 1:
+            raw_order_no = explicit_order_nos[0]
+            if _order_no_source_status(raw_order_no, messages) == "valid":
+                current_order_no = raw_order_no
+                entities["order_no"] = raw_order_no
+                entities["order_reference"] = "explicit"
+                reference = "explicit"
 
     # 列表回复后的序号、完整订单号或尾号只在紧邻的服务器列表中解析；随后仍会用
     # 本人近期订单结果复核，过期选择会重新列单，歧义尾号则要求用户澄清。
@@ -621,6 +646,26 @@ def _arguments_are_authorized(call: dict[str, Any], state: SupportState) -> bool
     question = args.get("question")
     completed_question = state.get("completed_question", "").strip()
     return isinstance(question, str) and question.strip() == completed_question
+
+
+def _bind_authorized_order_no(call: dict[str, Any], state: SupportState) -> None:
+    """把已由服务端授权的目标订单号绑定到工具参数，避免模型复抄时引入字符差异。"""
+    name = call.get("name")
+    if name not in {"query_order", "query_logistics"}:
+        return
+    if name == "query_order" and state.get("order_lookup_pending"):
+        return
+
+    args = call.get("args")
+    if not isinstance(args, dict) or not set(args).issubset({"order_no"}):
+        return
+    authorized_order_no = state.get("authorized_order_no")
+    semantic = state.get("semantic_result", {})
+    entities = semantic.get("entities", {}) if isinstance(semantic, dict) else {}
+    if not authorized_order_no and isinstance(entities, dict):
+        authorized_order_no = entities.get("order_no")
+    if isinstance(authorized_order_no, str) and authorized_order_no:
+        args["order_no"] = authorized_order_no
 
 
 def _order_lookup_result(state: SupportState) -> dict[str, Any]:
@@ -911,6 +956,8 @@ def build_support_graph():
         message = state["messages"][-1]
         calls = getattr(message, "tool_calls", [])
         invalid_calls = getattr(message, "invalid_tool_calls", [])
+        if len(calls) == 1 and not invalid_calls and isinstance(calls[0], dict):
+            _bind_authorized_order_no(calls[0], state)
         if not calls and not invalid_calls:
             if state.get("allowed_tools"):
                 # 仍有业务工具权限时，模型的自然语言不能代替真实查询结果。
