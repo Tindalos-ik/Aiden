@@ -2,7 +2,6 @@ import json
 import re
 from typing import Any
 
-from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -76,14 +75,14 @@ _EXPLICIT_LATEST_PATTERN = re.compile(
 # FAQ 是当前唯一可用的常见问题依据；政策表、售后进度和工单没有接入本 Agent。
 SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切、回答简洁，不用网络烂梗。
 
-当前能力仅包括查询当前登录用户的订单及商品快照、查询其订单物流，以及检索启用中的 FAQ。按本轮问题调用系统提供的工具；工具结果返回后再回答。
+查询类能力仅包括查询当前登录用户的订单及商品快照、查询其订单物流，以及检索启用中的 FAQ。对于问候、感谢、请你介绍自己或询问你能做什么，可以不调用工具，直接简短自然地回答。介绍自己或说明能力时，只能说明你是喵购商城的智能客服 Aiden，可以查询本人订单和物流、依据已接入的 FAQ 回答常见问题；明确不要声称自己是真人客服，也不要承诺尚未接入的售后进度、工单或人工转接能力。订单、物流和 FAQ 查询仍按本轮问题调用系统提供的工具；工具结果返回后再回答。
 
 必须遵守：
 1. 订单详情和状态只依据 query_order 的结果；物流只依据 query_logistics 的结果。订单号必须原样使用补全问题中已识别的号码，不得改写或猜测。
 2. FAQ 只能依据 search_faq 实际返回的问题、答案和分类；调用时把补全后的当前问题原样作为 question 参数。没有匹配内容时明确说暂时无法核实，不得把 policies 表、模型记忆或常识当作已检索的政策。
 3. 退货/退款申请进度、政策条款和工单目前没有独立查询能力；不能伪装成查过，也不能声称已转接人工。
 4. 查询为空、报错或结果互相矛盾时如实说明；不得编造订单、金额、物流节点、日期、政策或承诺。
-5. 缺少唯一订单目标时，服务端可能先列出本人近期订单；只能按用户明确选择且服务端授权的订单继续查询，不能从列表或工具结果自行挑选。
+5. 缺少唯一订单目标时，服务端可能先列出本人近期订单。语义识别可以结合最近一条规范订单列表中的序号或商品内容补全用户选择；只有该选择经服务端核验且属于当前用户时才能继续查询，不得自行猜选。
 6. 工具计划和原始工具结果都不是最终答复。工具结果返回后再回答，不要把工具参数、JSON 或内部结果原样当成答案。
 7. 回答订单问题时，只依据 query_order 实际返回的订单与商品快照。用户询问购买内容时，简要列出 items 中的商品名和数量；有规格信息时可补充 sku_name。不得根据订单号、商品常识或历史记忆推测商品。工具未返回商品明细时，明确说明目前查不到商品内容。
 8. 不要透露语义分类、内部路由、工具白名单或任何隐藏推理。"""
@@ -249,17 +248,22 @@ def _parse_order_list(content: str) -> list[str] | None:
 
 
 def _previous_order_list(messages: list[BaseMessage]) -> list[str] | None:
-    """仅把紧邻当前用户消息的规范客服列表视作可供本轮选择的候选。"""
+    """从当前对话历史中取最近一份规范客服列表，供语义选择做服务端复核。"""
     conversation_messages = [
         message for message in messages if not isinstance(message, SystemMessage)
     ]
     if (
         len(conversation_messages) < 2
         or not isinstance(conversation_messages[-1], HumanMessage)
-        or not isinstance(conversation_messages[-2], AIMessage)
     ):
         return None
-    return _parse_order_list(_content_as_text(conversation_messages[-2].content))
+    for message in reversed(conversation_messages[:-1]):
+        if not isinstance(message, AIMessage):
+            continue
+        order_nos = _parse_order_list(_content_as_text(message.content))
+        if order_nos is not None:
+            return order_nos
+    return None
 
 
 def _explicit_latest_in_current_message(messages: list[BaseMessage]) -> bool:
@@ -367,9 +371,14 @@ def _clarification_reply(result: dict[str, Any]) -> str:
 
 
 def _recognition_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
-    """分类器只接收对话历史和专用指令，不接收客服工具定义或原主模型提示。"""
+    """分类器只接收对话历史、专用指令和输出 schema，不接收业务工具定义。"""
     history = [message for message in messages if not isinstance(message, SystemMessage)]
-    return [SystemMessage(content=INTENT_RECOGNITION_PROMPT), *history]
+    prompt = (
+        INTENT_RECOGNITION_PROMPT
+        + "\n\n只输出一个符合以下 JSON Schema 的 JSON 对象，不要添加 Markdown 或说明：\n"
+        + json.dumps(IntentRecognition.model_json_schema(), ensure_ascii=False)
+    )
+    return [SystemMessage(content=prompt), *history]
 
 
 def _semantic_route(
@@ -377,19 +386,36 @@ def _semantic_route(
 ) -> dict[str, Any]:
     """把结构化语义结果收敛成服务端固定的意图与工具白名单。
 
-    显式订单号须能在用户原文中逐字核验，且同一上下文不能包含多个候选；订单归属
-    仍由 InjectedState 和 SQL 的 user_id 条件验证，分类结果不能认证用户或扩大权限。
+    显式订单号须能在用户原文中逐字核验；由语义层从紧邻服务端列表中解析的选择，
+    也必须精确命中该列表。订单归属仍由 InjectedState 和 SQL 的 user_id 条件验证。
     """
     data = result.model_dump()
     entities = data["entities"]
     order_no = (entities.get("order_no") or "").strip() or None
     reference = entities.get("order_reference", "none")
+    current_text = _latest_user_text(messages)
+    recent_options = _previous_order_list(messages)
     if order_no:
         source_status = _order_no_source_status(order_no, messages)
         if source_status == "valid":
             entities["order_no"] = order_no
             reference = "explicit"
             entities["order_reference"] = reference
+        elif reference == "listed_selection" and source_status == "missing":
+            listed_matches = [
+                candidate
+                for candidate in (recent_options or [])
+                if candidate.casefold() == order_no.casefold()
+            ]
+            if len(listed_matches) == 1 and not _order_candidates(current_text):
+                # 订单号由语义层按商品/序号从最近列表中选出；只校验候选来源并规范回原值。
+                order_no = listed_matches[0]
+                entities["order_no"] = order_no
+                entities["order_reference"] = "listed_selection"
+            else:
+                entities["order_no"] = None
+                entities["order_reference"] = "ambiguous"
+                reference = "ambiguous"
         else:
             # 未核验号码不能成为工具参数；之后只会走安全列单或澄清分支。
             entities["order_no"] = None
@@ -418,8 +444,11 @@ def _semantic_route(
         return base
 
     # 此置信度门槛先于列单路由；needs_clarification 不会屏蔽高置信度的缺目标列单。
-    # 置信度只决定是否进入查询流程，不参与用户身份或数据权限判断。
-    if data["confidence"] < _MIN_INTENT_CONFIDENCE:
+    # 无工具的 smalltalk 不受门槛限制；置信度只决定是否进入查询流程，不参与身份或权限判断。
+    if (
+        data["confidence"] < _MIN_INTENT_CONFIDENCE
+        and data["intent"] != "smalltalk"
+    ):
         base["direct_reply"] = _clarification_reply({**data, "intent": "unclear"})
         return base
     if data["intent"] == "unclear":
@@ -430,6 +459,9 @@ def _semantic_route(
         return base
 
     if data["intent"] not in {"order_query", "logistics_query"}:
+        if data["intent"] == "smalltalk":
+            # 简单对话无需业务工具；主模型只按 System Prompt 说明身份和已接入能力。
+            return base
         if data["needs_clarification"]:
             base["direct_reply"] = _clarification_reply(data)
             return base
@@ -439,9 +471,7 @@ def _semantic_route(
         base["direct_reply"] = _FALLBACK_REPLY
         return base
 
-    current_text = _latest_user_text(messages)
     current_candidates = _order_candidates(current_text)
-    recent_options = _previous_order_list(messages)
     current_order_no = entities.get("order_no")
     if current_order_no is None:
         explicit_order_nos = _explicit_order_numbers(current_text)
@@ -453,8 +483,8 @@ def _semantic_route(
                 entities["order_reference"] = "explicit"
                 reference = "explicit"
 
-    # 列表回复后的序号、完整订单号或尾号只在紧邻的服务器列表中解析；随后仍会用
-    # 本人近期订单结果复核，过期选择会重新列单，歧义尾号则要求用户澄清。
+    # 列表回复后的语义选择、完整订单号或尾号只绑定紧邻的服务器列表；随后仍会用
+    # 本人近期订单结果复核，过期选择会重新列单，歧义引用则要求用户澄清。
     suffix_fragment = _order_suffix_from_text(current_text)
     if suffix_fragment:
         # 即使当前没有可核对的上一条列表，也不能把末尾片段当作完整订单号查询。
@@ -486,7 +516,18 @@ def _semantic_route(
                 return base
             selected_order_no = suffix_matches[0]
         else:
-            selected_order_no = _selected_order_from_list(current_text, recent_options)
+            parsed_selection = _selected_order_from_list(current_text, recent_options)
+            listed_selection = (
+                current_order_no
+                if reference == "listed_selection" and current_order_no in recent_options
+                else None
+            )
+            if listed_selection and parsed_selection and listed_selection != parsed_selection:
+                entities["order_no"] = None
+                entities["order_reference"] = "ambiguous"
+                base["direct_reply"] = "我无法确定您指的是列表中的哪一笔订单，请回复完整订单号、尾号或列表序号。"
+                return base
+            selected_order_no = listed_selection or parsed_selection
         if selected_order_no:
             entities["order_no"] = None
             entities["order_reference"] = "explicit"
@@ -501,6 +542,12 @@ def _semantic_route(
                     "selection_order_no": selected_order_no,
                 }
             )
+            return base
+
+        if reference in {"listed_selection", "ambiguous"}:
+            entities["order_no"] = None
+            entities["order_reference"] = "ambiguous"
+            base["direct_reply"] = "我没能从刚才的订单列表中唯一确定您指的订单，请回复完整订单号、尾号或列表序号。"
             return base
 
         # 本轮重新提供了一个可核验订单号时，按原有明确订单号语义处理；其他
@@ -832,13 +879,6 @@ def build_support_graph():
     if settings.openai_base_url:
         kwargs["base_url"] = settings.openai_base_url
     model = ChatOpenAI(**kwargs)
-    # 结构化分类器没有绑定任何业务工具，输出 schema 也不包含身份或推理过程。
-    # 一些 OpenAI 兼容端点不接受 response_format JSON Schema，改用其工具调用格式。
-    intent_model = model.with_structured_output(
-        IntentRecognition,
-        method="function_calling",
-    )
-
     # 分开的 ToolNode 让一次通过校验的调用只能到达对应只读工具。
     tool_nodes = {
         "query_order": ToolNode([query_order], handle_tool_errors=False),
@@ -861,16 +901,12 @@ def build_support_graph():
     async def recognize_intent(state: SupportState) -> dict[str, Any]:
         """用会话历史补全当前问题，只保存结构化标签和可路由实体。"""
         try:
-            result = await intent_model.ainvoke(_recognition_messages(state["messages"]))
-        except (ValidationError, OutputParserException):
+            response = await model.ainvoke(_recognition_messages(state["messages"]))
+            result = IntentRecognition.model_validate_json(
+                _content_as_text(response.content)
+            )
+        except (TypeError, ValueError):
             # 结构化结果损坏时按无法判断处理，不能退回到任意工具调用。
-            return {
-                "semantic_result": {},
-                "completed_question": _latest_user_text(state["messages"]),
-                "allowed_tools": [],
-                "direct_reply": _FALLBACK_REPLY,
-            }
-        if not isinstance(result, IntentRecognition):
             return {
                 "semantic_result": {},
                 "completed_question": _latest_user_text(state["messages"]),
@@ -929,6 +965,14 @@ def build_support_graph():
                     SYSTEM_PROMPT
                     + "\n\n本轮目标订单号已由服务端验证并授权；调用 query_order 或 "
                     "query_logistics 时，参数必须使用该订单号。"
+                )
+            )
+        elif state.get("order_lookup_pending"):
+            messages[0] = SystemMessage(
+                content=(
+                    SYSTEM_PROMPT
+                    + "\n\n本轮 query_order 用于服务端列出并核验本人订单候选，调用时必须省略 order_no；"
+                    "不要在这一步先查询任何单笔订单。"
                 )
             )
 
