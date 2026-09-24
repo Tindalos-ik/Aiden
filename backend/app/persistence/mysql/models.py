@@ -463,7 +463,7 @@ class Message(UUIDPrimaryKey, Base):
         String(20), nullable=False, default="complete", server_default=text("'complete'")
     )
     created_at: Mapped[datetime] = mapped_column(
-        DATETIME(fsp=6), nullable=False, default=utc_now_naive, server_default=func.current_timestamp()
+        DATETIME(fsp=6), nullable=False, default=utc_now_naive, server_default=func.current_timestamp(6)
     )
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
