@@ -56,6 +56,13 @@ _ORDER_SELECTION_ORDINAL_PATTERNS = (
     re.compile(r"第\s*([1-5一二三四五])\s*(?:个|笔|单)?"),
     re.compile(r"(?:我选|选择|选|序号)\s*[:：]?\s*([1-5一二三四五])\s*(?:个|笔|单)?"),
 )
+_ORDER_SUFFIX_MARKER_PATTERN = re.compile(
+    r"(?:尾号|末尾|后缀|最后(?:\s*(?:[一二三四五六七八九十\d]+)?位)?)"
+    r"\s*(?:(?:是|为|[:：])\s*)?([A-Za-z0-9][A-Za-z0-9_-]{0,15})(?![A-Za-z0-9_-])"
+)
+_ORDER_SUFFIX_QUERY_PATTERN = re.compile(
+    r"(?:查询|查看|查|看)(?:一下|下)?\s*([A-Za-z0-9][A-Za-z0-9_-]{1,3})(?![A-Za-z0-9_-])"
+)
 _CHINESE_ORDINALS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5}
 _EXPLICIT_LATEST_PATTERN = re.compile(
     r"(?:最近\s*(?:的\s*)?(?:一笔|一单|一个订单)|"
@@ -283,6 +290,28 @@ def _selected_order_from_list(text: str, order_nos: list[str]) -> str | None:
     return next(iter(selected)) if len(selected) == 1 else None
 
 
+def _order_suffix_from_text(text: str) -> str | None:
+    """提取用户明确表达的订单尾号；简短数字查询词按尾号处理，不按列表序号猜选。"""
+    marked_suffix = _ORDER_SUFFIX_MARKER_PATTERN.search(text)
+    if marked_suffix:
+        return marked_suffix.group(1)
+    if _ORDER_MARKER_PATTERN.search(text):
+        # “订单号01”是完整订单号表达；不将其改解释为未标注的尾号。
+        return None
+    short_query = _ORDER_SUFFIX_QUERY_PATTERN.search(text)
+    return short_query.group(1) if short_query else None
+
+
+def _orders_matching_suffix(order_nos: list[str], suffix: str) -> list[str]:
+    """按不区分大小写的编号末尾片段筛选候选，不从助手文字生成编号。"""
+    normalized_suffix = suffix.casefold()
+    return [
+        order_no
+        for order_no in order_nos
+        if order_no.casefold().endswith(normalized_suffix)
+    ]
+
+
 def _clarification_reply(result: dict[str, Any]) -> str:
     """使用受控追问模板，避免分类器把凭据或无关要求变成用户可见问题。"""
     intent = result.get("intent")
@@ -385,10 +414,40 @@ def _semantic_route(
     recent_options = _previous_order_list(messages)
     current_order_no = entities.get("order_no")
 
-    # 列表回复后的序号/订单号选择只在紧邻的服务器列表中解析；随后还会用本轮
-    # query_order 的本人近期订单结果复核，过期或无法唯一定位的选择会重新列单。
-    if recent_options and not explicitly_latest:
-        selected_order_no = _selected_order_from_list(current_text, recent_options)
+    # 列表回复后的序号、完整订单号或尾号只在紧邻的服务器列表中解析；随后仍会用
+    # 本人近期订单结果复核，过期选择会重新列单，歧义尾号则要求用户澄清。
+    suffix_fragment = _order_suffix_from_text(current_text)
+    if suffix_fragment:
+        # 即使当前没有可核对的上一条列表，也不能把末尾片段当作完整订单号查询。
+        entities["order_no"] = None
+        entities["order_reference"] = "ambiguous"
+        current_order_no = None
+    if recent_options and (not explicitly_latest or suffix_fragment):
+        selected_order_no = None
+        if suffix_fragment:
+            ordinals = _selection_ordinal(current_text)
+            if ordinals:
+                entities["order_no"] = None
+                entities["order_reference"] = "ambiguous"
+                base["direct_reply"] = "请明确说明您要查询的完整订单号、订单尾号或列表序号。"
+                return base
+            suffix_matches = _orders_matching_suffix(recent_options, suffix_fragment)
+            if len(suffix_matches) != 1:
+                entities["order_no"] = None
+                entities["order_reference"] = "ambiguous"
+                if suffix_matches:
+                    base["direct_reply"] = (
+                        f"找到多个尾号为“{suffix_fragment}”的订单，请提供完整订单号或列表序号。"
+                    )
+                else:
+                    base["direct_reply"] = (
+                        f"近期订单中没有找到尾号为“{suffix_fragment}”的订单，"
+                        "请提供完整订单号或列表序号。"
+                    )
+                return base
+            selected_order_no = suffix_matches[0]
+        else:
+            selected_order_no = _selected_order_from_list(current_text, recent_options)
         if selected_order_no:
             entities["order_no"] = None
             entities["order_reference"] = "explicit"
