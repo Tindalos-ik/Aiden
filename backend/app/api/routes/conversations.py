@@ -6,7 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.agent.graph import build_support_graph, model_configuration_error, needs_grounded_data_guard
+from app.agent.graph import build_support_graph, model_configuration_error
 from app.api.deps import current_actor
 from app.api.schemas import CreateConversationRequest, StreamMessageRequest
 from app.api.sse import sse_event
@@ -76,6 +76,7 @@ async def stream_message(
 
     async def event_stream():
         answer_so_far = ""
+        pending_deltas: list[str] = []
         finished = False
         try:
             # start 也放进 try/finally；客户端若在收到首个事件后立即断开，仍会标记 stopped。
@@ -103,9 +104,8 @@ async def stream_message(
                 yield sse_event("error", {"error": config_error})
                 return
 
-            guarded = needs_grounded_data_guard(text)
             try:
-                graph = build_support_graph(text, guarded)
+                graph = build_support_graph()
                 initial_state = {
                     "conversation_id": conversation_id,
                     "assistant_message_id": pair.assistant_message_id,
@@ -118,26 +118,28 @@ async def stream_message(
                     ):
                         chunk = event.get("data", {}).get("chunk")
                         content = getattr(chunk, "content", "")
-                        if isinstance(content, str) and content and not guarded:
-                            answer_so_far += content
-                            yield sse_event("delta", {"text": content})
-                        elif isinstance(content, list) and not guarded:
+                        if isinstance(content, str) and content:
+                            pending_deltas.append(content)
+                        elif isinstance(content, list):
                             content_text = "".join(
                                 part.get("text", "") for part in content if isinstance(part, dict)
                             )
                             if content_text:
-                                answer_so_far += content_text
-                                yield sse_event("delta", {"text": content_text})
+                                pending_deltas.append(content_text)
                     if event.get("event") == "on_chain_end" and event.get("name") == "generate":
                         output = event.get("data", {}).get("output", {})
                         answer = output.get("answer") if isinstance(output, dict) else None
                         if isinstance(answer, str):
                             answer_so_far = answer
+                            if answer:
+                                # 先暂存本轮模型片段，确认节点没有生成工具调用后再发送，
+                                # 防止把模型的工具计划或工具前置文字当作客服回答。
+                                for text in pending_deltas or [answer]:
+                                    yield sse_event("delta", {"text": text})
+                        pending_deltas.clear()
 
                 if not answer_so_far:
                     raise RuntimeError("模型没有生成可显示的回答。")
-                if guarded:
-                    yield sse_event("delta", {"text": answer_so_far})
                 finished = True
                 yield sse_event("done", {})
             except asyncio.CancelledError:

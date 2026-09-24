@@ -53,8 +53,9 @@ app = FastAPI(title="商品 API")
 
 
 class ItemCreate(BaseModel):
-    """客户端新建商品时允许发送的字段。"""
-
+    """客户端新建商品时允许发送的字段。
+       Basemodel，强制约定了字段的类型，如果不对，服务器会拒绝请求
+    """
     name: str = Field(min_length=1, max_length=50)
     price: float = Field(gt=0)
     description: str | None = None
@@ -62,7 +63,6 @@ class ItemCreate(BaseModel):
 
 class ItemOut(BaseModel):
     """API 返回给客户端的商品格式。"""
-
     id: int
     name: str
     price: float
@@ -184,38 +184,44 @@ def my_endpoint(actor: dict = Depends(current_actor)):
 
 小练习可以把所有接口放进 `main.py`。项目变大后，可以用 `APIRouter` 按功能分组，再由主应用 `include_router(...)` 注册。它类似于把一大本说明书拆成多个章节：每个路由文件只管理一类接口，但最终仍由同一个 FastAPI 应用对外服务。
 
+### 自动生成接口文档
+
+访问`http://127.0.0.1:8000/docs` 由 Swagger UI 提供
+
+它会自动更新，很好用，点击`Try it out`，它允许你填写参数并直接与 API 交互
+
 ## 4. Aiden 项目里 FastAPI 怎么工作
 
 ### 请求经过哪些部分
 
 ```mermaid
-flowchart LR
-    Browser[浏览器前端] --> Client[remote.ts]
-    Client -->|/api 请求| Proxy[Vite 开发代理]
-    Proxy --> Main[FastAPI app]
-    Main --> Router[认证或会话路由]
-    Router --> Store[MySQL 数据访问]
-    Router --> Agent[LangGraph 模型流程]
-    Store --> Result[JSON 响应]
-    Agent --> Stream[SSE 文本流]
+graph TD
+    Browser["浏览器前端"] --> Client["remote.ts"]
+    Client --> Proxy["Vite 开发代理 /api"]
+    Proxy --> Main["FastAPI app"]
+    Main --> Router["认证或会话路由"]
+    Router --> Store["MySQL 数据访问"]
+    Router --> Agent["LangGraph 模型流程"]
+    Store --> Result["JSON 响应"]
+    Agent --> Stream["SSE 文本流"]
     Result --> Browser
     Stream --> Browser
 ```
 
-前端的 [`remote.ts`](frontend/src/api/remote.ts) 用 `fetch` 发 HTTP 请求；本地开发时，Vite 把 `/api` 转发到 `http://localhost:8000`。FastAPI 根据 HTTP 方法和路径找到对应路由，读取请求字段，执行认证和业务逻辑，再返回 JSON 或流式响应。前端请求带 `credentials: 'include'`，浏览器会在需要时自动发送服务端设置的登录 Cookie。
+前端的 [`remote.ts`](../frontend/src/api/remote.ts) 用 `fetch` 发 HTTP 请求；本地开发时，Vite 把 `/api` 转发到 `http://localhost:8000`。FastAPI 根据 HTTP 方法和路径找到对应路由，读取请求字段，执行认证和业务逻辑，再返回 JSON 或流式响应。前端请求带 `credentials: 'include'`，浏览器会在需要时自动发送服务端设置的登录 Cookie。
 
 ### 后端代码分别负责什么
 
 | 文件 | 用途 |
 | --- | --- |
-| [`main.py`](backend/app/main.py) | 创建 FastAPI 应用、注册认证和会话路由、提供健康检查接口 |
-| [`auth.py`](backend/app/api/routes/auth.py) | 登录、读取当前用户、退出登录；登录成功时设置 HttpOnly Cookie |
-| [`conversations.py`](backend/app/api/routes/conversations.py) | 列出和创建会话、读取消息历史、发送流式消息 |
-| [`schemas.py`](backend/app/api/schemas.py) | 用 Pydantic 定义登录和消息请求体及字段限制 |
-| [`deps.py`](backend/app/api/deps.py) | 读取并验证登录 Cookie，将当前用户提供给需要登录的路由 |
-| [`chat.py`](backend/app/persistence/mysql/chat.py) | 执行 MySQL 用户、会话、消息等数据读写 |
-| [`graph.py`](backend/app/agent/graph.py) | 组织上下文读取、模型生成和回答保存的 LangGraph 流程 |
-| [`sse.py`](backend/app/api/sse.py) | 把事件名称和 JSON 数据编码成 SSE 文本格式 |
+| [`main.py`](../backend/app/main.py) | 创建 FastAPI 应用、注册认证和会话路由、提供健康检查接口 |
+| [`auth.py`](../backend/app/api/routes/auth.py) | 登录、读取当前用户、退出登录；登录成功时设置 HttpOnly Cookie |
+| [`conversations.py`](../backend/app/api/routes/conversations.py) | 列出和创建会话、读取消息历史、发送流式消息 |
+| [`schemas.py`](../backend/app/api/schemas.py) | 用 Pydantic 定义登录和消息请求体及字段限制 |
+| [`deps.py`](../backend/app/api/deps.py) | 读取并验证登录 Cookie，将当前用户提供给需要登录的路由 |
+| [`chat.py`](../backend/app/persistence/mysql/chat.py) | 执行 MySQL 用户、会话、消息等数据读写 |
+| [`graph.py`](../backend/app/agent/graph.py) | 组织上下文读取、模型生成和回答保存的 LangGraph 流程 |
+| [`sse.py`](../backend/app/api/sse.py) | 把事件名称和 JSON 数据编码成 SSE 文本格式 |
 
 主应用用 `include_router` 注册认证和会话两个路由组。比如 `auth.py` 中路由器的前缀是 `/api/auth`，某个接口再写 `@router.post("/login")`，组合后就是 `POST /api/auth/login`。`conversations.py` 同理使用 `/api/conversations` 前缀。
 
@@ -240,21 +246,19 @@ flowchart LR
 
 普通读写路由多用同步 `def`，例如读取会话列表；需要异步消费模型事件的 `stream_message` 用 `async def`。发消息时，后端检查会话归属和状态，先把用户消息与助手消息占位记录写入 MySQL，再运行 LangGraph 的模型流程。模型生成期间，FastAPI 用 `StreamingResponse` 持续返回 `text/event-stream`：`start` 携带助手消息 id，`delta` 携带新生成的文本，最后以 `done` 或 `error` 结束。前端读取这些事件并逐段显示。
 
-本项目直接用 `StreamingResponse` 和 [`sse.py`](backend/app/api/sse.py) 编码 SSE，再由前端用 `fetch` 读取流。它不是普通的一次性 JSON 响应；也不是仅凭 `EventSource` 自动完成的连接。FastAPI 官方还介绍了自己的 SSE 响应工具，学习项目实现时要区分官方其他写法和这里实际使用的代码。
+本项目直接用 `StreamingResponse` 和 [`sse.py`](../backend/app/api/sse.py) 编码 SSE，再由前端用 `fetch` 读取流。它不是普通的一次性 JSON 响应；也不是仅凭 `EventSource` 自动完成的连接。FastAPI 官方还介绍了自己的 SSE 响应工具，学习项目实现时要区分官方其他写法和这里实际使用的代码。
 
-数据库表结构由 Alembic 迁移管理。导入应用模块不会自动创建表；手动只启动 FastAPI 时，需先配置数据库并应用迁移。根目录的 [`start.ps1`](start.ps1) 则会检查本地配置，启动 MySQL、应用迁移、准备演示用户，然后启动 FastAPI 和前端。若只想运行后端，官方项目文档给出的开发命令是在 `backend/` 目录运行：
+数据库表结构由 Alembic 迁移管理。导入应用模块不会自动创建表；手动只启动 FastAPI 时，需先配置数据库并应用迁移。根目录的 [`start.ps1`](../start.ps1) 则会检查本地配置，启动 MySQL、应用迁移、准备演示用户，然后启动 FastAPI 和前端。若只想运行后端，官方项目文档给出的开发命令是在 `backend/` 目录运行：
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-启动后可打开 `http://127.0.0.1:8000/docs` 查看当前注册的接口。`/api/health` 返回成功只代表 API 进程已响应，并不能证明数据库迁移、登录或模型配置都正常。聊天模型还需要 `backend/.env` 中的模型配置；具体数据库准备方式见 [`database-schema.md`](docs/database-schema.md)。
+启动后可打开 `http://127.0.0.1:8000/docs` 查看当前注册的接口。`/api/health` 返回成功只代表 API 进程已响应，并不能证明数据库迁移、登录或模型配置都正常。聊天模型还需要 `backend/.env` 中的模型配置；具体数据库准备方式见 [`database-schema.md`](database-schema.md)。
 
-有一点容易混淆：前端 [`remote.ts`](frontend/src/api/remote.ts) 也写有客服接管和员工工作台请求，但当前后端注册的路由只有认证和会话两组，并且登录路由明确拒绝员工登录。因此，前端文件里出现一个 URL 并不代表 FastAPI 已经提供了那个接口；判断服务端当前能力，应以 `backend/app/main.py` 注册的路由及 `backend/app/api/routes/` 中实际定义的接口为准。
+有一点容易混淆：前端 [`remote.ts`](../frontend/src/api/remote.ts) 也写有客服接管和员工工作台请求，但当前后端注册的路由只有认证和会话两组，并且登录路由明确拒绝员工登录。因此，前端文件里出现一个 URL 并不代表 FastAPI 已经提供了那个接口；判断服务端当前能力，应以 `backend/app/main.py` 注册的路由及 `backend/app/api/routes/` 中实际定义的接口为准。
 
-## 5. 继续学习的顺序
 
-建议先修改上面的小商品 API：新增一个字段、调整字段限制、增加一个按 id 删除的接口；然后阅读项目的 `schemas.py` 和一条简单路由；最后再看 `Depends`、Cookie 登录和 SSE 流式响应。每一步都可以打开本地 `/docs` 查看代码变化如何反映到接口说明。
 
 ## 官方资料
 

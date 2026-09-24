@@ -25,9 +25,11 @@ from .models import (
 )
 from .queries import (
     get_effective_policy,
+    get_owned_order_with_shipments,
     list_conversation_messages,
     list_order_tracking_events,
     list_user_orders,
+    search_active_faq,
 )
 
 __all__ = [
@@ -50,11 +52,13 @@ __all__ = [
     "User",
     # 便捷导出：查询函数需传入 Session，不会隐式打开事务；连接工具按需读取配置。
     "get_effective_policy",
+    "get_owned_order_with_shipments",
     "get_engine",
     "get_session",
     "get_session_factory",
     "list_conversation_messages",
     "list_order_tracking_events",
     "list_user_orders",
+    "search_active_faq",
     "session_scope",
 ]

@@ -91,13 +91,25 @@ deploy/.env.mysql 是本机配置，不要提交；应提交的只有 deploy/.en
 
 订单、物流轨迹、会话消息三个查询都在 SQL 条件中要求 user_id，不会只凭订单号或会话 ID 返回其他用户的数据。
 
+## 客服只读工具
+
+客服 Agent 已通过 `backend/app/services/tools/` 接入三个只读查询工具，完整参数、返回字段、权限边界和流式行为见 [`tools.md`](tools.md)：
+
+- `query_order` 从当前用户的订单中按订单号精确筛选；未提供订单号时最多返回最近 5 笔，并带订单商品快照。
+- `query_logistics` 先按 `user_id` 和订单号确认订单归属，再经订单关系读取包裹和物流节点。未知订单号和其他用户的订单号都返回空结果。
+- `search_faq` 只检索 `faq.is_active = true` 的记录，最多返回 5 条匹配的问题、答案和分类。
+
+身份由会话路由从认证 Cookie 解析后写入 LangGraph 状态，再通过 `InjectedState` 注入订单和物流工具；模型可见的工具参数不包含 `user_id`。工具使用 SQLAlchemy 查询和短生命周期 Session，不修改数据，也不需要新增表或迁移。当前 FAQ 表没有全文索引，工具使用有界的关键词 `LIKE` 匹配，不是语义检索。
+
 ## FastAPI 对话服务接入
 
 - 登录、Cookie 会话、会话列表、消息历史、发消息和 LangGraph 上下文均使用 MySQL；服务启动不会自动建表或修改表结构。先运行 Alembic，再启动 API。
+- Agent 模型绑定上述只读工具；LangGraph 按“生成工具调用、执行工具、将结果交回模型、保存最终回答”的循环运行。订单、物流和 FAQ 的数据必须来自工具结果，查无记录时回答空结果；售后申请、政策表和工单尚无对应查询工具。
 - `0002_chat_runtime` 是新增迁移，保留 `0001_initial` 不变。它增加登录会话表、消息重试键和会话预览字段。
 - `0003_message_timestamp_precision` 将消息时间改为微秒精度，并修正已有用户消息与助手回复的成对顺序。
 - 普通用户演示登录为 `maya@aiden.demo` / `chen@aiden.demo`，密码均为 `aiden123`。执行 `python -m scripts.init_demo_users` 可显式创建账号；它只补入不存在且无冲突的记录，不会重置已有密码。账号与目标库现有记录冲突时会停止并回滚。
 - 应用 Alembic 迁移后，在 `backend` 目录执行 `python -m scripts.init_demo_users` 创建本地演示账号。该命令只补入缺少且无冲突的账号，不会重置已有密码或业务数据。
 - 复制 `backend/.env.example`（只在本机尚无 `backend/.env` 时复制），在其中填写模型 API Key、Base URL、模型名及 `DATABASE_URL`。DeepSeek Flash 示例使用 `OPENAI_BASE_URL=https://api.deepseek.com`、`OPENAI_MODEL=deepseek-flash`。`DATABASE_URL` 应与 `deploy/.env.mysql` 中的数据库名、账号和端口相同；密钥和本地密码不要提交。
 - 前端保持 remote 模式并在 `frontend` 目录执行 `npm run dev`；后端 API 默认监听 `127.0.0.1:8000`。不需要修改前端 SSE 客户端。Mock 模式仍可独立使用。
-- 每个数据库读写函数只在单次短操作内创建并关闭 SQLAlchemy Session；不会跨越模型流式 `await` 持有同步 Session。会话和消息查询都在 SQL 条件中校验当前用户归属。
+- 每个数据库读写函数只在单次短操作内创建并关闭 SQLAlchemy Session；不会跨越模型流式 `await` 持有同步 Session。会话、消息、订单和物流查询都在 SQL 条件或已校验的 ORM 关系中限制当前用户归属。
+- SSE 继续使用 `start`、`delta`、`done` 和 `error` 事件。模型生成轮的文本片段先暂存；确认该轮没有工具调用后才作为 `delta` 发出，以免把工具计划显示为客服回答。

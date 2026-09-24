@@ -136,7 +136,7 @@ $apiProcess = $null
 try {
     Write-Host 'Starting FastAPI...'
     $apiProcess = Start-Process -FilePath $python `
-        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000') `
+        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000', '--reload') `
         -WorkingDirectory $backend -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $apiStdout -RedirectStandardError $apiStderr
 

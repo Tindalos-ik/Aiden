@@ -1,25 +1,30 @@
-import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
+from langgraph.prebuilt import ToolNode
 
 from app.agent.state import SupportState
 from app.config.settings import settings
 from app.persistence.mysql.chat import finish_assistant_message, recent_messages
+from app.services.tools import READ_ONLY_CUSTOMER_TOOLS
 
 
-SYSTEM_PROMPT = """你是「喵购商城」的智能客服小喵，语气亲切、回答简洁，不用网络烂梗。
+# FAQ 就是常见问题
+SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切、回答简洁，不用网络烂梗。
 
 你的职责范围：商品咨询、订单与物流查询、退换货政策解答。
 
-必须遵守：
-1. 只依据商城政策作答，拿不准就说「这边帮您转人工核实」，严禁编造；
-2. 不承诺具体的退款到账时间，不对商品质量打包票；
-3. 用户聊到职责之外的话题，礼貌把话拉回客服业务。
-
-当前部署没有接入订单、物流、售后申请或商城政策数据，也没有接入人工客服。对具体订单状态、物流轨迹、退款进度或商城政策条款，必须明确说当前无法核实，绝不能猜测或编造编号、状态、时间、进度或政策内容，也不能声称已转接人工。可以简短邀请用户稍后提供一般商品咨询。不得把不存在的数据说成已查询结果。"""
+工具使用和事实约束：
+1. 订单内容或状态必须调用 query_order；用户给出订单号时按该订单号查询，没有指定时可查询当前账号最近订单。
+2. 物流必须调用 query_logistics，并使用当前账号下的订单号；没有订单号且无法从近期订单确定时，先向用户询问。
+3. 常见问题必须调用 search_faq。只能根据工具返回的 FAQ 问题、答案和分类回答，不要用模型记忆补写商城政策。
+4. 只转述工具返回的数据。订单或物流未找到时，如实说明当前账号下没有匹配记录；FAQ 无匹配时说明没有检索到相关条目；工具报告查询错误时说明暂时无法查询。
+5. 工具未覆盖的售后申请进度、退款到账或政策条款不得猜测；FAQ 没有提供依据时，明确说当前无法核实。
+6. 不编造订单、包裹、物流节点、FAQ 答案、时间或承诺；不声称已转接人工客服。
+7. 用户聊到职责之外的话题时，礼貌地把话题引回客服业务。
+8. 只依据商城政策作答，拿不准就说「这边帮您转人工核实」，严禁编造；"""
 
 
 def model_configuration_error() -> str | None:
@@ -38,28 +43,13 @@ def model_configuration_error() -> str | None:
     return None
 
 
-def needs_grounded_data_guard(text: str) -> bool:
-    """保守识别需要订单、物流、售后或政策数据支撑的问题。
-
-    这些数据源尚未接入；命中时仍执行真实模型调用，但不向用户转发模型可能作出
-    的无依据断言，最终改用明确的“当前无法核实”说明。
-    """
-    normalized = text.casefold()
-    return any(term in normalized for term in (
-        "订单", "物流", "快递", "运单", "发货", "配送", "签收", "退款", "退货", "售后",
-        "到账", "进度", "政策", "规则", "运费险", "退换", "保修", "包裹", "单号",
-        "order", "tracking", "shipment", "shipping", "delivery", "refund", "return",
-        "policy", "after-sale", "package",
-    )) or bool(re.search(r"\b(?:SO|AD)-?\d{6,}\b", text, re.IGNORECASE))
-
-
 def _message_for_row(role: str, content: str) -> BaseMessage | None:
     """把数据库角色映射到 LangChain 消息类型，跳过不支持的角色值。"""
     if role == "user":
         return HumanMessage(content=content)
-    if role in {"assistant", "staff"}:
+    if role in {"assistant", "staff"}: # 客服和人工客服都算作助手
         return AIMessage(content=content)
-    if role == "system":
+    if role == "system": # 系统消息
         return SystemMessage(content=content)
     return None
 
@@ -73,12 +63,8 @@ def _content_as_text(content: Any) -> str:
     return ""
 
 
-def build_support_graph(user_text: str, guard_sensitive_data: bool):
-    """构建一次请求使用的 LangGraph：加载上下文、调用模型、保存最终回答。
-
-    节点按顺序执行。数据库节点只在自身短事务中读取或更新，并返回普通 Python
-    状态；模型的异步流式 await 期间不会持有同步 SQLAlchemy Session。
-    """
+def build_support_graph():
+    """构建带只读工具循环的单次客服图，并保持每次数据库访问的 Session 生命周期短暂。"""
     kwargs: dict[str, Any] = {
         "model": settings.openai_model,
         "api_key": settings.openai_api_key,
@@ -88,36 +74,47 @@ def build_support_graph(user_text: str, guard_sensitive_data: bool):
     }
     if settings.openai_base_url:
         kwargs["base_url"] = settings.openai_base_url
-    model = ChatOpenAI(**kwargs)
+    model = ChatOpenAI(**kwargs).bind_tools(READ_ONLY_CUSTOMER_TOOLS)
+    tool_node = ToolNode(
+        READ_ONLY_CUSTOMER_TOOLS,
+        # 工具函数会返回已清理的错误结果；未预期异常交由 SSE 路由转换为通用错误。
+        handle_tool_errors=False,
+    )
 
     async def load_context(state: SupportState) -> dict[str, Any]:
         """加载当前用户最近的有限历史，并在模型 await 前关闭 MySQL Session。"""
         rows = recent_messages(
             state["conversation_id"], state["user_id"], state["assistant_message_id"]
         )
-        history = [msg for row in rows if (msg := _message_for_row(row["role"], row["content"])) is not None]
-        return {"context_messages": [SystemMessage(content=SYSTEM_PROMPT), *history]}
+        history = [
+            msg
+            for row in rows
+            if (msg := _message_for_row(row["role"], row["content"])) is not None
+        ]
+        return {"messages": [SystemMessage(content=SYSTEM_PROMPT), *history]}
 
-    async def generate(state: SupportState) -> dict[str, str]:
-        """调用 OpenAI 兼容聊天模型并汇总 token 片段供图状态和 SSE 使用。"""
-        parts: list[str] = []
-        async for chunk in model.astream(state["context_messages"]):
-            parts.append(_content_as_text(chunk.content))
-        model_answer = "".join(parts).strip()
-        if not model_answer:
-            raise RuntimeError("模型返回了空回答，请检查模型名称和接口配置。")
+    async def generate(state: SupportState) -> dict[str, Any]:
+        """累积一次模型响应；工具调用轮不作为最终回答写入或流给客户端。"""
+        response = None
+        async for chunk in model.astream(state["messages"]):
+            response = chunk if response is None else response + chunk
+        if response is None:
+            raise RuntimeError("模型没有生成回答。")
 
-        # 所有轮次仍真实调用模型；需要实时账户或政策数据的问题不暴露无依据的模型断言，
-        # 而是返回明确的当前数据接入状态说明。
-        answer = (
-            "为避免误导，我目前没有接入订单、物流、售后或商城政策数据，因此无法核实你提到的具体信息，也不能确认状态或进度。"
-            if guard_sensitive_data else model_answer
-        )
-        return {"answer": answer}
+        has_tool_calls = bool(getattr(response, "tool_calls", []))
+        answer = "" if has_tool_calls else _content_as_text(response.content).strip()
+        return {"messages": [response], "answer": answer}
+
+    def route_after_generate(state: SupportState) -> str:
+        """只在模型明确生成工具调用时执行工具，其余情况进入最终回答保存节点。"""
+        message = state["messages"][-1]
+        return "tools" if getattr(message, "tool_calls", []) else "save_answer"
 
     def save_answer(state: SupportState) -> dict[str, str]:
-        """模型完成后用独立短事务保存完整回答，并将助手消息状态设为 complete。"""
+        """模型完成工具循环后，用独立短事务保存最后一轮完整回答。"""
         answer = state["answer"]
+        if not answer:
+            raise RuntimeError("模型没有生成可显示的回答。")
         finish_assistant_message(
             state["assistant_message_id"],
             state["conversation_id"],
@@ -130,9 +127,15 @@ def build_support_graph(user_text: str, guard_sensitive_data: bool):
     graph = StateGraph(SupportState)
     graph.add_node("load_context", load_context)
     graph.add_node("generate", generate)
+    graph.add_node("tools", tool_node)
     graph.add_node("save_answer", save_answer)
     graph.add_edge(START, "load_context")
     graph.add_edge("load_context", "generate")
-    graph.add_edge("generate", "save_answer")
+    graph.add_conditional_edges(
+        "generate",
+        route_after_generate,
+        {"tools": "tools", "save_answer": "save_answer"},
+    )
+    graph.add_edge("tools", "generate")
     graph.add_edge("save_answer", END)
     return graph.compile()
