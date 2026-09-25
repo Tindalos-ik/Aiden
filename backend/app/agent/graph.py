@@ -807,6 +807,13 @@ def build_support_graph():
     }
     if settings.openai_base_url:
         kwargs["base_url"] = settings.openai_base_url
+    # DeepSeek 等思考型模型下，带 tools 的请求必须回传历史 reasoning_content，而本图的工具调用
+    # 是服务端合成的、不带该字段，会让“工具结果后再生成回答”这一步被服务端拒绝（400）。
+    # OPENAI_THINKING_MODE=disabled 可关闭思考模式绕开该约束；未配置时不传此参数，
+    # 保持服务端默认行为。详见 app.config.settings 中的说明。
+    thinking_body = settings.openai_thinking_body
+    if thinking_body:
+        kwargs["extra_body"] = thinking_body
     model = ChatOpenAI(**kwargs)
     # 分开的 ToolNode 让一次通过校验的调用只能到达对应只读工具。
     tool_nodes = {
