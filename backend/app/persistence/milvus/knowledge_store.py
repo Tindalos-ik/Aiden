@@ -48,7 +48,9 @@ class KnowledgeVector:
     """一条待写入 Milvus 的知识向量。
 
     `metadata` 保存不参与 embedding 的检索辅助信息（section_path、content_type、
-    is_key_clause、questions 数量、前后块 id 等），供在线检索时过滤、加权和回拉上下文。
+    is_key_clause、questions 数量、前后块 id 等）。它们当前只随向量存放，在线检索并不读取：
+    `search` 只按向量取 Top-K 并回传 chunk_id，过滤与取原文都在 MySQL 侧完成。保留这些字段是
+    为了让集合自身可读，以及后续需要按分类过滤或按关键条款加权时不必重建集合。
     """
 
     chunk_id: str

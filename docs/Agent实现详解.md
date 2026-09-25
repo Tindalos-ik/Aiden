@@ -333,6 +333,8 @@ return graph.compile()
 
 知识检索只有一路 dense 向量相似度，没有关键词召回、`LIKE` 兜底、混合检索或重排；Milvus 检索期间不持有 MySQL Session，回表才开短事务。命中项只有当前有效且 `vector_status = 'vectorized'` 的块会交给模型，向量服务或 Milvus 故障时返回通用错误结果，不退回关键词查询。数据库里虽有政策相关模型/查询代码，当前三个 Agent 工具没有调用独立政策查询；政策问题只有知识库（`knowledge_chunks`）实际返回了相关条目时才有依据。
 
+在线 Agent 的模型客户端还需要 `OPENAI_THINKING_MODE=disabled`：工具调用由服务端合成（`dispatch_tool_call` 构造的 `AIMessage` 不带 `reasoning_content`），而 DeepSeek 思考模式要求带 `tools` 的请求必须回传历史 `reasoning_content`，否则在「工具结果后再生成回答」这一步返回 400。原因与替代做法见 [`RAG.md`](RAG.md#思考模式必须关闭)。
+
 ## 10. SSE 是怎样发到前端的
 
 路由返回 `StreamingResponse`，媒体类型为 `text/event-stream`。`sse_event()` 把事件名和 JSON 数据编码成 SSE 格式，并在末尾加空行作为事件边界，见 `backend/app/api/sse.py` 中的 `sse_event()`。

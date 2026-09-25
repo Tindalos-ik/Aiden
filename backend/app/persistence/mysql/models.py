@@ -405,7 +405,8 @@ class KnowledgeChunk(UUIDPrimaryKey, TimestampMixin, Base):
     实际送去向量化的文本，便于核对模板或内容变更。
 
     section_path、content_type、is_key_clause 和前后块指针只作为元数据保存，不参与
-    embedding。prev/next 指向同一来源内相邻块的 id，用于在线检索时按需拉回前后文补全语义。
+    embedding。prev/next 指向同一来源内相邻块的 id，留作后续按需拉回前后文补全语义；
+    当前在线检索没有使用它们。
 
     chunk_key 由来源、块序号和内容哈希决定，是导入幂等的依据；id 同时是 Milvus 的主键，
     所以“Milvus 已写入但状态尚未回填”时重跑只会覆盖同一条向量，不会产生重复向量。

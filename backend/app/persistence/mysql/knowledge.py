@@ -287,7 +287,8 @@ def list_sources_with_superseded_chunks() -> list[tuple[str, str]]:
 def link_neighbour_chunks(source_type: str, source_id: str) -> int:
     """按 chunk_index 顺序回填 prev_chunk_id / next_chunk_id，返回更新的行数。
 
-    前后块指针只在同一来源内建立，供在线检索时按需拉回相邻块补全语义；它不参与 embedding。
+    前后块指针只在同一来源内建立，供后续按需拉回相邻块补全语义；它不参与 embedding，
+    当前在线检索也没有读取它。
     """
     factory = get_session_factory()
     with factory() as session:

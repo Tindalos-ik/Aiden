@@ -2,11 +2,38 @@
 
 本文说明 Aiden 的 RAG 设计。已实现三段能力：把既有文档与 FAQ 建成知识库、从历史客服对话里挖出问答知识，以及 `search_faq` 的在线语义检索。
 
+## 全景
+
+三段能力的分工与衔接关系是理解本文其余部分的前提：
+
+```mermaid
+graph TD
+    docs["backend/knowledge 下的 Markdown 文档"] --> chunk["解析 切分 拼向量化文本"]
+    faq["faq 表启用中的行"] --> chunk
+    chat["历史客服对话"] --> mine["抽取 脱敏 整体去重"]
+    mine --> chunk
+    chunk --> mysql["MySQL knowledge_chunks<br/>原文与向量状态的权威源"]
+    mysql --> vec["BGE dense 向量"]
+    vec --> store["Milvus knowledge 集合<br/>只负责相似度"]
+    store --> online["search_faq 在线检索"]
+    mysql --> online
+    online --> agent["Agent 回答<br/>只依据召回内容"]
+```
+
+要点：
+
+- **两条离线路径、一张表**。Markdown/FAQ 导入与历史对话挖掘的输入不同，但最后都落到 `knowledge_chunks`、共用一套向量化流程，因此可以一同被在线检索到。
+- **MySQL 是权威源，Milvus 只是索引**。原文、问法、分类、章节路径与向量状态都在 MySQL；Milvus 只回答"哪条向量最像"。任何在线结果都要回 MySQL 取原文并校验状态。
+- **离线和在线必须同源**。两端共用 `build_embedding_text` 的模板与同一个 `EmbeddingClient`（同一模型、同一 L2 归一化），否则相似度不可比。
+- **知识只经工具结果进入模型**。`search_faq` 的返回值作为一轮工具结果交给模型，不拼进系统提示词；提示词只约束"只能依据召回内容作答"。
+
+三段的详细说明分别在「离线建库」「在线语义检索」「历史对话挖掘」三节，其中在线一节包含一次提问从入口到 SSE 的完整链路。
+
+`docs/Aiden.md` 的 RAG 章记录目标设计与选型过程，其中包含尚未实现的规划内容；已实现的行为以本文为准。
+
 ## 离线建库
 
 把知识变成可检索的向量。
-
-`docs/Aiden.md` 的 RAG 章记录目标设计与选型过程，其中包含尚未实现的规划内容；已实现的行为以本文为准。
 
 两条离线路径共用同一套知识块表与同一套向量化流程：
 
@@ -119,7 +146,7 @@ FAQ 块天然带真实问题，直接用它作为 questions，用自己的分类
 
 #### 关键条款
 
-`is_key_clause` 标记退货、退款、换货、售后这类条款，留作后续检索排序的加权信号，当前只做标记、不参与排序。判定方式是看章节路径里是否出现退货、退款、换货、售后、保修、质保、赔付、运费险、发票、退换这些关键词。
+`is_key_clause` 标记退货、退款、换货、售后这类条款，判定方式是看章节路径里是否出现退货、退款、换货、售后、保修、质保、赔付、运费险、发票、退换这些关键词。它是为后续检索加权预留的信号，**当前完全不参与在线检索排序**：`search` 只按向量相似度取 Top-K，不读取该字段。
 
 ### 切分
 
@@ -410,7 +437,9 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 索引使用 HNSW，度量用 COSINE。规模不大时 HNSW 的查询延迟比 IVF 更低，这与 `docs/Aiden.md` 的选型一致。
 
-标量字段的作用是在线检索时做过滤与加权，例如按分类或来源过滤、给关键条款加权。正文随向量一起存放，检索命中后可以直接取回，MySQL 仍是权威原文。
+这几个标量字段（source_type、source_id、category、section_path、content_type、is_key_clause、chunk_index）当前**只作为元数据存放**，没有参与检索：`search` 只按向量取 Top-K，只回传 `chunk_id`，不过滤也不加权；结果的有效性过滤发生在 MySQL 侧（见「为什么候选要比结果多」）。留这些字段是为了后续按分类过滤或给关键条款加权时不必重建集合，属于规划能力。
+
+`content` 字段是写入时留下的正文副本，同样**没有参与在线检索**：命中后按主键回 MySQL 取 `category/questions/answer`，不使用这个副本，避免它落后于 MySQL 时把过期正文交给模型。它保留的目的只是让集合自身可读、便于人工排查。
 
 `KnowledgeVectorStore.search(embedding, limit)` 提供单路 dense 相似度检索，返回 `chunk_id`、COSINE 相似度与返回顺序；它只回答「哪条向量最像」，不判断这条知识是否仍然有效。集合不存在或连接失败时会直接抛错，不返回空列表——把服务故障伪装成「没有相关知识」会让 Agent 对用户说出无法核实的结论。
 
@@ -492,16 +521,18 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 ### 已验证的范围
 
-用 `bge-small-zh-v1.5`（512 维）与真实 Milvus 验证过的内容：
+用 `bge-small-zh-v1.5`（512 维）与真实 Milvus 验证过的内容。当前库内共 39 个知识块，其中 38 个已向量化（Markdown 4 个来源 36 块、`faq` 表 2 行 2 块），另有 1 块是验收时写入后置为 `superseded` 的临时测试块：
 
-- 切分：36 个知识块的每块不超预算、每行都来自原文、表格分块复制表头且数据行不丢失不重复、异常长句整句保留并标记待人工处理
+- 切分：36 个 Markdown 块每块不超预算、每行都来自原文、表格分块复制表头且数据行不丢失不重复、异常长句整句保留并标记待人工处理
 - 长度计量：精确分词模式下在 512 与 8192 两套配置下均通过
-- 迁移：`alembic upgrade head` 建出 knowledge_chunks 表，字段与唯一索引齐全
+- 迁移：`alembic upgrade head` 建出 `knowledge_chunks` 表（`0004_knowledge_chunks`），字段与唯一索引齐全；历史对话挖掘又新增 `0005_conversation_mining`，当前库内版本为 `0005 (head)`
 - 幂等：内容未变时重导入零新增、零作废、不重置状态，重跑向量化是空操作
 - 中断补齐：模拟回填前中断后重跑，Milvus 唯一主键数等于块总数，无重复向量
-- 一致性：MySQL 已回填的 vector_id 与 Milvus 主键集合完全相同，无孤儿向量
+- 一致性：MySQL 已回填的 `vector_id` 与 Milvus 主键集合完全相同，无孤儿向量
 - Milvus：集合按 HNSW 与 COSINE 建索引，同名主键连续 upsert 两次后记录数仍为 1
 - 检索：14 条真实问法的离线评测，top-1 命中 86%，top-3 命中 100%
+
+这组检索指标来自 `backend/.tmp/evaluate_retrieval.py`，它把知识块编码后逐条检索、直接比较排名，**不经过 `search_faq`、Milvus 或 MySQL**，因此衡量的是切分与向量化文本的质量，不是在线链路的端到端指标；在线链路自身的验证结果见「在线语义检索」一节的「已验证的范围」。
 
 尚未验证的部分：真实 BGE-M3（1024 维）尚未跑过，当前使用的是 bge-small-zh-v1.5。离线建库已经接入 Agent 工具：`search_faq` 走 Milvus 向量召回，见下一节。
 
@@ -522,6 +553,55 @@ graph TD
     keep --> trim
     trim --> json["返回 status results message"]
 ```
+
+### 一次提问的完整链路
+
+上面那张图只覆盖 `search_faq` 内部。放进 Agent 后，一次知识类提问的完整过程如下（每一步都标注了实际代码位置，便于对照排查）：
+
+```mermaid
+graph TD
+    user["用户提问：邮费是多少"] --> load["load_context<br/>从 MySQL 载入本人近期历史"]
+    load --> recog["recognize_intent<br/>LLM 输出意图 faq 与补全问题"]
+    recog --> route["route_intent<br/>服务端算出白名单 search_faq"]
+    route --> dispatch["dispatch_tool_call<br/>服务端构造 question 参数"]
+    dispatch --> tool["ToolNode 执行 search_faq<br/>BGE 到 Milvus 到 MySQL"]
+    tool --> msg["工具结果作为 ToolMessage<br/>追加进本轮消息"]
+    msg --> gen["generate<br/>LLM 依据 ToolMessage 生成回答"]
+    gen --> save["save_answer<br/>写回助手消息"]
+    save --> sse["SSE 发 delta 与 done"]
+```
+
+各步与代码的对应关系：
+
+| 步骤 | 位置 | 关键行为 |
+| --- | --- | --- |
+| 载入上下文 | `app/agent/graph.py` 的 `load_context` | 只载入当前用户的历史消息，System Prompt 也在这里加入 |
+| 识别意图 | `recognize_intent` + `app/agent/intent.py` | 只拿到对话历史与分类提示词，**不拿工具定义，也不拿知识** |
+| 计算白名单 | `route_intent` → `_semantic_route` | 意图 `faq` 且置信度达标时放入 `search_faq`；模型不能指定工具名 |
+| 构造调用 | `dispatch_tool_call` | 把 `completed_question` 原样作为 `question`；模型不参与参数拼装 |
+| 执行检索 | `ToolNode([search_faq])` → `semantic_search` | 本文其余各节说明的向量链路 |
+| 生成回答 | `generate` | 拿到的消息里包含工具结果，据此作答 |
+| 落库与推送 | `save_answer` + `app/api/routes/conversations.py` | 只保存最终回答，SSE 只推 `generate` 节点的片段 |
+
+#### 知识是怎么进到模型里的
+
+这一点容易误解，实测抓取 `generate` 节点收到的消息数组确认：**知识不是拼进提示词的，而是作为工具结果进入当轮上下文**。一次「邮费是多少」的提问中，模型实际收到 4 条消息：
+
+```
+[1] HumanMessage  "邮费是多少"
+[2] SystemMessage（SYSTEM_PROMPT，1138 字，不含任何知识正文）
+[3] AIMessage     tool_calls=[search_faq {'question': '邮费是多少'}]   ← 服务端合成
+[4] ToolMessage   name=search_faq status=ok 条数=5（764 字）           ← 知识在这里
+```
+
+`SYSTEM_PROMPT` 与 `INTENT_RECOGNITION_PROMPT` 里都探测不到任何召回正文：提示词只负责**约束**（"知识类问题只能依据 `search_faq` 实际返回的 category、question、answer"，"不得把模型记忆或 `policies` 表当作已检索的政策"），事实内容全部来自第 `[4]` 条。
+
+由此带来两个已知特性：
+
+- **识别节点不看知识**：`recognize_intent` 收到的只有 `[SystemMessage(分类提示词), HumanMessage]` 两条，它只判断意图与补全问题，不参与内容作答。
+- **召回条目不跨轮留存**：`save_answer` 只写最终回答，上面第 `[3]`、`[4]` 条都不写入 `messages` 表。下一轮 `load_context` 重新从 MySQL 载入历史时只有回答文本，没有当轮的召回条目，因此用户追问时会重新检索一次。这样不会让过期知识污染后续轮次，代价是没有跨轮的知识缓存。
+
+想复核这张消息数组，可以跑 `backend/.tmp/inspect_llm_context.py`；它用替身模型记录消息，检索走真实链路，且不写任何用户数据。
 
 代码分三层：`app.services.rag.retrieval` 负责编排，`app.persistence.milvus.knowledge_store` 的 `search` 负责向量召回，`app.persistence.mysql.knowledge` 的 `get_vectorized_chunks_by_ids` 负责回表。工具入口是 `app.services.tools.customer` 中的 `search_faq`。
 
@@ -552,12 +632,29 @@ Milvus 命中不等于知识有效。回表时只接受 `vector_status = 'vector
 
 `knowledge_chunks.questions` 是问法列表，工具返回的单数 `question` 按优先级取第一个非空项：先用全角竖线连接 `questions` 里的全部问法，`questions` 为空时退回 `section_path`。商品 FAQ 这里显示它在 `faq` 表里的真实问题；政策与手册块没有天然问法，显示的是章节标题，与离线入库时的选择保持一致。
 
+### 思考模式必须关闭
+
+在线 Agent 需要 `OPENAI_THINKING_MODE=disabled`，这是一处跨层约束，不是可选优化。
+
+DeepSeek 的思考模式默认开启，且[官方规定](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/)：**携带 `tools` 参数的请求，后续所有请求必须完整回传历史轮次的 `reasoning_content`，否则返回 400**。而本项目的工具调用是服务端合成的：`dispatch_tool_call` 构造一条 `AIMessage(tool_calls=[...])` 并追加工具结果，这条合成消息天然没有 `reasoning_content`。于是「工具结果之后再让模型生成回答」这一步必然被服务端拒绝：
+
+```
+400 The `reasoning_content` in the thinking mode must be passed back to the API.
+```
+
+关掉思考模式后模型不再产生 `reasoning_content`，该约束自然消失。它同时省掉思维链的 token 开销；本项目的分类与回答都不需要思维链。
+
+该开关只作用于在线对话（`agent/graph.py` 里的 `ChatOpenAI`）。离线对话挖掘走自己的裸 `OpenAI` 客户端（`services/rag/extraction.py`，读 `MINING_LLM_*`），不受影响，抽取质量不会因为这里改成 `disabled` 而变化。
+
+若要保留思考能力，替代做法是在合成 `AIMessage` 时把模型上一轮的 `reasoning_content` 一起带着回传；这属于 Agent 层的独立改动。
+
 ### 配置
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | RAG_ONLINE_RESULT_LIMIT | 5 | 最终交给 Agent 的知识条数上限 |
 | RAG_ONLINE_CANDIDATE_LIMIT | 20 | 送给 Milvus 的候选条数；小于结果数时按结果数取值 |
+| OPENAI_THINKING_MODE | 空（不传该参数） | 在线 Agent 的思考模式；DeepSeek 思考模型下必须设 `disabled`，见上一节 |
 
 在线检索复用离线那套 `EMBEDDING_*` 与 `MILVUS_*` 配置，不允许两段各配一套向量服务：query 向量必须与库中向量出自同一个模型和同一份归一化方式。
 
@@ -569,16 +666,16 @@ Milvus 命中不等于知识有效。回表时只接受 `vector_status = 'vector
 - 契约兼容：成功返回 `status`、`results`、`message`，每条结果只有 `category`、`question`、`answer`；空问题、超长问题、空结果的行为与接入前一致
 - 故障语义：向量服务不可用时返回 `status = error` 与通用错误文案，不退回关键词查询
 - 失效过滤：把一条块置为 `superseded` 并删除其向量后，同问题的检索结果里不再出现该块
-- 图内链路：Agent 图路由到 `search_faq`、服务端构造 `question` 参数、工具结果进入最终回答依据，这条链路在替换模型为替身的情况下完整跑通
+- 图内链路：Agent 图路由到 `search_faq`、服务端构造 `question` 参数、工具结果进入最终回答依据，这条链路用真实模型完整跑通。问「邮费是多少」时回答只引用召回的运费规则，并主动说明知识库里没有「下单配送邮费」；问「尺码不合适能换吗」时引用换货流程与商品 FAQ，同时 `query_order` 路径无回归
 - 中断补齐：Milvus 已写入、MySQL 仍为 `pending` 时重跑 `vectorize`，块被补齐为 `vectorized`，Milvus 主键去重计数不变，无重复向量
 
-尚未验证：真实 BGE-M3（1024 维）与真实 LLM 措辞下的最终答复质量；本轮的图内验证替换了模型客户端，只验证链路与依据来源。
+尚未验证：真实 BGE-M3（1024 维）。当前 512 维向量由 bge-small-zh-v1.5 生成。
 
 ## 历史对话挖掘
 
 从历史客服对话里挖出可复用的商品或服务知识。与上一节的差别在于知识不是人写好的，而是从对话里抽出来的，因此多了三道必须处理的关卡：只从可信对话里抽、抽取前后都要去掉个人信息、以及候选必须整体去重之后才能入库。
 
-范围限定在挖掘这一段。挖掘出的知识进入同一张 `knowledge_chunks` 表、走同一套向量化流程，因此可以像文档或 FAQ 一样被 `search_faq` 检索到；本节只说明抽取与入库，在线检索见上一节。
+范围限定在挖掘这一段。挖掘出的知识进入同一张 `knowledge_chunks` 表、走同一套向量化流程，因此可以像文档或 FAQ 一样被 `search_faq` 检索到；本节只说明抽取与入库，检索路径见本文的「在线语义检索」一节。
 
 ### 整体流程
 
