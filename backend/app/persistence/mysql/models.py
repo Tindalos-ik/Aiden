@@ -27,7 +27,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.mysql import DATETIME
+from sqlalchemy.dialects.mysql import DATETIME, MEDIUMTEXT
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -395,6 +395,61 @@ class FAQ(UUIDPrimaryKey, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("1")
     )
+
+
+class KnowledgeChunk(UUIDPrimaryKey, TimestampMixin, Base):
+    """离线知识库里的一块知识，MySQL 是原文权威源。
+
+    入库的不是一段裸正文，而是结构化的“分类 + 真实问法 + 答案”：category、questions、
+    answer 会被拼成唯一稳定的文本送去 BGE-M3 计算 dense 向量，embedding_text 保存当时
+    实际送去向量化的文本，便于核对模板或内容变更。
+
+    section_path、content_type、is_key_clause 和前后块指针只作为元数据保存，不参与
+    embedding。prev/next 指向同一来源内相邻块的 id，用于在线检索时按需拉回前后文补全语义。
+
+    chunk_key 由来源、块序号和内容哈希决定，是导入幂等的依据；id 同时是 Milvus 的主键，
+    所以“Milvus 已写入但状态尚未回填”时重跑只会覆盖同一条向量，不会产生重复向量。
+    vector_status 记录向量同步状态，内容更新后旧块置为 superseded 并删除对应向量。
+    """
+
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        CheckConstraint(
+            "vector_status IN ('pending', 'vectorized', 'need_manual_review', 'superseded')",
+            name="vector_status_valid",
+        ),
+        CheckConstraint("source_type IN ('markdown', 'faq', 'conversation')", name="source_type_valid"),
+        CheckConstraint("chunk_index >= 0", name="chunk_index_nonnegative"),
+        UniqueConstraint("chunk_key"),
+        Index("ix_knowledge_chunks_source_index", "source_type", "source_id", "chunk_index"),
+        Index("ix_knowledge_chunks_vector_status", "vector_status", "id"),
+        Index("ix_knowledge_chunks_category_active", "category", "vector_status"),
+    )
+
+    chunk_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_path: Mapped[str | None] = mapped_column(String(512))
+    source_title: Mapped[str | None] = mapped_column(String(255))
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str] = mapped_column(String(255), nullable=False)
+    questions: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    answer: Mapped[str] = mapped_column(MEDIUMTEXT, nullable=False)
+    embedding_text: Mapped[str] = mapped_column(MEDIUMTEXT, nullable=False)
+    embedding_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    section_path: Mapped[str] = mapped_column(String(512), nullable=False, default="", server_default=text("''"))
+    content_type: Mapped[str] = mapped_column(String(16), nullable=False, default="text", server_default=text("'text'"))
+    is_key_clause: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    prev_chunk_id: Mapped[str | None] = mapped_column(String(36))
+    next_chunk_id: Mapped[str | None] = mapped_column(String(36))
+    vector_status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    vector_id: Mapped[str | None] = mapped_column(String(128))
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    vectorized_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Conversation(UUIDPrimaryKey, TimestampMixin, Base):

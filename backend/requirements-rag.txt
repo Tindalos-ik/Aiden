@@ -1,0 +1,6 @@
+# 离线建库（RAG）可选依赖：Milvus 客户端与精确 token 计量。
+# 聊天运行时不需要这些依赖；未安装时后端仍可正常启动，只是无法执行建库命令。
+# 用法：pip install -r requirements-rag.txt
+pymilvus>=2.4,<3.0
+# 只用于切分时的精确 token 计数；缺失时退回按字符估算，并把不确定度计入预算。
+tokenizers>=0.15,<1.0
