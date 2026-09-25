@@ -1,12 +1,21 @@
 # Aiden RAG
 
-本文说明 Aiden 的 RAG 设计。当前只实现了离线建库这一段，其余部分待补。
+本文说明 Aiden 的 RAG 设计。当前实现了两段离线能力：把既有文档与 FAQ 建成知识库，以及从历史客服对话里挖出问答知识。在线语义检索待补。
 
 ## 离线建库
 
 把知识变成可检索的向量。
 
 范围限定在离线这一段。在线语义检索还没有实现，`search_faq` 也没有接入向量召回，仍是关键词匹配。`docs/Aiden.md` 的 RAG 章记录目标设计与选型过程，其中包含尚未实现的规划内容；已实现的离线建库行为以本文为准。
+
+两条离线路径共用同一套知识块表与同一套向量化流程：
+
+| 路径 | 输入 | 入口 |
+| --- | --- | --- |
+| 离线建库 | Markdown 知识文档、`faq` 表启用中的行 | `backend/scripts/build_knowledge_base.py` |
+| 历史对话挖掘 | `conversations`、`messages` 里的历史客服对话 | `backend/scripts/mine_conversation_knowledge.py` |
+
+后者见本文的「历史对话挖掘」一节。
 
 ### 整体流程
 
@@ -54,13 +63,13 @@ graph TD
 | embedding_text | 当时实际送去向量化的文本 |
 | embedding_fingerprint | 拼接模板版本 |
 | section_path | 章节路径 |
-| content_type | text、table、code 或 mixed |
+| content_type | text、table、code、mixed，或对话挖掘的「对话挖掘问答」 |
 | is_key_clause | 是否关键条款 |
 | prev_chunk_id / next_chunk_id | 同一来源内相邻块 |
 | vector_status / vector_id | 向量同步状态与回填的向量主键 |
 | content_hash | 正文哈希，用于识别内容变更 |
 
-来源有两类。Markdown 文档以相对路径标识为 `markdown:<相对路径>`，现有 FAQ 行标识为 `faq:<行 id>`。FAQ 逐条独立成来源，因此改一条 FAQ 只影响它自己那块，不会牵动其他 FAQ 的向量。
+来源有三类。Markdown 文档以相对路径标识为 `markdown:<相对路径>`，现有 FAQ 行标识为 `faq:<行 id>`。FAQ 逐条独立成来源，因此改一条 FAQ 只影响它自己那块，不会牵动其他 FAQ 的向量。第三类是历史对话挖掘出的问答，`source_type` 为 `conversation`、`source_id` 形如 `conversation-qa:<问法集合哈希>`，标识方式与理由见「历史对话挖掘」一节。
 
 #### 哪些字段进入向量化
 
@@ -494,8 +503,252 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 尚未验证的部分：真实 BGE-M3（1024 维）尚未跑过，当前使用的是 bge-small-zh-v1.5。离线建库也尚未接入任何 Agent 工具，`search_faq` 仍走关键词匹配。
 
-### 后续阶段
+## 历史对话挖掘
 
-在线语义检索：用 `EmbeddingClient` 把用户问题向量化，到 Milvus 做近似最近邻检索，按分类或来源过滤、对关键条款加权，再按命中主键用 `get_chunks_by_ids` 取回权威原文，必要时沿 `prev_chunk_id` 与 `next_chunk_id` 拉相邻块补全语义。
+从历史客服对话里挖出可复用的商品或服务知识。与上一节的差别在于知识不是人写好的，而是从对话里抽出来的，因此多了三道必须处理的关卡：只从可信对话里抽、抽取前后都要去掉个人信息、以及候选必须整体去重之后才能入库。
 
-历史对话挖知识：从客服对话里抽取问答对。`docs/Aiden.md` 要求先写入暂存表，批次跑完再整体去重，最后才写入 knowledge_chunks。`source_type` 的检查约束已预留 `conversation` 取值。
+范围同样限定在离线。挖掘出的知识进入同一张 `knowledge_chunks` 表、走同一套向量化流程，`search_faq` 与在线检索不受影响。
+
+### 整体流程
+
+```mermaid
+graph TD
+    msg["conversations / messages<br/>只取 status = complete"] --> turns["按完整问答轮次组织"]
+    turns --> pack["按轮次边界分批"]
+    pack --> batch["写入 conversation_mining_batches<br/>状态 pending"]
+    batch --> claim["短事务认领批次<br/>状态 extracting"]
+    claim --> mask["脱敏手机号 地址 订单号等"]
+    mask --> llm["调用 LLM 抽取结构化问答对"]
+    llm --> validate["逐条结构 依据 脱敏校验"]
+    validate --> stage["通过与被拒候选都写入<br/>conversation_qa_candidates"]
+    stage --> wait{"本轮所有批次<br/>都抽完了吗"}
+    wait -->|还有批次| batch
+    wait -->|全部完成| dedupe["整体去重<br/>跨对话 跨批次"]
+    dedupe --> mysql["写入 knowledge_chunks<br/>状态 pending"]
+    mysql --> embed["复用 vectorize_pending<br/>BGE 服务与 Milvus"]
+```
+
+流程被刻意切成「抽取」与「去重入库」两段，中间以「本轮所有批次是否都抽完」为闸门。只要还有批次没抽完（达到批次上限或抽取失败），去重就整体推迟到下一次运行。理由是重复问法会跨批次出现，只在单个模型批次内部去重必然漏掉。
+
+代码分层：
+
+| 层 | 位置 | 职责 |
+| --- | --- | --- |
+| 脱敏与校验 | `backend/app/services/rag/sanitization.py`、`extraction.py` | 擦除个人与交易标识、调模型、按结构逐条校验 |
+| 编排 | `backend/app/services/rag/conversation_mining.py` | 分批、抽取、整体去重、入库 |
+| MySQL 持久化 | `backend/app/persistence/mysql/conversation_mining.py` | 消息读取、批次进度、候选暂存 |
+| 运行控制 | `backend/app/services/rag/runtime_control.py` | 实例锁与停止信号 |
+| 定时入口 | `backend/scripts/mine_conversation_knowledge.py` | 手动跑一次、按周期常驻、查看进度 |
+
+### 消息读取与分批
+
+#### 什么算可信问答
+
+只读 `messages.status = 'complete'` 的消息。`streaming` 还在生成、`error` 与 `stopped` 都不是可信答案，把它们当依据会把半截回答变成「知识」。`system` 消息也不参与。
+
+轮次的构成规则是：一条用户消息（或**连续**多条用户消息合并成一个提问）加上紧邻其后的一条可信答案消息（`assistant` 或 `staff`）算一轮。合并连续用户消息是必要的，否则「我要退货」和「尺码不对」会被当成两个独立问题，而答案只有一个。末尾没等到答案的用户消息被丢弃，等下一轮运行有新答案时再处理。
+
+#### 分批不切开一轮问答
+
+两个上限同时生效：单批最多 `MINING_MAX_TURNS_PER_BATCH` 轮、送进模型的对话文本最多 `MINING_MAX_BATCH_CHARS` 字符。装箱只发生在轮次边界上，因此一轮问答不会跨批，否则答案与问题分离，抽出来的知识必然残缺。
+
+单轮自身就超过字符上限时，它独占一个批次，抽取阶段把它标记为 `skipped` 并记录原因。既不与别的轮次合并（合并会让整批超限），也不切分它（切分违反上一条约束）。
+
+#### 增量读取靠续跑锚点
+
+每个会话从「已处置批次的最后消息时间」之后继续读，已处理过的消息不会再次读取。这里的「已处置」只包括 `promoted` 与 `skipped`：
+
+- 不包括 `superseded`：它表示窗口被显式作废，若拿它推进锚点，那段消息就再也读不到；
+- 不包括 `failed`：那是「下次要重试」。
+
+一次任务的读取量由上界控制（会话数、批次数），达到上限就停下，剩余消息留给下一次运行。
+
+### 脱敏
+
+个人与交易标识在**调用模型之前**就擦除，不依赖模型自觉。理由是这些信息一旦进入模型输出、暂存表或正式知识，就等于把用户隐私写进了可被检索的知识库，事后清理的代价远高于提前擦除。
+
+处理方式是纯文本的确定性替换，用固定占位符而不是随机串：
+
+| 类别 | 占位符 | 识别要点 |
+| --- | --- | --- |
+| 证件号 | `[证件号]` | 18 位与 15 位两代身份证格式 |
+| 邮箱 | `[邮箱]` | 常规邮箱形态 |
+| 订单号 | `[订单号]` | 需带「订单号」「订单编号」等上下文标签，编号本体至少 6 位 |
+| 运单号 | `[运单号]` | 需带「运单号」「快递单号」等上下文标签 |
+| 手机号 | `[手机号]` | 允许 `+86`、空格与连字符分隔；前后不允许紧邻字母数字，避免误吃长数字串 |
+| 地址 | `[地址]` | 需命中行政区划或门牌号，单独一个市名不算 |
+
+替换用固定占位符是为了让同一段对话每次都得到同一份文本，批次签名与候选指纹才稳定，重复运行不会因为脱敏结果抖动而产生新知识。
+
+裸编号不匹配：纯数字形态无法与商品编号、金额、时间戳区分，误伤面太大。代价是「订单 202405160001」这种没有标签的写法不会被擦除，而真实对话里订单号几乎总带着标签或 `#`。
+
+### 抽取与校验
+
+#### 抽取的目标不是摘要
+
+提示词里明确禁止把某个用户的订单状态、物流轨迹、个人承诺或含糊的助手回答提炼成通用政策。这类内容一旦入库，会在别的用户提问时被当成公司政策检索出来，比缺失更有害。
+
+模型按固定结构输出，每条包含 question、answer、category、evidence、confidence。调用走 OpenAI 兼容的 `/v1/chat/completions`，凭据默认复用在线 Agent 的 `OPENAI_*`，也可用 `MINING_LLM_*` 单独指定，让离线批量抽取与在线客服回答使用不同的模型或网关。
+
+#### 逐条校验与拒绝原因
+
+模型输出必须通过结构校验，任何一条不满足的候选都会带上拒绝原因写入暂存表，而不是静默丢弃。
+
+| 拒绝原因 | 触发条件 |
+| --- | --- |
+| 缺少必填字段 | question、answer 或 evidence 为空 |
+| 问题或答案超出长度上限 | 超过 `MINING_MAX_QUESTION_CHARS` 或 `MINING_MAX_ANSWER_CHARS` |
+| 答案过短，不构成可复用知识 | 答案短于 8 个字符 |
+| 答案本身仍是提问 | 答案以问号结尾 |
+| 模型给出的置信度过低 | confidence 低于 0.5 |
+| 问法/答案依赖个人或交易标识 | 脱敏后仍带占位符 |
+| 答案含糊，未给出确定结论 | 命中「不确定」「视情况而定」等表述 |
+| 答案自相矛盾 | 同时给出互斥结论 |
+| 答案在对话中没有明确依据 | evidence 与原文的字符 n-gram 覆盖率低于 0.6 |
+| 缺少可用的分类 | category 为空 |
+| 同一问法存在相互冲突的答案 | 见下一节 |
+| 与已入库知识重复，未重复生成 | 见下一节 |
+
+含占位符就等于「这段话只在某个用户的具体情境下成立」。「您的包裹已到 [地址]」这类候选描述的是订单播报，把占位符当通用政策写进知识库，检索会返回残缺内容。
+
+依据校验用字符 n-gram 覆盖率而不是严格子串匹配：模型常会轻微改写或补全标点，严格匹配会误杀真实依据；而覆盖率过低基本可以确认是凭常识补出来的内容。短依据（不超过 12 字）用子串匹配，避免 n-gram 样本不足导致比例失真。
+
+结构校验失败不重试。重试同一个提示词通常得到同样的越界输出，重试只对网络与响应解析错误有意义，这类错误会把批次标为 `failed` 并保留原因，下次运行重新认领继续。
+
+### 整体去重
+
+去重跑在**本轮全部候选**上（跨对话、跨批次），同时读入已有 `knowledge_chunks`。判定顺序是：
+
+1. 同一问法在本轮出现多个**不互为同义**的答案 → 冲突，全部留待人工确认，不入库；
+2. 该问法与已有正式知识相同或同义：候选答案与已有答案等价 → 判为已入库，不重复生成正式知识与向量；不等价 → 冲突，留待人工确认，不自动改写已有知识；
+3. 其余候选先按「问法 + 答案」分组，再把**语义等价的问法**合并成一条知识，questions 保留全部真实问法。
+
+#### 同义问法与同义答案
+
+只用文本比较无法合并「保修期是多久」与「质保多长时间」这类同义问法，同一条知识会被拆成多个块。因此归一化后仍不同的问法再用向量余弦相似度判定，复用第一阶段同一个 `EmbeddingClient`（BGE-M3），不新建向量客户端。
+
+| 阈值 | 默认值 | 说明 |
+| --- | --- | --- |
+| `MINING_QUESTION_SIMILARITY` | 0.88 | 同义改写通常在 0.90 以上，话题相近但问题不同多在 0.75 到 0.88，取 0.88 以免把不同问题并成一条 |
+| `MINING_ANSWER_SIMILARITY` | 0.95 | 比问法阈值更严：答案差一点就是不同结论，不能并成一条 |
+
+换用其它向量模型时必须重新标定这两个值。向量服务不可用时默认不中止（`MINING_REQUIRE_EMBEDDING_FOR_DEDUPE=false`），退化为「只有归一化问法完全相同才合并」并在运行结果里记录降级原因；置为 `true` 则直接报错，避免在依赖不可用时产生一批没有合并过的知识。
+
+合并问法时**答案也必须语义等价**。两条知识的问法同义但答案不同（例如「退款多久到账」分别答 15 个工作日和 7 个工作日）描述的是不同结论，合并会丢掉其中一个结论，还会给同一条知识挂上互相矛盾的两个问法。这种情况保持两条独立知识。
+
+合并按顺序进行且不设传递闭包：相似度是近似的，传递合并可能把「A 像 B、B 像 C、但 A 不像 C」的问法串成一条，导致检索语义漂移。
+
+#### 入库如何保持幂等
+
+来源标识按**规范化问法集合**生成（`conversation-qa:<问法集合哈希>`），不是按会话或批次。理由是 `upsert_source_chunks` 的作废判定是「同一来源内本次未生成的块」：来源随问法集合走，同一组真实问法在每次运行中都映射到同一个来源，重复运行才不会把已经向量化的块置为 superseded。
+
+`chunk_index` 恒为 0，每个来源就是一条问答知识。chunk_key 复用第一阶段的规则（来源 + 序号 + 内容哈希），只是内容哈希覆盖答案与全部问法——问法集合变了就应该是一条新知识，而不是静默沿用旧的 embedding_text。
+
+因此重复运行只会更新同一行：已抽取的窗口不会再次调模型，已入库的知识不会产生新块，Milvus 侧是 upsert 覆盖同一条向量。
+
+### 状态与续跑
+
+#### 批次状态
+
+| 状态 | 含义 | 是否推进续跑锚点 |
+| --- | --- | --- |
+| pending | 窗口已确定，尚未调用模型 | 否 |
+| extracting | 已被某次运行认领，正在调模型 | 否 |
+| extracted | 抽取完成、候选已写入暂存表 | 否 |
+| ready | 本运行全部批次已抽取完成，可以整体去重 | 否 |
+| promoted | 本批次参与的去重与入库已完成 | 是 |
+| skipped | 已处置但没产生知识（候选全是重复或冲突、单轮超长、窗口内无完整轮次） | 是 |
+| failed | 调用模型或校验失败，保留错误信息，可重跑 | 否 |
+| superseded | 预留状态，当前没有代码路径产生 | 否 |
+
+`skipped` 与 `failed` 的区别是语义：`failed` 表示这次没成功、下次要重试；`skipped` 表示重复执行也不会有不同结果，因此计入已处理窗口并让锚点前进，避免每次运行都重复抽取同一段历史。
+
+候选状态有三值：`staged` 抽取后待去重处理，`promoted` 已作为正式知识写入 knowledge_chunks（并回填 `promoted_chunk_id`，可从知识反查来源），`rejected` 不入库、`rejection_reason` 说明原因。被拒候选择保留在暂存表而不是删除，便于后续人工复核与调整提示词。
+
+#### 续跑
+
+不带参数重跑同一命令即可。入口启动时默认先把上次被强杀留下的 `extracting` 批次放回 `pending`，再用批次签名与候选键跳过已完成的工作，因此不会重复抽取、不会重复生成知识或向量。`--no-reset-stale` 可关闭这一行为。
+
+#### 并发安全
+
+两道机制配合：
+
+```python
+select(ConversationMiningBatch)
+    .where(ConversationMiningBatch.status.in_((PENDING, FAILED)))
+    .order_by(ConversationMiningBatch.first_message_at.asc())
+    .limit(limit)
+    .with_for_update(skip_locked=True)      # 行锁 + 跳过被锁行
+# 同一事务内立即置为 extracting 并写入 claimed_by
+```
+
+`FOR UPDATE` 保证同一批次只会被一个运行拿到，`SKIP LOCKED` 让其他运行直接跳过被锁行而不是排队等待。批次签名与候选键的唯一约束在数据库层兜底：并发运行可能同时算出同一个窗口，先提交者胜出，后者跳过。
+
+进程级还有一把非阻塞文件锁，把同时启动的第二个任务实例直接挡在门外。锁绑定在打开的文件句柄上，进程无论正常退出还是被强杀，操作系统都会释放句柄，不需要人工清理锁文件。
+
+数据库会话不跨模型调用持有：读消息、写候选、写状态各自是短事务，调模型期间没有任何打开的连接。
+
+### 命令
+
+都在 `backend` 目录下执行，连接与凭据来自 `backend/.env`。
+
+    # 手动运行一次：抽取 -> 暂存 -> 整体去重 -> 入库 -> 补向量
+    .\.venv\Scripts\python.exe -m scripts.mine_conversation_knowledge
+    # 只抽取并写入暂存表，不做整体去重与入库
+    .\.venv\Scripts\python.exe -m scripts.mine_conversation_knowledge --staging-only
+    # 按周期常驻运行；周期也可用 MINING_INTERVAL_SECONDS 配置
+    .\.venv\Scripts\python.exe -m scripts.mine_conversation_knowledge --interval 3600
+    # 查看批次与候选状态统计，不写数据
+    .\.venv\Scripts\python.exe -m scripts.mine_conversation_knowledge stats
+    # 列出留待处理或已拒绝的候选及原因
+    .\.venv\Scripts\python.exe -m scripts.mine_conversation_knowledge list-candidates --status rejected
+
+退出码约定：0 本轮工作完整结束，1 还有遗留（批次上限、抽取失败或存在待处理候选），2 配置或外部服务出错，3 已有实例在运行，130 收到中断。
+
+这是独立的离线任务，**不绑定 FastAPI**：不在应用导入阶段启动任何线程或循环，也不由 HTTP 请求触发。定时执行由入口自己的「跑一轮、按周期等待、再跑一轮」循环完成，因此 API 进程重启与在线流量都不影响抽取节奏。按 `Ctrl+C` 时当前批次会跑完并把状态写回数据库。
+
+### 配置
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| MINING_LLM_API_KEY / BASE_URL / MODEL | 回落到 OPENAI_* | 抽取模型，可让离线抽取与在线回答用不同模型 |
+| MINING_LLM_TIMEOUT | 180 | 单次请求超时（秒） |
+| MINING_LLM_TEMPERATURE | 0.0 | 抽取是照抄已有依据，不需要发散 |
+| MINING_LLM_MAX_TOKENS | 2048 | 输出上限 |
+| MINING_LLM_USE_JSON_MODE | true | 服务不支持 response_format=json_object 时置 false |
+| MINING_MAX_TURNS_PER_BATCH | 8 | 单批最多完整问答轮次 |
+| MINING_MAX_BATCH_CHARS | 6000 | 单批对话文本字符上限 |
+| MINING_MAX_CONVERSATIONS_PER_RUN | 20 | 单次运行最多检查多少会话 |
+| MINING_MAX_BATCHES_PER_RUN | 40 | 单次运行最多抽取多少批次 |
+| MINING_MAX_QUESTION_CHARS | 200 | 单条候选问法长度上限 |
+| MINING_MAX_ANSWER_CHARS | 800 | 单条候选答案长度上限 |
+| MINING_INTERVAL_SECONDS | 21600 | 定时周期（秒） |
+| MINING_VECTORIZE_AFTER_PROMOTE | true | 入库后是否顺势补齐向量 |
+| MINING_QUESTION_SIMILARITY | 0.88 | 问法同义判定阈值 |
+| MINING_ANSWER_SIMILARITY | 0.95 | 答案同义判定阈值 |
+| MINING_MAX_SEMANTIC_QUESTIONS | 500 | 一次去重最多为多少条问法算向量 |
+| MINING_REQUIRE_EMBEDDING_FOR_DEDUPE | false | 向量服务不可用时是否中止入库 |
+
+### 数据库表
+
+新增两张表，由迁移 `0005_conversation_mining` 创建；该迁移同时把 `knowledge_chunks.content_type` 由 VARCHAR(16) 加宽到 VARCHAR(64)，因为内容类型标为可读的「对话挖掘问答」（24 字节装不下）。字段与索引的完整说明见 [`数据层.md`](数据层.md)。
+
+| 表 | 用途 |
+| --- | --- |
+| conversation_mining_batches | 抽取窗口与进度：批次签名、窗口消息、轮次数、状态、错误信息 |
+| conversation_qa_candidates | 问答候选暂存：真实问法、答案、分类、来源消息标识、依据、置信度、状态与拒绝原因 |
+
+`batch_signature` 对「会话 id + 窗口内消息 id 与发送角色序列」取哈希，因此窗口的内容与边界完全决定签名：重跑同一窗口命中唯一键而跳过，边界变化则天然生成新批次，不需要额外的「改过没有」标记。
+
+### 已验证的范围
+
+用 stub 的 OpenAI 兼容对话与向量端点（真实 LLM 密钥与 BGE-M3 服务在本机未配置）验证：
+
+- 去重规则：13 项判定全部通过，覆盖同问法同答案合并、同问法不同答案冲突不入库、语义等价答案合并、已有知识同答案判重复、同义问法 + 同答案判重复、同义问法 + 不同答案冲突、同义问法合并且保留两种问法、同义问法但答案不同不合并、向量不可用时降级并给出提示
+- 端到端：10 个批次抽取 → 5 条候选经整体去重合并成 3 条知识（questions 分别保留 2、1、2 个真实问法），4 条候选按 4 种原因留待处理
+- 幂等：第二次运行新建批次 0、抽取 0、入库 0，LLM 调用次数不增加
+- 续跑：把已入库批次改回 `pending` 后重跑，判为重复，不产生新知识与新向量
+- 并发：持锁时启动第二个实例被拒绝（退出码 3）
+- 迁移：`alembic upgrade head` 建出两张表，`content_type` 为 varchar(64)，检查约束与索引齐全
+
+尚未验证：真实 LLM 的抽取质量与真实 BGE-M3 的语义阈值标定（`MINING_QUESTION_SIMILARITY` 与 `MINING_ANSWER_SIMILARITY` 需要接入真实模型后重新标定），以及真实 Milvus 写入。

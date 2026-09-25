@@ -438,7 +438,9 @@ class KnowledgeChunk(UUIDPrimaryKey, TimestampMixin, Base):
     embedding_text: Mapped[str] = mapped_column(MEDIUMTEXT, nullable=False)
     embedding_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     section_path: Mapped[str] = mapped_column(String(512), nullable=False, default="", server_default=text("''"))
-    content_type: Mapped[str] = mapped_column(String(16), nullable=False, default="text", server_default=text("'text'"))
+    # 知识块的内容类型。文档切分产生 text/table/code/mixed，对话挖掘产生“对话挖掘问答”，
+    # 因此长度按中文字面值留足（“对话挖掘问答”在 utf8mb4 下占 24 字节）。
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False, default="text", server_default=text("'text'"))
     is_key_clause: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("0")
     )
@@ -589,3 +591,120 @@ class UnansweredQuestion(UUIDPrimaryKey, Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=utc_now_naive, server_default=func.current_timestamp()
     )
+
+
+class ConversationMiningBatch(UUIDPrimaryKey, TimestampMixin, Base):
+    """历史对话挖掘的抽取批次与进度记录。
+
+    一行代表“某个会话中由固定消息序列组成的一段抽取窗口”，是抽取与续跑的进度单位。
+    `batch_signature` 对“会话 id + 窗口内消息 id 与发送角色序列”做哈希，因此窗口的内容和边界
+    完全决定签名：重跑同一窗口得到同一签名，会命中唯一键而跳过抽取；边界变化（例如窗口内又补
+    了一条助手回复）则天然生成新批次，不需要额外的“改过没有”标记。
+
+    `status` 的含义：
+
+    * `pending`：窗口已确定，尚未调用模型抽取；
+    * `extracting`：本次运行已认领该窗口，正在调用模型；
+    * `extracted`：抽取完成、候选已写入暂存表，等待整体去重；
+    * `ready`：所属运行的全部批次都已抽取完成，可以开始整体去重；
+    * `promoted`：本批次参与的去重与入库已完成，窗口内的知识已写入 knowledge_chunks；
+    * `superseded`：窗口被更细的新批次取代，不再处理；
+    * `skipped`：窗口已处置但没产生知识（候选全是重复或冲突，或单轮问答超过模型可读长度）。
+      它与 `failed` 的区别是：`failed` 表示这次没成功、下次要重试；`skipped` 表示重复执行也不会有
+      不同结果，因此计入已处理窗口并让续跑锚点前进，避免每次运行都重复抽取同一段历史；
+    * `failed`：调用模型或校验失败，保留错误信息，可重跑从该批次继续。
+
+    `run_id` 把同一次任务运行抽取出的批次串在一起，整体去重的作用域是同一 `run_id` 的全部
+    候选，而不是单个模型批次内部；`claimed_by` 记录认领该批次的运行，任务并发运行时靠“短事务
+    内 SELECT ... FOR UPDATE SKIP LOCKED + 立刻置为 extracting”保证同一窗口不会被处理两次。
+    """
+
+    __tablename__ = "conversation_mining_batches"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'extracting', 'extracted', 'ready', 'promoted', "
+            "'superseded', 'skipped', 'failed')",
+            name="batch_status",
+        ),
+        CheckConstraint("turn_count > 0", name="turn_count_positive"),
+        UniqueConstraint("batch_signature"),
+        Index("ix_conversation_mining_batches_conversation", "conversation_id", "first_message_at"),
+        Index("ix_conversation_mining_batches_status", "status", "conversation_id"),
+        Index("ix_conversation_mining_batches_run", "run_id", "status"),
+    )
+
+    # 抽取窗口所属会话；会话被清理时批次一并删除。
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    batch_signature: Mapped[str] = mapped_column(String(64), nullable=False)
+    # run_id 在批次被认领、真正要调模型时才写入：只有处理过的窗口才属于某一轮运行，
+    # 这样“本轮抽取出的候选”与“本轮实际处理过的窗口”始终一致。待抽取批次为 NULL。
+    run_id: Mapped[str | None] = mapped_column(String(36))
+    claimed_by: Mapped[str | None] = mapped_column(String(36))
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    # 窗口边界：首条与最后一条消息时间，用于按稳定顺序推进续跑锚点。
+    first_message_at: Mapped[datetime] = mapped_column(DATETIME(fsp=6), nullable=False)
+    last_message_at: Mapped[datetime] = mapped_column(DATETIME(fsp=6), nullable=False)
+    # 窗口内的消息主键与完整问答轮次数量；消息 id 列表是恢复与人工核对窗口范围的依据。
+    message_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    turn_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    candidate_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    error_message: Mapped[str | None] = mapped_column(String(500))
+    extracted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    promoted_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class ConversationQaCandidate(UUIDPrimaryKey, TimestampMixin, Base):
+    """从历史对话抽出的问答候选，正式知识入库前的暂存记录。
+
+    暂存表保存的是**已脱敏**的真实问法与答案：调用模型之前就先处理手机号、地址、订单号等个人
+    与交易标识，写入这里的内容不再包含这些信息。正式知识只可能来自本表，因此正式知识同样干净。
+
+    `status` 的含义：
+
+    * `staged`：抽取后待去重处理，尚未决定去向；
+    * `promoted`：已作为正式知识写入 knowledge_chunks；
+    * `rejected`：经结构校验、依据校验或整体去重后判定不可入库，`rejection_reason` 说明原因。
+
+    被拒候选择保留在暂存表而不是删除，便于后续人工复核与调整抽取提示词。
+    `candidate_key` 由批次签名与候选在模型输出中的序号组成，是重复抽取的幂等键；
+    `answer_fingerprint` 支持跨批次比较答案是否一致，用于合并同一答案的不同真实问法。
+    """
+
+    __tablename__ = "conversation_qa_candidates"
+    __table_args__ = (
+        CheckConstraint("status IN ('staged', 'promoted', 'rejected')", name="candidate_status"),
+        UniqueConstraint("candidate_key"),
+        Index("ix_conversation_qa_candidates_batch", "batch_id", "status"),
+        Index("ix_conversation_qa_candidates_conversation", "conversation_id", "status"),
+        Index("ix_conversation_qa_candidates_fingerprint", "answer_fingerprint", "status"),
+    )
+
+    batch_id: Mapped[str] = mapped_column(
+        ForeignKey("conversation_mining_batches.id", ondelete="CASCADE"), nullable=False
+    )
+    conversation_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    candidate_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 真实问法与答案；questions 在正式入库时按答案分组汇总，这里保存抽取出的单条问法。
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(String(255), nullable=False)
+    # 来源消息标识：本候选所依据的用户消息与答案消息，保证正式知识可追溯。
+    source_user_message_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source_answer_message_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # 模型给出的对话原文依据与置信度，用于人工复核“是否有明确依据”。
+    evidence: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="staged", server_default=text("'staged'")
+    )
+    rejection_reason: Mapped[str | None] = mapped_column(String(500))
+    answer_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    deduped_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # 本候选最终并入的正式知识块，便于从知识反查抽取来源。
+    promoted_chunk_id: Mapped[str | None] = mapped_column(String(36))

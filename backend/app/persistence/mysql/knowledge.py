@@ -17,7 +17,7 @@ MySQL（短事务）”，中途进程中断也不会留下未关闭的连接。
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from sqlalchemy import func, select, update
@@ -34,13 +34,18 @@ VECTOR_STATUS_SUPERSEDED = "superseded"
 
 @dataclass(frozen=True)
 class ChunkUpsertResult:
-    """一次来源导入的 MySQL 侧结果统计，供命令行输出说明实际写入内容。"""
+    """一次来源导入的 MySQL 侧结果统计，供命令行输出说明实际写入内容。
+
+    `chunk_ids` 把 chunk_key 映射到实际写入的 knowledge_chunks 主键：对话挖掘需要把候选回填到
+    它最终并入的知识块，从而做到“从知识能反查抽取来源”。文档与 FAQ 导入不使用该字段。
+    """
 
     inserted: int
     updated: int
     reset_to_pending: int
     need_manual_review: int
     superseded: int
+    chunk_ids: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -159,6 +164,7 @@ def upsert_source_chunks(
             }
 
             inserted = updated = reset_to_pending = review_count = 0
+            chunk_ids: dict[str, str] = {}
             for chunk_key, payload in deduped.items():
                 status = (
                     VECTOR_STATUS_NEED_MANUAL_REVIEW
@@ -167,27 +173,27 @@ def upsert_source_chunks(
                 )
                 current = existing.get(chunk_key)
                 if current is None:
-                    session.add(
-                        KnowledgeChunk(
-                            chunk_key=chunk_key,
-                            source_type=source_type,
-                            source_id=source_id,
-                            source_path=source_path,
-                            source_title=source_title,
-                            chunk_index=payload["chunk_index"],
-                            category=payload["category"],
-                            questions=list(payload["questions"]),
-                            answer=payload["answer"],
-                            embedding_text=payload["embedding_text"],
-                            embedding_fingerprint=payload["embedding_fingerprint"],
-                            section_path=payload["section_path"],
-                            content_type=payload["content_type"],
-                            is_key_clause=bool(payload.get("is_key_clause")),
-                            vector_status=status,
-                            vector_id=None,
-                            content_hash=payload["content_hash"],
-                        )
+                    created = KnowledgeChunk(
+                        chunk_key=chunk_key,
+                        source_type=source_type,
+                        source_id=source_id,
+                        source_path=source_path,
+                        source_title=source_title,
+                        chunk_index=payload["chunk_index"],
+                        category=payload["category"],
+                        questions=list(payload["questions"]),
+                        answer=payload["answer"],
+                        embedding_text=payload["embedding_text"],
+                        embedding_fingerprint=payload["embedding_fingerprint"],
+                        section_path=payload["section_path"],
+                        content_type=payload["content_type"],
+                        is_key_clause=bool(payload.get("is_key_clause")),
+                        vector_status=status,
+                        vector_id=None,
+                        content_hash=payload["content_hash"],
                     )
+                    session.add(created)
+                    chunk_ids[chunk_key] = created.id
                     inserted += 1
                     if status == VECTOR_STATUS_NEED_MANUAL_REVIEW:
                         review_count += 1
@@ -208,6 +214,7 @@ def upsert_source_chunks(
                 current.content_type = payload["content_type"]
                 current.is_key_clause = bool(payload.get("is_key_clause"))
                 current.content_hash = payload["content_hash"]
+                chunk_ids[chunk_key] = current.id
                 updated += 1
                 if status == VECTOR_STATUS_NEED_MANUAL_REVIEW:
                     current.vector_status = VECTOR_STATUS_NEED_MANUAL_REVIEW
@@ -240,6 +247,7 @@ def upsert_source_chunks(
             reset_to_pending=reset_to_pending,
             need_manual_review=review_count,
             superseded=superseded,
+            chunk_ids=chunk_ids,
         )
 
 
