@@ -1,6 +1,14 @@
-# 离线建库（RAG）可选依赖：Milvus 客户端与精确 token 计量。
-# 聊天运行时不需要这些依赖；未安装时后端仍可正常启动，只是无法执行建库命令。
+# 离线建库（RAG）与在线向量检索的依赖：Milvus 客户端与精确 token 计量。
+#
+# pymilvus 在两种场景下都是**必需**的：
+#   * 离线：scripts/build_knowledge_base.py 的建库与向量化命令；
+#   * 在线：search_faq 的向量检索（app/persistence/milvus/knowledge_store.py 在实例化时
+#     懒导入 MilvusClient）。后端不带它仍能启动，因为导入发生在实例化那一刻；但缺失时任何
+#     知识类提问都只会得到通用错误结果，和「Milvus 服务不可用」的表现一样，难以区分。
+#
+# tokenizers 才是真正的可选依赖：只用于切分时的精确 token 计数，缺失时退回按字符估算，
+# 并把计量不确定度计入预算。
+#
 # 用法：pip install -r requirements-rag.txt
 pymilvus>=2.4,<3.0
-# 只用于切分时的精确 token 计数；缺失时退回按字符估算，并把不确定度计入预算。
 tokenizers>=0.15,<1.0
