@@ -35,5 +35,3 @@ class SupportState(TypedDict, total=False):
     selection_order_no: str
     # 只允许对本轮本人订单查询结果中确定的订单发起详情或物流查询。
     authorized_order_no: str
-    # 非法工具调用被拒绝后，防止模型重新尝试并确保最终走安全答复。
-    tool_rejected: bool

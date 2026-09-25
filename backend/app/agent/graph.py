@@ -1,6 +1,7 @@
 import json
 import re
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.messages import (
     AIMessage,
@@ -641,80 +642,6 @@ def _semantic_route(
     return base
 
 
-def _arguments_are_authorized(call: dict[str, Any], state: SupportState) -> bool:
-    """在 ToolNode 前复核工具名与关键参数，拒绝模型拼造的工具请求。"""
-    name = call.get("name")
-    allowed_tools = state.get("allowed_tools", [])
-    args = call.get("args")
-    if (
-        not isinstance(name, str)
-        or name not in allowed_tools
-        or name not in _TOOLS_BY_NAME
-        or not isinstance(args, dict)
-    ):
-        return False
-
-    permitted_arguments = {
-        "query_order": {"order_no"},
-        "query_logistics": {"order_no"},
-        "search_faq": {"question"},
-    }[name]
-    # 尤其拒绝模型自行提供 user_id；身份只从服务端状态注入工具。
-    if not set(args).issubset(permitted_arguments):
-        return False
-
-    semantic = state.get("semantic_result", {})
-    entities = semantic.get("entities", {}) if isinstance(semantic, dict) else {}
-    expected_order_no = entities.get("order_no") if isinstance(entities, dict) else None
-    requested_order_no = args.get("order_no")
-    if isinstance(requested_order_no, str):
-        requested_order_no = requested_order_no.strip() or None
-
-    if name == "query_order":
-        # 列出或复核候选时，模型不得自行指定一个订单号缩小服务端查询范围。
-        if state.get("order_lookup_pending"):
-            return requested_order_no is None
-        authorized_order_no = state.get("authorized_order_no")
-        if authorized_order_no:
-            return requested_order_no == authorized_order_no
-        if expected_order_no:
-            return requested_order_no == expected_order_no
-        return requested_order_no is None
-
-    if name == "query_logistics":
-        # 明确订单号或服务端刚从本人订单结果中选出的订单号必须精确匹配。
-        authorized_order_no = state.get("authorized_order_no") or expected_order_no
-        return (
-            isinstance(requested_order_no, str)
-            and isinstance(authorized_order_no, str)
-            and requested_order_no == authorized_order_no
-        )
-
-    question = args.get("question")
-    completed_question = state.get("completed_question", "").strip()
-    return isinstance(question, str) and question.strip() == completed_question
-
-
-def _bind_authorized_order_no(call: dict[str, Any], state: SupportState) -> None:
-    """把已由服务端授权的目标订单号绑定到工具参数，避免模型复抄时引入字符差异。"""
-    name = call.get("name")
-    if name not in {"query_order", "query_logistics"}:
-        return
-    if name == "query_order" and state.get("order_lookup_pending"):
-        return
-
-    args = call.get("args")
-    if not isinstance(args, dict) or not set(args).issubset({"order_no"}):
-        return
-    authorized_order_no = state.get("authorized_order_no")
-    semantic = state.get("semantic_result", {})
-    entities = semantic.get("entities", {}) if isinstance(semantic, dict) else {}
-    if not authorized_order_no and isinstance(entities, dict):
-        authorized_order_no = entities.get("order_no")
-    if isinstance(authorized_order_no, str) and authorized_order_no:
-        args["order_no"] = authorized_order_no
-
-
 def _order_lookup_result(state: SupportState) -> dict[str, Any]:
     """只从本人近期订单结果生成列表，或核验选择后开放指定订单的下一步查询。"""
     tool_message = next(
@@ -932,23 +859,47 @@ def build_support_graph():
             return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
         return _semantic_route(recognition, state.get("messages", []))
 
-    async def generate(state: SupportState) -> dict[str, Any]:
-        """生成工具调用轮或最终回答；只有最终回答写入 answer 供 SSE 和保存节点使用。"""
-        direct_reply = state.get("direct_reply", "").strip()
-        if state.get("tool_rejected"):
-            direct_reply = _TOOL_REJECTED_REPLY
-        if direct_reply:
-            # 澄清、能力兜底和被拒绝工具的答复也经过 generate，沿用现有 SSE 收集点。
-            return {"messages": [AIMessage(content=direct_reply)], "answer": direct_reply}
-
+    async def dispatch_tool_call(state: SupportState) -> dict[str, Any]:
+        """由服务端构造已批准的工具调用，避免模型漏调工具或改写订单参数。"""
         allowed_names = state.get("allowed_tools", [])
-        # 只从服务端常量映射中取工具；状态意外包含其他名字时关闭工具并安全兜底。
-        if any(name not in _TOOLS_BY_NAME for name in allowed_names):
-            return {
-                "messages": [AIMessage(content=_TOOL_REJECTED_REPLY)],
-                "answer": _TOOL_REJECTED_REPLY,
-            }
-        turn_model = model.bind_tools([_TOOLS_BY_NAME[name] for name in allowed_names]) if allowed_names else model
+        if len(allowed_names) != 1 or allowed_names[0] not in _TOOLS_BY_NAME:
+            return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
+
+        name = allowed_names[0]
+        args: dict[str, Any] = {}
+        semantic = state.get("semantic_result", {})
+        entities = semantic.get("entities", {}) if isinstance(semantic, dict) else {}
+
+        if name == "search_faq":
+            args["question"] = state.get("completed_question", "").strip()
+        elif name == "query_order":
+            # 列候选或核验列表选择时只查当前用户的近期订单，不接受模型提供的订单号。
+            if not state.get("order_lookup_pending"):
+                order_no = state.get("authorized_order_no")
+                if not order_no and isinstance(entities, dict):
+                    order_no = entities.get("order_no")
+                if isinstance(order_no, str) and order_no.strip():
+                    args["order_no"] = order_no.strip()
+        elif name == "query_logistics":
+            # 物流工具只使用服务端在路由或订单核验阶段授权的目标。
+            order_no = state.get("authorized_order_no")
+            if not isinstance(order_no, str) or not order_no.strip():
+                return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
+            args["order_no"] = order_no.strip()
+
+        call = {
+            "name": name,
+            "args": args,
+            "id": str(uuid4()),
+            "type": "tool_call",
+        }
+        return {"messages": [AIMessage(content="", tool_calls=[call])]}
+
+    async def generate(state: SupportState) -> dict[str, Any]:
+        """仅生成最终答复；查询工具由服务端路由并构造参数后执行。"""
+        direct_reply = state.get("direct_reply", "").strip()
+        if direct_reply:
+            return {"messages": [AIMessage(content=direct_reply)], "answer": direct_reply}
 
         messages = list(state["messages"])
         completed_question = state.get("completed_question", "").strip()
@@ -959,58 +910,25 @@ def build_support_graph():
                     messages[index] = HumanMessage(content=completed_question)
                     break
 
-        if state.get("authorized_order_no"):
-            messages[0] = SystemMessage(
-                content=(
-                    SYSTEM_PROMPT
-                    + "\n\n本轮目标订单号已由服务端验证并授权；调用 query_order 或 "
-                    "query_logistics 时，参数必须使用该订单号。"
-                )
-            )
-        elif state.get("order_lookup_pending"):
-            messages[0] = SystemMessage(
-                content=(
-                    SYSTEM_PROMPT
-                    + "\n\n本轮 query_order 用于服务端列出并核验本人订单候选，调用时必须省略 order_no；"
-                    "不要在这一步先查询任何单笔订单。"
-                )
-            )
-
         response = None
-        async for chunk in turn_model.astream(messages):
+        async for chunk in model.astream(messages):
             response = chunk if response is None else response + chunk
         if response is None:
             raise RuntimeError("模型没有生成回答。")
 
-        # 任何工具调用都先经过 route_after_generate 的服务端白名单和参数检查。
-        has_tool_calls = bool(
-            getattr(response, "tool_calls", []) or getattr(response, "invalid_tool_calls", [])
-        )
-        # SSE 只发送 generate.output.answer；工具白名单仍有效时，模型文本只能是待验证的
-        # 工具轮输出，不能先作为答案发出，再由后续拒绝节点撤回。
-        answer = (
-            ""
-            if has_tool_calls or allowed_names
-            else _content_as_text(response.content).strip()
-        )
+        answer = _content_as_text(response.content).strip()
         return {"messages": [response], "answer": answer}
 
-    def route_after_generate(state: SupportState) -> str:
-        """所有工具调用先做服务端校验；名称或参数不符时绝不进入任何 ToolNode。"""
-        message = state["messages"][-1]
-        calls = getattr(message, "tool_calls", [])
-        invalid_calls = getattr(message, "invalid_tool_calls", [])
-        if len(calls) == 1 and not invalid_calls and isinstance(calls[0], dict):
-            _bind_authorized_order_no(calls[0], state)
-        if not calls and not invalid_calls:
-            if state.get("allowed_tools"):
-                # 仍有业务工具权限时，模型的自然语言不能代替真实查询结果。
-                return "reject_tool_call"
-            return "save_answer"
-        if len(calls) != 1 or invalid_calls or not _arguments_are_authorized(calls[0], state):
-            return "reject_tool_call"
-        # 名称已通过服务端常量表验证，路由目标也只可能是下方静态 ToolNode。
-        return _TOOL_NODE_BY_NAME[calls[0]["name"]]
+    def route_after_intent(state: SupportState) -> str:
+        """语义路由已批准工具时交给服务端构造调用，否则直接生成答复。"""
+        return "dispatch_tool_call" if state.get("allowed_tools") else "generate"
+
+    def route_dispatched_tool(state: SupportState) -> str:
+        """只把服务端构造且位于静态映射中的工具调用交给对应 ToolNode。"""
+        allowed_names = state.get("allowed_tools", [])
+        if len(allowed_names) != 1:
+            return "generate"
+        return _TOOL_NODE_BY_NAME.get(allowed_names[0], "generate")
 
     def after_tools(state: SupportState) -> dict[str, Any]:
         """工具返回后关闭本轮权限；物流前置查单只有唯一目标才开放物流工具。"""
@@ -1024,9 +942,9 @@ def build_support_graph():
         # 查询工具一旦执行完毕就收回白名单，防止模型在同一意图下重复或扩展查询。
         return {"allowed_tools": [], "order_lookup_pending": False}
 
-    def reject_tool_call(state: SupportState) -> dict[str, Any]:
-        """拒绝模型越过意图白名单或篡改订单号的调用，并让 generate 给出安全答复。"""
-        return {"allowed_tools": [], "tool_rejected": True}
+    def route_after_tools(state: SupportState) -> str:
+        """列表选择核验可能开放下一次物流查询；其余查询结果直接生成答复。"""
+        return "dispatch_tool_call" if state.get("allowed_tools") else "generate"
 
     def save_answer(state: SupportState) -> dict[str, str]:
         """模型完成工具循环或澄清/兜底后，仅保存 generate 产出的最终回答。"""
@@ -1046,9 +964,9 @@ def build_support_graph():
     graph.add_node("load_context", load_context)
     graph.add_node("recognize_intent", recognize_intent)
     graph.add_node("route_intent", route_intent)
+    graph.add_node("dispatch_tool_call", dispatch_tool_call)
     graph.add_node("generate", generate)
     graph.add_node("after_tools", after_tools)
-    graph.add_node("reject_tool_call", reject_tool_call)
     graph.add_node("save_answer", save_answer)
     for tool_name, node_name in _TOOL_NODE_BY_NAME.items():
         graph.add_node(node_name, tool_nodes[tool_name])
@@ -1056,19 +974,26 @@ def build_support_graph():
     graph.add_edge(START, "load_context")
     graph.add_edge("load_context", "recognize_intent")
     graph.add_edge("recognize_intent", "route_intent")
-    graph.add_edge("route_intent", "generate")
     graph.add_conditional_edges(
-        "generate",
-        route_after_generate,
+        "route_intent",
+        route_after_intent,
+        {"dispatch_tool_call": "dispatch_tool_call", "generate": "generate"},
+    )
+    graph.add_conditional_edges(
+        "dispatch_tool_call",
+        route_dispatched_tool,
         {
             **{node_name: node_name for node_name in _TOOL_NODE_BY_NAME.values()},
-            "reject_tool_call": "reject_tool_call",
-            "save_answer": "save_answer",
+            "generate": "generate",
         },
     )
     for node_name in _TOOL_NODE_BY_NAME.values():
         graph.add_edge(node_name, "after_tools")
-    graph.add_edge("after_tools", "generate")
-    graph.add_edge("reject_tool_call", "generate")
+    graph.add_conditional_edges(
+        "after_tools",
+        route_after_tools,
+        {"dispatch_tool_call": "dispatch_tool_call", "generate": "generate"},
+    )
+    graph.add_edge("generate", "save_answer")
     graph.add_edge("save_answer", END)
     return graph.compile()
