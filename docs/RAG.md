@@ -1,12 +1,12 @@
 # Aiden RAG
 
-本文说明 Aiden 的 RAG 设计。当前实现了两段离线能力：把既有文档与 FAQ 建成知识库，以及从历史客服对话里挖出问答知识。在线语义检索待补。
+本文说明 Aiden 的 RAG 设计。已实现三段能力：把既有文档与 FAQ 建成知识库、从历史客服对话里挖出问答知识，以及 `search_faq` 的在线语义检索。
 
 ## 离线建库
 
 把知识变成可检索的向量。
 
-范围限定在离线这一段。在线语义检索还没有实现，`search_faq` 也没有接入向量召回，仍是关键词匹配。`docs/Aiden.md` 的 RAG 章记录目标设计与选型过程，其中包含尚未实现的规划内容；已实现的离线建库行为以本文为准。
+`docs/Aiden.md` 的 RAG 章记录目标设计与选型过程，其中包含尚未实现的规划内容；已实现的行为以本文为准。
 
 两条离线路径共用同一套知识块表与同一套向量化流程：
 
@@ -75,7 +75,7 @@ graph TD
 
 只有 category、questions、answer 三项会拼成向量化文本。章节路径、内容类型、关键条款标记和前后块指针只作为元数据保存，不参与 embedding。元数据掺进向量化文本会稀释语义，让相似度偏向结构而不是内容。
 
-拼接格式由 `app.services.rag.embedding_text` 中的 `build_embedding_text` 单点定义，所有入口都必须走它，避免不同路径拼出不一致的文本：
+拼接格式由 `app.services.rag.embedding_text` 中的 `build_embedding_text` 单点定义，离线建库与在线检索两端都必须走它，避免不同路径拼出不一致的文本：
 
 ```python
 def build_embedding_text(category, questions, answer):
@@ -410,7 +410,9 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 索引使用 HNSW，度量用 COSINE。规模不大时 HNSW 的查询延迟比 IVF 更低，这与 `docs/Aiden.md` 的选型一致。
 
-标量字段的作用是后续在线检索时做过滤与加权，例如按分类或来源过滤、给关键条款加权。正文随向量一起存放，检索命中后可以直接取回，MySQL 仍是权威原文。
+标量字段的作用是在线检索时做过滤与加权，例如按分类或来源过滤、给关键条款加权。正文随向量一起存放，检索命中后可以直接取回，MySQL 仍是权威原文。
+
+`KnowledgeVectorStore.search(embedding, limit)` 提供单路 dense 相似度检索，返回 `chunk_id`、COSINE 相似度与返回顺序；它只回答「哪条向量最像」，不判断这条知识是否仍然有效。集合不存在或连接失败时会直接抛错，不返回空列表——把服务故障伪装成「没有相关知识」会让 Agent 对用户说出无法核实的结论。
 
 `get_collection_stats` 返回的 `row_count` 统计的是物理存储版本数，upsert 覆盖后旧版本仍在，直到后台压缩完成才收敛。判断集合里有没有重复向量必须按主键去重计数，不能用这个值。
 
@@ -501,13 +503,82 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 - Milvus：集合按 HNSW 与 COSINE 建索引，同名主键连续 upsert 两次后记录数仍为 1
 - 检索：14 条真实问法的离线评测，top-1 命中 86%，top-3 命中 100%
 
-尚未验证的部分：真实 BGE-M3（1024 维）尚未跑过，当前使用的是 bge-small-zh-v1.5。离线建库也尚未接入任何 Agent 工具，`search_faq` 仍走关键词匹配。
+尚未验证的部分：真实 BGE-M3（1024 维）尚未跑过，当前使用的是 bge-small-zh-v1.5。离线建库已经接入 Agent 工具：`search_faq` 走 Milvus 向量召回，见下一节。
+
+## 在线语义检索
+
+`search_faq` 的检索路径。离线把知识写成向量，在线把问题写成向量，两端共用同一份模板与同一个向量客户端。
+
+```mermaid
+graph TD
+    q["Agent 调用 search_faq(question)"] --> text["build_query_embedding_text<br/>拼成与知识块同构的文本"]
+    text --> bge["BGE 服务 /v1/embeddings<br/>L2 归一化 dense 向量"]
+    bge --> milvus["Milvus knowledge 集合<br/>单路 dense 相似度 Top-K"]
+    milvus --> mysql["MySQL knowledge_chunks<br/>按主键回表取权威原文"]
+    mysql --> filter{"状态是 vectorized 吗"}
+    filter -->|否| drop["丢弃该命中"]
+    filter -->|是| keep["保留，按相似度排序"]
+    drop --> trim["截取最终条数"]
+    keep --> trim
+    trim --> json["返回 status results message"]
+```
+
+代码分三层：`app.services.rag.retrieval` 负责编排，`app.persistence.milvus.knowledge_store` 的 `search` 负责向量召回，`app.persistence.mysql.knowledge` 的 `get_vectorized_chunks_by_ids` 负责回表。工具入口是 `app.services.tools.customer` 中的 `search_faq`。
+
+### 为什么 query 也要走同一份模板
+
+在线 query 复用 `build_embedding_text`，由 `app.services.rag.embedding_text` 中的 `build_query_embedding_text` 拼成 `分类：用户提问 / 问题：<用户问句>`：分类用固定值、答案留空。
+
+理由是模板里的固定字段标签本身参与向量语义。如果把裸问句直接送去编码，它和库中带标签的文本就落在向量空间的不同位置，相似度不再可比。分类取固定值而不是知识块的真实分类，是因为 query 侧没有权威分类，用某条知识的分类去凑等于凭空引入「这是哪一类」的猜测；「问题」段才是 query 与知识块唯一共有的语义锚点。
+
+### 为什么候选要比结果多
+
+Milvus 命中不等于知识有效。回表时只接受 `vector_status = 'vectorized'` 的块，其余一律丢弃：
+
+| 命中项状态 | 为什么会出现在 Milvus | 处理 |
+| --- | --- | --- |
+| pending | 向量已写入，但回填状态那一步中断了 | 丢弃 |
+| superseded | 内容已更新，旧向量尚未删除或索引尚未收敛 | 丢弃 |
+| need_manual_review | 正常不会进 Milvus；集合被人工写入时兜底 | 丢弃 |
+| MySQL 中查不到该主键 | 整库重建或整表清空后残留的孤儿向量 | 丢弃 |
+
+因此送给 Milvus 的候选数默认取 20，大于最终返回的 5 条：过滤掉失效命中后仍能凑满 Top-K。两个值都由配置控制。
+
+### 不做的事
+
+检索路径上只有一路 dense 向量相似度。没有关键词召回、没有 MySQL `LIKE` 兜底、没有混合检索或重排，因此排序只有一个可解释的来源。向量服务或 Milvus 不可用时，工具返回既有的通用错误结果，不会静默退回关键词查询：那会把「检索服务坏了」表现成「知识库里没有这条」。
+
+### question 字段怎么来
+
+`knowledge_chunks.questions` 是问法列表，工具返回的单数 `question` 按优先级取第一个非空项：先用全角竖线连接 `questions` 里的全部问法，`questions` 为空时退回 `section_path`。商品 FAQ 这里显示它在 `faq` 表里的真实问题；政策与手册块没有天然问法，显示的是章节标题，与离线入库时的选择保持一致。
+
+### 配置
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| RAG_ONLINE_RESULT_LIMIT | 5 | 最终交给 Agent 的知识条数上限 |
+| RAG_ONLINE_CANDIDATE_LIMIT | 20 | 送给 Milvus 的候选条数；小于结果数时按结果数取值 |
+
+在线检索复用离线那套 `EMBEDDING_*` 与 `MILVUS_*` 配置，不允许两段各配一套向量服务：query 向量必须与库中向量出自同一个模型和同一份归一化方式。
+
+### 已验证的范围
+
+用 bge-small-zh-v1.5（512 维）、真实 Milvus 与 38 个知识块（3 份 Markdown 文档 + 2 条 faq 行）验证：
+
+- 语义召回：问法「邮费是多少」不含「运费」二字，top-1 命中「退货政策 > 运费承担规则」；「尺码不合适能换吗」top-1 命中商品 FAQ「鞋子的尺码不准怎么办」
+- 契约兼容：成功返回 `status`、`results`、`message`，每条结果只有 `category`、`question`、`answer`；空问题、超长问题、空结果的行为与接入前一致
+- 故障语义：向量服务不可用时返回 `status = error` 与通用错误文案，不退回关键词查询
+- 失效过滤：把一条块置为 `superseded` 并删除其向量后，同问题的检索结果里不再出现该块
+- 图内链路：Agent 图路由到 `search_faq`、服务端构造 `question` 参数、工具结果进入最终回答依据，这条链路在替换模型为替身的情况下完整跑通
+- 中断补齐：Milvus 已写入、MySQL 仍为 `pending` 时重跑 `vectorize`，块被补齐为 `vectorized`，Milvus 主键去重计数不变，无重复向量
+
+尚未验证：真实 BGE-M3（1024 维）与真实 LLM 措辞下的最终答复质量；本轮的图内验证替换了模型客户端，只验证链路与依据来源。
 
 ## 历史对话挖掘
 
 从历史客服对话里挖出可复用的商品或服务知识。与上一节的差别在于知识不是人写好的，而是从对话里抽出来的，因此多了三道必须处理的关卡：只从可信对话里抽、抽取前后都要去掉个人信息、以及候选必须整体去重之后才能入库。
 
-范围同样限定在离线。挖掘出的知识进入同一张 `knowledge_chunks` 表、走同一套向量化流程，`search_faq` 与在线检索不受影响。
+范围限定在挖掘这一段。挖掘出的知识进入同一张 `knowledge_chunks` 表、走同一套向量化流程，因此可以像文档或 FAQ 一样被 `search_faq` 检索到；本节只说明抽取与入库，在线检索见上一节。
 
 ### 整体流程
 

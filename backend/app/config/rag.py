@@ -1,8 +1,11 @@
-"""离线建库（RAG）相关配置。
+"""RAG 相关配置：离线建库参数与在线语义检索参数。
 
-与 `app.config.settings` 分开，是因为这里的参数只服务于“读取知识 -> 切分 -> 向量化 ->
-写入 Milvus”的离线流程，在线对话链路不读这些值。所有外部地址和凭据都从进程环境
+与 `app.config.settings` 分开，是因为这两组参数只服务于 RAG 流程（离线建库与 `search_faq`
+的向量召回），不参与订单、物流等其他对话链路。所有外部地址和凭据都从进程环境
 （本地 `backend/.env`）读取，示例文件里只放占位值。
+
+在线检索复用这里的 `embedding_*` 与 `milvus_*`：query 向量必须与库中向量出自同一个模型和
+同一份归一化方式，否则相似度不可比，因此两段流程不允许各自配置向量服务。
 
 切分参数在这里集中定义，长度一律以 **BGE-M3 的 token** 为准，换算方式见
 `app.services.rag.length`：安装了 `tokenizers` 且配置了本地 tokenizer.json 时精确计数，
@@ -38,10 +41,12 @@ def _env_float(name: str, default: float) -> float:
 
 
 class RagSettings:
-    """离线建库的运行时参数。
+    """RAG 流程的运行时参数。
 
     `chunk_budget_tokens` 是实际用于装正文的 token 预算，等于模型上限减去长度计量的
     不确定度和安全余量：估算模式下必须留出余量，否则真实 token 数可能越过模型上限。
+
+    在线检索相关参数（`online_*`）只影响 `search_faq` 的召回，不参与离线切分。
     """
 
     # --- BGE-M3 dense 向量服务（OpenAI 兼容 /v1/embeddings 端点）---
@@ -63,6 +68,14 @@ class RagSettings:
     milvus_token: str = os.getenv("MILVUS_TOKEN", "").strip()
     milvus_collection: str = os.getenv("MILVUS_KNOWLEDGE_COLLECTION", "knowledge").strip()
     milvus_insert_batch_size: int = _env_int("MILVUS_INSERT_BATCH_SIZE", 64)
+
+    # --- 在线语义检索（search_faq）---
+    # 最终交给 Agent 的知识条数上限。
+    online_result_limit: int = _env_int("RAG_ONLINE_RESULT_LIMIT", 5)
+    # 送给 Milvus 的候选条数。之所以取得比最终结果多，是因为 Milvus 命中项还要回 MySQL 校验
+    # “当前有效且已向量化”：Milvus 与 MySQL 之间允许存在短暂不一致（回填前中断、向量已删但
+    # 索引尚未收敛等），多取候选才能在过滤掉失效项之后仍能凑满最终条数。
+    online_candidate_limit: int = _env_int("RAG_ONLINE_CANDIDATE_LIMIT", 20)
 
     # --- 切分参数 ---
     # 单块上限。注意：真正的上限还要受 EMBEDDING_MAX_SEQ_TOKENS 约束（取两者较小值），
@@ -130,6 +143,20 @@ class RagSettings:
         after_margin = ceiling - self.measurement_uncertainty_tokens - self.safety_margin_tokens
         bounded = ceiling - self.effective_max_sentence_tokens
         return max(min(after_margin, bounded), 1)
+
+    @property
+    def effective_online_result_limit(self) -> int:
+        """生效的最终返回条数：至少 1 条，值写小了按 1 条处理。"""
+        return max(self.online_result_limit, 1)
+
+    @property
+    def online_candidate_pool(self) -> int:
+        """实际请求 Milvus 的候选条数。
+
+        候选池不允许小于最终条数，否则过滤掉任何一条失效命中都会凑不满结果，而这与
+        “多取候选以补足过滤后的 Top-K”的意图相反；配置写小了就按最终条数取值。
+        """
+        return max(self.online_candidate_limit, self.online_result_limit, 1)
 
     @property
     def embedding_service_configured(self) -> bool:

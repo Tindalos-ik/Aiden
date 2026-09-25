@@ -1,7 +1,8 @@
 """向量化文本的唯一拼接格式。
 
 送进 BGE-M3 dense embedding 的文本 **只** 由 category、questions、answer 三段拼成，格式由
-本模块单点定义：任何调用方都必须走 `build_embedding_text`，避免不同入口拼出不一致的文本。
+本模块单点定义：离线建库与在线检索都必须走 `build_embedding_text`，避免两端拼出不一致的
+文本——query 与库中向量的模板不一致，相似度就失去可比性。
 
 明确不参与 embedding 的内容：section_path、content_type、is_key_clause、前后块指针。它们只
 作为 Milvus 的标量字段和 MySQL 的元数据保存，用于过滤与排序加权。
@@ -26,6 +27,10 @@ _CATEGORY_LABEL = "分类"
 _QUESTIONS_LABEL = "问题"
 _ANSWER_LABEL = "答案"
 
+# 在线 query 侧的固定分类值。它不是业务分类，只用于让 query 文本与知识块文本在同一个模板下
+# 对齐；知识块的 category 是权威业务分类，不能被 query 冒用。
+QUERY_CATEGORY_LABEL = "用户提问"
+
 
 def build_embedding_text(category: str, questions: list[str] | tuple[str, ...], answer: str) -> str:
     """按唯一格式拼接向量化文本。
@@ -40,6 +45,20 @@ def build_embedding_text(category: str, questions: list[str] | tuple[str, ...], 
         lines.append(f"{_QUESTIONS_LABEL}：{_QUESTIONS_SEPARATOR.join(clean_questions)}")
     lines.append(f"{_ANSWER_LABEL}：{answer.strip()}")
     return "\n".join(lines)
+
+
+def build_query_embedding_text(question: str) -> str:
+    """把用户在线提问拼成与知识块同构的向量化文本。
+
+    在线检索必须复用 `build_embedding_text`，让 query 向量与库中向量出自同一份模板：模板里
+    的固定字段标签本身参与向量语义，如果 query 直接送裸问句，它就与库中带标签的文本落在
+    向量空间的不同位置，相似度不再可比。
+
+    分类固定用 `QUERY_CATEGORY_LABEL`、答案留空：query 侧没有权威分类和正文，用知识块的真实
+    category 去凑会凭空引入“这是什么分类”的猜测；而“问题”段是知识块与 query 唯一共有的语义
+    锚点，因此只保留它。
+    """
+    return build_embedding_text(QUERY_CATEGORY_LABEL, [question], "")
 
 
 def embedding_fingerprint() -> str:

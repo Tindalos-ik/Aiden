@@ -303,7 +303,7 @@ return graph.compile()
 
 ### 例一：FAQ 咨询
 
-识别为 `faq` 且置信度通过后，服务端把 `search_faq` 放入 `allowed_tools`。模型只能用补全后的当前问题作为 `question` 调工具。工具返回真实 FAQ 候选后，服务端收回权限，再让模型基于这些结果回答；没有结果时不能把模型记忆或 `policies` 表当作查证结果。
+识别为 `faq` 且置信度通过后，服务端把 `search_faq` 放入 `allowed_tools`。模型只能用补全后的当前问题作为 `question` 调工具，服务端在 `dispatch_tool_call` 中把 `completed_question` 原样写入参数。工具返回知识候选后，服务端收回权限，再让模型基于这些结果回答；没有结果或结果与问题对不上时，模型必须说明暂时无法核实，不能把模型记忆或 `policies` 表当作查证结果，也不能因为知识块带章节标题就补出条款细节。
 
 ### 例二：用户提供明确订单号查物流
 
@@ -327,11 +327,11 @@ return graph.compile()
 | --- | --- | --- |
 | `query_order` | 查询当前用户的订单及下单时商品快照；不传号码时查询最近五笔。 | `backend/app/persistence/mysql/queries.py` 中的 `list_user_orders()`。 |
 | `query_logistics` | 查询指定订单的包裹、承运商、运单和轨迹节点。 | `backend/app/persistence/mysql/queries.py` 中的 `get_owned_order_with_shipments()`。 |
-| `search_faq` | 检索启用中的常见问题，返回匹配问题、答案和分类。 | `backend/app/persistence/mysql/queries.py` 中的 `search_active_faq()`。 |
+| `search_faq` | 按语义相似度检索已入库的常见问题、政策与手册知识，返回匹配问题、答案和分类。 | 问题经 `backend/app/services/rag/retrieval.py` 中的 `semantic_search()` 编码成 dense 向量，先由 `backend/app/persistence/milvus/knowledge_store.py` 中的 `KnowledgeVectorStore.search()` 召回 Milvus 候选，再由 `backend/app/persistence/mysql/knowledge.py` 中的 `get_vectorized_chunks_by_ids()` 回表取权威原文。 |
 
-`query_order` 和 `query_logistics` 的函数签名使用 `InjectedState("user_id")`，因此模型提供的 JSON 参数不含身份字段。工具打开一个短生命周期的 SQLAlchemy Session，整理成普通 JSON 字符串后关闭 Session；模型不会拿到 ORM 对象或数据库连接。关系查询的 `WHERE` 子句会包含用户 ID。实现见 `backend/app/services/tools/customer.py` 中的 `query_order()`、`query_logistics()` 和 `search_faq()`。
+`query_order` 和 `query_logistics` 的函数签名使用 `InjectedState("user_id")`，因此模型提供的 JSON 参数不含身份字段。这两个工具打开一个短生命周期的 SQLAlchemy Session，整理成普通 JSON 字符串后关闭 Session；模型不会拿到 ORM 对象或数据库连接。关系查询的 `WHERE` 子句会包含用户 ID。实现见 `backend/app/services/tools/customer.py` 中的 `query_order()`、`query_logistics()` 和 `search_faq()`。
 
-FAQ 检索当前是有界关键词 `LIKE` 匹配和简单排序，不是向量 RAG 或语义检索。数据库里虽有政策相关模型/查询代码，当前三个 Agent 工具没有调用独立政策查询；政策问题只有 FAQ 实际返回了相关条目时才有依据。
+知识检索只有一路 dense 向量相似度，没有关键词召回、`LIKE` 兜底、混合检索或重排；Milvus 检索期间不持有 MySQL Session，回表才开短事务。命中项只有当前有效且 `vector_status = 'vectorized'` 的块会交给模型，向量服务或 Milvus 故障时返回通用错误结果，不退回关键词查询。数据库里虽有政策相关模型/查询代码，当前三个 Agent 工具没有调用独立政策查询；政策问题只有知识库（`knowledge_chunks`）实际返回了相关条目时才有依据。
 
 ## 10. SSE 是怎样发到前端的
 
@@ -370,14 +370,14 @@ data: {}
 
 | 已由当前代码实现 | 还属于规划或未接入 Agent 的能力 |
 | --- | --- |
-| 登录 Cookie、用户会话和消息持久化 | 在线语义检索与向量召回 |
-| 订单及商品快照查询 | 摘要记忆 |
-| 订单物流查询 | 退货退款办理流程 |
-| 关键词 FAQ 检索 | 独立政策查询和售后进度查询 |
-| SSE 文本回答 | 创建工单、人工转接和员工接管流程 |
-| 离线建库：Markdown 与 FAQ 向量化到 Milvus | 运营工作台和完整链路 trace |
+| 登录 Cookie、用户会话和消息持久化 | 摘要记忆 |
+| 订单及商品快照查询 | 退货退款办理流程 |
+| 订单物流查询 | 独立政策查询（版本与生效期）和售后进度查询 |
+| 在线语义检索：`search_faq` 的向量召回与失效过滤 | 创建工单、人工转接和员工接管流程 |
+| SSE 文本回答 | 运营工作台和完整链路 trace |
+| 离线建库：Markdown 与 FAQ 向量化到 Milvus | 关键词召回、混合检索与重排 |
 
-离线建库的实现位于 `backend/app/services/rag/`，从 `backend/scripts/build_knowledge_base.py` 触发；它只负责把知识写入 MySQL 与 Milvus，尚未被任何 Agent 工具调用。`search_faq` 仍然是关键词匹配，没有接入向量检索。表结构、向量状态与建库命令见 [`数据层.md`](数据层.md) 的离线建库一节。
+离线建库的实现位于 `backend/app/services/rag/`，从 `backend/scripts/build_knowledge_base.py` 触发；它把知识写入 MySQL 与 Milvus。在线检索由 `backend/app/services/rag/retrieval.py` 的 `semantic_search()` 提供，`search_faq` 已经是它的调用方：问题经同一套 BGE dense 模型编码，在 Milvus 召回候选，再回 MySQL `knowledge_chunks` 取权威原文。表结构、向量状态与建库命令见 [`数据层.md`](数据层.md) 的离线建库一节，检索细节见 [`RAG.md`](RAG.md#在线语义检索)。
 
 判断功能是否可用时，沿路由、图节点、工具和数据库查询找到实际调用链。`docs/Aiden.md` 主要呈现目标设计；可配合阅读 `docs/语义识别与意图路由前置层.md`、`docs/tools.md` 和 `docs/数据层.md`。
 
@@ -390,5 +390,6 @@ data: {}
 | 发送消息 API、SSE 生命周期 | `backend/app/api/routes/conversations.py` 中的 `stream_message()`；`backend/app/api/sse.py` 中的 `sse_event()` |
 | Prompt、分类、订单目标校验、图节点 | `backend/app/agent/intent.py` 中的 `INTENT_RECOGNITION_PROMPT` 和 `IntentRecognition`；`backend/app/agent/state.py` 中的 `SupportState`；`backend/app/agent/graph.py` 中的 `SYSTEM_PROMPT`、`_semantic_route()` 和 `build_support_graph()` |
 | Agent 历史裁剪与消息状态 | `backend/app/persistence/mysql/chat.py` 中的 `recent_messages()`、`finish_assistant_message()` |
-| 订单、物流、FAQ 数据查询 | `backend/app/services/tools/customer.py` 中的 `query_order()`、`query_logistics()`、`search_faq()`；`backend/app/persistence/mysql/queries.py` 中的 `list_user_orders()`、`get_owned_order_with_shipments()`、`search_active_faq()` |
+| 订单、物流、FAQ 数据查询 | `backend/app/services/tools/customer.py` 中的 `query_order()`、`query_logistics()`、`search_faq()`；`backend/app/persistence/mysql/queries.py` 中的 `list_user_orders()`、`get_owned_order_with_shipments()` |
+| 在线语义检索链路 | `backend/app/services/rag/retrieval.py` 中的 `semantic_search()`；`backend/app/services/rag/embedding_text.py` 中的 `build_query_embedding_text()`；`backend/app/persistence/milvus/knowledge_store.py` 中的 `KnowledgeVectorStore.search()`；`backend/app/persistence/mysql/knowledge.py` 中的 `get_vectorized_chunks_by_ids()` |
 | 浏览器 SSE 解码 | `frontend/src/api/remote.ts` 中的 `readSseStream()` 和 `sendMessageStream()` |

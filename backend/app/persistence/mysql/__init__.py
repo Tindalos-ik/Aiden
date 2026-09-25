@@ -29,7 +29,6 @@ from .queries import (
     list_conversation_messages,
     list_order_tracking_events,
     list_user_orders,
-    search_active_faq,
 )
 
 __all__ = [
@@ -59,6 +58,5 @@ __all__ = [
     "list_conversation_messages",
     "list_order_tracking_events",
     "list_user_orders",
-    "search_active_faq",
     "session_scope",
 ]

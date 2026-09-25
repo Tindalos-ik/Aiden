@@ -1,7 +1,8 @@
-"""Milvus `knowledge` 集合的建表、写入与删除封装。
+"""Milvus `knowledge` 集合的建表、写入、删除与相似度检索封装。
 
 集合只负责“按相似度检索”，原文与业务字段的权威来源始终是 MySQL 的 knowledge_chunks 表。
-这里的标量字段用于在线检索时做过滤和排序加权，集合本身不承担业务一致性。
+这里的标量字段用于在线检索时做过滤和排序加权，集合本身不承担业务一致性；`search` 因此只
+返回候选与相似度，有效性判断由 MySQL 侧完成。
 
 幂等的关键：`chunk_id` 就是 MySQL knowledge_chunks 的主键。写入使用 upsert 而不是 insert，
 所以“Milvus 已写成功、MySQL 状态尚未回填”时重跑只会覆盖同一条向量，不会产生重复向量。
@@ -21,6 +22,25 @@ from app.config.rag import rag_settings
 CHUNK_ID_FIELD = "chunk_id"
 VECTOR_FIELD = "embedding"
 METADATA_FIELD = "metadata"
+# HNSW 的度量方式。建索引与检索必须一致，否则相似度含义不同、排序不可比。
+METRIC_TYPE = "COSINE"
+
+
+def _hit_field(hit: Any, name: str) -> Any:
+    """从 pymilvus 命中项里取字段值，兼容 dict 与带 entity 的两种返回形态。
+
+    不同版本的 pymilvus 把 `chunk_id` 放在命中项本身还是放在 `entity` 里并不一致，这里两种
+    都试；取不到返回 None，由调用方决定是跳过还是报错。
+    """
+    if isinstance(hit, dict) and name in hit:
+        return hit[name]
+    entity = hit.get("entity") if isinstance(hit, dict) else getattr(hit, "entity", None)
+    if isinstance(entity, dict):
+        return entity.get(name)
+    getter = getattr(entity, "get", None)
+    if callable(getter):
+        return getter(name)
+    return None
 
 
 @dataclass(frozen=True)
@@ -43,6 +63,19 @@ class KnowledgeVector:
     chunk_index: int
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class KnowledgeMatch:
+    """一次相似度检索的命中项。
+
+    `score` 是 COSINE 相似度（越大越相似），`rank` 是 Milvus 返回顺序（0 为最相似）。检索只
+    说明“这条向量在库里最像”，不代表这条知识仍然有效——有效性与原文一律以 MySQL 为准。
+    """
+
+    chunk_id: str
+    score: float
+    rank: int
 
 
 class KnowledgeVectorStore:
@@ -143,6 +176,44 @@ class KnowledgeVectorStore:
             self._client.flush(collection_name=self._collection)
             written.extend(row[CHUNK_ID_FIELD] for row in batch)
         return written
+
+    def search(self, embedding: list[float], *, limit: int) -> list[KnowledgeMatch]:
+        """按 dense 向量相似度检索候选，返回按相似度降序、序号从 0 开始的命中列表。
+
+        只做单路 dense 检索：没有关键词召回、没有多路融合，也没有重排——知识块的向量化文本
+        已经由 category、questions、answer 共同构成，在这里再叠一层文本匹配只会让排序不可解释。
+
+        集合不存在时 `pymilvus` 会抛错，本方法不做兜底：调用方必须区分“检索服务不可用”与
+        “没有相关知识”，静默返回空列表会把服务故障伪装成知识缺失。
+        """
+        if not embedding or limit <= 0:
+            return []
+        results = self._client.search(
+            collection_name=self._collection,
+            data=[embedding],
+            limit=limit,
+            # ef 只影响 HNSW 的检索宽度与召回率，取值高于建索引时的 efConstruction 才有意义。
+            search_params={"metric_type": METRIC_TYPE, "params": {"ef": 64}},
+            output_fields=[CHUNK_ID_FIELD],
+        )
+        matches: list[KnowledgeMatch] = []
+        for rank, hit in enumerate(results[0] if results else []):
+            # 主键在不同版本里可能落在 chunk_id、id 或 pk 上，逐个尝试后仍取不到就跳过这条命中，
+            # 不让单条异常结果影响整次检索。
+            chunk_id = next(
+                (value for value in (_hit_field(hit, key) for key in (CHUNK_ID_FIELD, "id", "pk")) if value),
+                None,
+            )
+            if not chunk_id:
+                continue
+            matches.append(
+                KnowledgeMatch(
+                    chunk_id=str(chunk_id),
+                    score=float(_hit_field(hit, "distance") or 0.0),
+                    rank=rank,
+                )
+            )
+        return matches
 
     def delete_by_chunk_ids(self, chunk_ids: Iterable[str]) -> int:
         """按 chunk_id 删除向量，返回请求删除的条数。

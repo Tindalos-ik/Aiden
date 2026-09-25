@@ -398,7 +398,10 @@ def list_active_faq_rows(limit: int | None = None) -> list[dict[str, str | None]
 
 
 def get_chunks_by_ids(chunk_ids: list[str]) -> list[KnowledgeChunkRow]:
-    """按主键读取知识块，供后续在线检索按向量命中结果回表取权威原文。"""
+    """按主键读取知识块，不过滤状态，供运维排查与人工核对使用。
+
+    在线检索不使用本函数：它必须排除失效块，因此走 `get_vectorized_chunks_by_ids`。
+    """
     if not chunk_ids:
         return []
     factory = get_session_factory()
@@ -408,13 +411,38 @@ def get_chunks_by_ids(chunk_ids: list[str]) -> list[KnowledgeChunkRow]:
     return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
 
 
+def get_vectorized_chunks_by_ids(chunk_ids: list[str]) -> list[KnowledgeChunkRow]:
+    """按主键读取“当前有效且已向量化”的知识块，供在线检索回表取权威原文。
+
+    过滤条件必须落在 SQL 里，而不是读回来再筛：Milvus 与 MySQL 允许存在短暂不一致，命中项可能
+    已经 `superseded`（内容更新后旧向量尚未删除或索引尚未收敛）、可能仍是 `pending`
+    （向量写进了 Milvus，但回填状态那一步在中断前没跑完），也可能是 `need_manual_review`
+    （人工拆分前不该被当作知识）。这些命中项一律不能交给 Agent。
+
+    返回顺序与传入的 `chunk_ids` 一致：在线检索按相似度排序后传入，调用方需要保留该排序。
+    """
+    if not chunk_ids:
+        return []
+    factory = get_session_factory()
+    with factory() as session:
+        rows = session.scalars(
+            select(KnowledgeChunk).where(
+                KnowledgeChunk.id.in_(chunk_ids),
+                KnowledgeChunk.vector_status == VECTOR_STATUS_VECTORIZED,
+            )
+        )
+        by_id = {chunk.id: _row_to_chunk(chunk) for chunk in rows}
+    return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
+
+
 def list_knowledge_chunks(
     *, category: str | None = None, limit: int = 20, offset: int = 0
 ) -> list[KnowledgeChunkRow]:
-    """分页读取处于 active 的知识块（已向量化或待人工处理），作为后续在线检索的读取接口。
+    """分页读取处于 active 的知识块（已向量化或待人工处理），供运维人工核对切分结果。
 
-    仅返回没有被 superseded 的块；`category` 可选，用于按分类浏览。后续在线语义检索在此接口
-    之上叠加 Milvus 召回，本阶段不涉及检索逻辑本身。
+    仅返回没有被 superseded 的块；`category` 可选，用于按分类浏览。它不是检索接口：在线
+    语义检索由 `app.services.rag.retrieval.semantic_search` 走 Milvus 召回，只接受已向量化
+    的块，本函数的 pending / need_manual_review 结果不会进入在线结果。
     """
     factory = get_session_factory()
     with factory() as session:

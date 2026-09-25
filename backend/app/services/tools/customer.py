@@ -2,6 +2,9 @@
 
 每个工具从 LangGraph 已认证状态注入 user_id，模型参数中不包含身份字段；数据库
 Session 只在同步查询期间打开，返回给模型的内容是经过筛选的普通 Python 数据。
+
+`search_faq` 是唯一的语义检索入口：问题和知识都用同一套 BGE-M3 dense 向量，检索在 Milvus
+完成，原文由 MySQL 的 `knowledge_chunks` 提供。这里不保留任何关键词或 LIKE 兜底逻辑。
 """
 
 from __future__ import annotations
@@ -13,16 +16,19 @@ from typing import Annotated, Any
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
+from app.config.rag import rag_settings
 from app.persistence.mysql.database import get_session_factory
 from app.persistence.mysql.queries import (
     get_owned_order_with_shipments,
     list_user_orders,
-    search_active_faq,
 )
+from app.services.rag.retrieval import RetrievalError, semantic_search
 
 _TOOL_ERROR = "查询暂时无法完成，请稍后重试。"
 _ORDER_LIMIT = 5
-_FAQ_LIMIT = 5
+# knowledge_chunks.questions 是多问法列表，塞进单数 question 字段时用全角竖线连接，
+# 与离线向量化文本里的分隔符保持一致，便于人工核对。
+_QUESTIONS_SEPARATOR = "｜"
 
 
 def _json_result(data: dict[str, Any]) -> str:
@@ -157,9 +163,32 @@ def query_logistics(
         return _json_result({"status": "error", "message": _TOOL_ERROR, "shipments": []})
 
 
+def _display_question(chunk_questions: list[str], section_path: str) -> str:
+    """把知识块的多问法映射成结果里唯一的 question 字段。
+
+    映射规则按优先级取第一个非空项，保证同一条知识每次给出同一个问题文本：
+
+    1. `questions` 里的全部问法用全角竖线连接。商品 FAQ 这里就是它在 `faq` 表里的真实问题；
+       政策与手册块没有天然问法，离线入库时用章节标题（直接上级标题 + 本节标题）充当问法，
+       所以这一项会直接显示章节标题。
+    2. `questions` 为空时退回 `section_path`（形如「退货政策 > 七天无理由退货」）。
+    3. 两者都为空时给出空串，由调用方决定是否用分类兜底。
+
+    不在这里截断或改写问法文本：它是 Agent 判断“这条知识是否对得上用户问题”的依据之一。
+    """
+    questions = [value.strip() for value in chunk_questions if value and value.strip()]
+    if questions:
+        return _QUESTIONS_SEPARATOR.join(questions)
+    return section_path.strip()
+
+
 @tool
 def search_faq(question: str) -> str:
-    """根据用户的问题检索启用中的 FAQ，返回匹配的问题、答案和分类。"""
+    """按语义相似度检索已入库的常见问题、政策与手册知识，返回匹配问题、答案和分类。
+
+    出参契约与接入向量检索前保持一致：成功返回 `status`、`results`、`message`，每个结果只有
+    `category`、`question`、`answer` 三个字段；不把 ORM 对象、向量或内部异常交给模型。
+    """
     normalized_question = question.strip()
     if not normalized_question:
         return _json_result(
@@ -171,21 +200,30 @@ def search_faq(question: str) -> str:
         )
 
     try:
-        with get_session_factory()() as session:
-            results = search_active_faq(
-                session,
-                normalized_question,
-                limit=_FAQ_LIMIT,
-            )
-        return _json_result(
-            {
-                "status": "ok",
-                "results": results,
-                "message": "" if results else "FAQ 中没有找到匹配条目。",
-            }
-        )
+        # 最终条数上限来自配置（RAG_ONLINE_RESULT_LIMIT，默认 5 条）。
+        hits = semantic_search(normalized_question, limit=rag_settings.effective_online_result_limit)
+    except RetrievalError:
+        # 向量服务或 Milvus 不可用时明确报错，不退回关键词查询：静默降级会把“检索服务故障”
+        # 表现成“没有这条知识”，让 Agent 对用户说出无法核实的结论。
+        return _json_result({"status": "error", "message": _TOOL_ERROR, "results": []})
     except Exception:
         return _json_result({"status": "error", "message": _TOOL_ERROR, "results": []})
+
+    results = [
+        {
+            "category": hit.chunk.category,
+            "question": _display_question(hit.chunk.questions, hit.chunk.section_path),
+            "answer": hit.chunk.answer,
+        }
+        for hit in hits
+    ]
+    return _json_result(
+        {
+            "status": "ok",
+            "results": results,
+            "message": "" if results else "知识库中没有找到匹配条目。",
+        }
+    )
 
 
 READ_ONLY_CUSTOMER_TOOLS = [query_order, query_logistics, search_faq]
