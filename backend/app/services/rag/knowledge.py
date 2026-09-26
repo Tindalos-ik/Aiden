@@ -3,20 +3,19 @@
 职责分两层：
 
 * `parse_markdown_document` 只做语法解析，把文档还原成保留章节归属的章节树；
-* `build_document_chunks` / `build_faq_chunks` 把章节和 FAQ 行变成待入库的知识块，在这里
-  决定 category、questions、section_path、content_type 和关键条款标记。
+* `build_document_chunks` / `build_faq_chunks` 把章节和 FAQ 行变成待入库的知识块，并补齐
+  category、questions；文档块的 section_path、content_type 和关键条款标记由切分层保留。
 
-商品 FAQ 的 questions 使用真实问题；政策或手册块没有天然问题，questions 退回所在章节
-标题（标题本身就是用户会问的说法），category 使用上级标题路径。
+商品 FAQ 的 questions 使用真实问题；政策或手册块没有天然问题，questions 使用所属章节
+标题，category 使用该章节完整的上级标题路径。
 
-章节树用“路径 -> 章节”的字典维护，标题层级只需按路径前缀归位，不需要在解析过程中反复
-重建父节点引用；章节对象本身是不可变数据类，追加内容时替换整棵路径上的对象。
+解析时按标题出现顺序维护独立节点，最终转成不可变的章节树；同名标题不会覆盖先前章节。
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field
 from hashlib import sha256
 
 from app.config.rag import rag_settings
@@ -58,51 +57,46 @@ class ParsedDocument:
     sections: tuple[SectionData, ...]
 
 
+@dataclass
+class _SectionNode:
+    """解析中的章节节点；用对象身份区分同路径的多次标题出现。"""
+
+    title: str
+    level: int
+    path: tuple[str, ...]
+    blocks: list[Block] = field(default_factory=list)
+    children: list[_SectionNode] = field(default_factory=list)
+
+    def freeze(self) -> SectionData:
+        """按文档顺序生成供切分层使用的不可变章节树。"""
+        return SectionData(
+            title=self.title,
+            level=self.level,
+            path=self.path,
+            blocks=tuple(self.blocks),
+            children=tuple(child.freeze() for child in self.children),
+        )
+
+
 class _SectionTree:
-    """解析过程中的可变章节树：用路径索引定位章节，再回写不可变节点。"""
+    """按标题出现顺序保存节点，避免同名标题按文字路径互相覆盖。"""
 
     def __init__(self) -> None:
-        self._nodes: dict[tuple[str, ...], SectionData] = {}
-        self.roots: list[SectionData] = []
+        self.roots: list[_SectionNode] = []
 
-    def add(self, parent_path: tuple[str, ...], title: str, level: int) -> None:
-        """在指定父路径下新增一个章节节点。"""
-        path = (*parent_path, title)
-        self._nodes[path] = SectionData(title=title, level=level, path=path)
-        if parent_path:
-            self._replace(parent_path, lambda node: replace(node, children=(*node.children, self._nodes[path])))
+    def add(self, parent: _SectionNode | None, title: str, level: int) -> _SectionNode:
+        """在指定父节点下新增章节，即使标题路径与已有章节相同。"""
+        path = (*parent.path, title) if parent is not None else (title,)
+        node = _SectionNode(title=title, level=level, path=path)
+        if parent is not None:
+            parent.children.append(node)
         else:
-            self.roots.append(self._nodes[path])
+            self.roots.append(node)
+        return node
 
-    def append_block(self, path: tuple[str, ...], block: Block) -> None:
-        """把内容块挂到指定章节上。"""
-        self._replace(path, lambda node: replace(node, blocks=(*node.blocks, block)))
-
-    def section_paths(self) -> list[tuple[str, ...]]:
-        """按文档顺序返回已出现的章节路径。"""
-        return list(self._nodes)
-
-    def _replace(self, path: tuple[str, ...], transform) -> None:
-        """就地更新一个节点，并把变更向上冒泡，保证祖先持有的子树包含该节点。"""
-        node = self._nodes[path]
-        updated = transform(node)
-        self._nodes[path] = updated
-        self._bubble(path, updated)
-
-    def _bubble(self, path: tuple[str, ...], child: SectionData) -> None:
-        """把子节点的更新同步到其所有祖先与根列表。"""
-        parent_path = path[:-1]
-        while parent_path:
-            parent = self._nodes[parent_path]
-            children = tuple(child if existing.path == child.path else existing for existing in parent.children)
-            updated_parent = replace(parent, children=children)
-            self._nodes[parent_path] = updated_parent
-            child = updated_parent
-            path = parent_path
-            parent_path = path[:-1]
-        self.roots = [
-            child if existing.path == child.path else existing for existing in self.roots
-        ]
+    def sections(self) -> tuple[SectionData, ...]:
+        """冻结所有根节点及其子节点，保留重复标题和原有顺序。"""
+        return tuple(root.freeze() for root in self.roots)
 
 
 def _clean_heading_text(raw: str) -> str:
@@ -125,11 +119,11 @@ def parse_markdown_document(text: str, fallback_title: str) -> ParsedDocument:
     """把 Markdown 文本解析成章节树。
 
     围栏代码块内部的 `#` 和 `|` 不会被当作标题或表格，因此文档中的代码示例不会破坏结构。
-    文档开头、第一个标题之前的内容挂在空路径节点上，只作为文档前言，不生成知识块。
+    文档开头、第一个标题之前的内容作为前言跳过，不生成知识块。
     """
     lines = text.splitlines()
     tree = _SectionTree()
-    current_path: tuple[str, ...] = ()
+    heading_stack: list[_SectionNode] = []
     first_heading: str | None = None
     buffer: list[str] = []
     buffer_type: str = "text"
@@ -140,10 +134,11 @@ def parse_markdown_document(text: str, fallback_title: str) -> ParsedDocument:
         """把缓冲区内容作为直属块挂到当前章节；前言内容直接丢弃。"""
         nonlocal buffer, buffer_type
         raw = "\n".join(buffer).strip("\n").strip()
+        block_type = buffer_type
         buffer = []
         buffer_type = "text"
-        if raw and current_path:
-            tree.append_block(current_path, Block(type=buffer_type, text=raw))
+        if raw and heading_stack:
+            heading_stack[-1].blocks.append(Block(type=block_type, text=raw))
 
     index = 0
     while index < len(lines):
@@ -179,12 +174,11 @@ def parse_markdown_document(text: str, fallback_title: str) -> ParsedDocument:
             title = _clean_heading_text(heading_match.group(2))
             if first_heading is None and level == 1:
                 first_heading = title
-            # 同级或更浅的新标题会关闭所有更深层级；父路径就是长度小于本级的最近路径。
-            parent_path = current_path
-            while parent_path and len(parent_path) >= level:
-                parent_path = parent_path[:-1]
-            tree.add(parent_path, title, level)
-            current_path = (*parent_path, title)
+            # 标题层级决定父节点，节点身份决定内容归属；同名兄弟章节仍各自独立。
+            while heading_stack and heading_stack[-1].level >= level:
+                heading_stack.pop()
+            parent = heading_stack[-1] if heading_stack else None
+            heading_stack.append(tree.add(parent, title, level))
             index += 1
             continue
 
@@ -195,8 +189,8 @@ def parse_markdown_document(text: str, fallback_title: str) -> ParsedDocument:
             while index < len(lines) and lines[index].strip() and "|" in lines[index]:
                 table_lines.append(lines[index])
                 index += 1
-            if current_path:
-                tree.append_block(current_path, Block(type="table", text="\n".join(table_lines)))
+            if heading_stack:
+                heading_stack[-1].blocks.append(Block(type="table", text="\n".join(table_lines)))
             continue
 
         buffer.append(line)
@@ -205,18 +199,14 @@ def parse_markdown_document(text: str, fallback_title: str) -> ParsedDocument:
     flush()
     return ParsedDocument(
         fallback_title=first_heading or fallback_title,
-        sections=tuple(tree.roots),
+        sections=tree.sections(),
     )
 
 
 def category_for(section: SectionData, document_title: str) -> str:
-    """按“上级标题路径”给出分类；没有上级标题时退回文档标题。
-
-    只取直接上级标题（`path[-2]`）：完整路径会无限拉长分类，而检索过滤需要的是稳定的
-    业务分类粒度，例如“七天无理由退货”“受理范围”。
-    """
+    """分类使用完整上级标题路径；根章节退回文档标题。"""
     if len(section.path) >= 2:
-        return section.path[-2]
+        return " > ".join(section.path[:-1])
     return document_title or DEFAULT_CATEGORY
 
 
@@ -232,19 +222,29 @@ def build_document_chunks(
 ) -> list[ChunkDraft]:
     """把解析后的文档切成知识块，并补齐每块所属的分类。
 
-    questions / is_key_clause 由 `chunk_section` 按“产出该块的章节”填写：递归下钻时块来自更深
-    的子章节，只有切分过程知道它的直接归属。这里只补 category，因为分类按顶层业务标题取值，
-    对同一份文档内的块是稳定的。
+    `chunk_section` 保留内容、顺序、章节路径及其他元数据；这里按每块的章节路径补齐完整
+    上级标题分类，并让 questions 只使用所属章节标题。
     """
     active_meter = meter or get_length_meter()
     document_title = (source_title or parsed.fallback_title or "").strip()
     chunks: list[ChunkDraft] = []
+
+    def section_metadata(section: SectionData) -> dict[str, tuple[str, str]]:
+        """索引整棵子树，供递归切出的块按所属章节取分类和标题。"""
+        metadata = {
+            " > ".join(section.path): (category_for(section, document_title), section.title)
+        }
+        for child in section.children:
+            metadata.update(section_metadata(child))
+        return metadata
+
     for section in parsed.sections:
-        category = category_for(section, document_title)
+        metadata = section_metadata(section)
         for draft in chunk_section(section, active_meter):
             if not draft.content.strip():
                 continue
-            draft.category = category
+            draft.category, title = metadata[draft.section_path]
+            draft.questions = (title,) if title else ()
             chunks.append(draft)
     return chunks
 
