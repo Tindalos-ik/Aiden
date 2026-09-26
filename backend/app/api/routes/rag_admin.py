@@ -23,6 +23,11 @@ def overview() -> dict:
     return admin_console.overview()
 
 
+@router.get("/milvus")
+def milvus(limit: int = Query(default=20, ge=1, le=100), offset: int = Query(default=0, ge=0)) -> dict:
+    return admin_console.milvus_snapshot(limit=limit, offset=offset)
+
+
 @router.get("/preview")
 def preview(file: str = Query(min_length=1, max_length=500)) -> dict:
     try:

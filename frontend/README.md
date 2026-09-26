@@ -46,7 +46,7 @@ mock 的流式输出由浏览器适配器分段生成，不代表已连接模型
 
 ## 连接 FastAPI
 
-以下 FastAPI 服务提供第一版普通用户对话闭环：演示账号登录、Cookie 会话、新建会话、LangGraph 模型回答、SSE 增量显示与 MySQL 持久化历史消息。订单、物流、售后政策和人工客服接口尚未接入；remote 页面会明确提示这些限制，人工客服入口不可点击。
+FastAPI 提供普通用户对话闭环，以及员工专用 RAG 建库控制台。remote 员工登录后进入 `/staff/rag`，可预览切块、导入知识、挖掘对话和补齐向量。人工客服接管会话的 `/api/staff/*` 接口仍未实现，remote 员工不会进入 mock 的接待工作台。订单和物流工具是否返回数据取决于后端数据与服务配置。
 
 设置：
 
@@ -59,7 +59,7 @@ VITE_API_BASE_URL=/api
 
 ### 本地启动
 
-需要 Python 3.10+、Node.js 和 npm。在仓库根目录开两个 PowerShell 窗口。
+需要 Python 3.10+、Node.js、npm、MySQL。真实建库还需要按 `docs/RAG.md` 配置 BGE-M3、Milvus 和对话抽取 LLM。在仓库根目录开两个 PowerShell 窗口。
 
 后端窗口：
 
@@ -68,6 +68,7 @@ cd backend
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-rag.txt
 Copy-Item .env.example .env
 ```
 
@@ -77,7 +78,7 @@ Copy-Item .env.example .env
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-首次启动前，在 `backend/.env` 中配置 MySQL `DATABASE_URL`，然后从 `backend` 目录运行 `.\.venv\Scripts\alembic.exe -c alembic.ini upgrade head` 和 `.\.venv\Scripts\python.exe -m scripts.init_demo_users`。数据库表由 Alembic 管理，演示账号需显式初始化。不要把真实 API Key 放入 `.env.example` 或提交到仓库。
+首次启动前，在 `backend/.env` 中配置 MySQL `DATABASE_URL`，然后从 `backend` 目录运行 `.\.venv\Scripts\alembic.exe -c alembic.ini upgrade head` 和 `.\.venv\Scripts\python.exe -m scripts.init_demo_users`。数据库表由 Alembic 管理，演示账号需显式初始化。建库控制台员工账号另由 `.\.venv\Scripts\python.exe -m scripts.init_staff_user` **人工执行**创建：先在运行环境设置 `AIDEN_STAFF_EMAIL`、`AIDEN_STAFF_NAME`、`AIDEN_STAFF_PASSWORD`（至少 12 字符），脚本不会覆盖已有账号或密码。不要把真实密码或 API Key 放入示例文件或提交到仓库。
 
 前端窗口：
 
@@ -99,7 +100,7 @@ VITE_API_BASE_URL=/api
 npm run dev
 ```
 
-访问 Vite 显示的地址。remote 登录使用普通用户演示账号 `maya@aiden.demo` 或 `chen@aiden.demo`，密码均为 `aiden123`。第一版没有人工客服工作台，remote 登录页会禁用该身份选项。
+访问 Vite 显示的地址。普通用户演示账号为 `maya@aiden.demo` 或 `chen@aiden.demo`，密码均为 `aiden123`。选择员工身份并使用上一步创建的员工账号登录后进入 `/staff/rag`。mock 的 `staff@aiden.demo` 只属于浏览器演示数据，不能用于真实建库。`start.ps1` 默认不启动定时对话挖掘；显式使用 `.\start.ps1 -EnableConversationMining` 才启动独立的周期任务。
 
 后端模型配置变量：
 
@@ -111,11 +112,11 @@ npm run dev
 | `SESSION_COOKIE_NAME` | 登录 Cookie 名称 | `aiden_session` |
 | `SESSION_COOKIE_SECURE` | 是否只经 HTTPS 发送 Cookie | 本地开发使用 `false` |
 
-未填写 `OPENAI_API_KEY` 或 `OPENAI_MODEL` 时，流式接口会返回明确的 SSE `error` 事件；不会用固定回答伪装成模型输出。当前版本没有订单、物流、售后和商城政策数据，遇到这些具体查询会说明无法核实，也不会生成具体状态、进度或政策内容。
+未填写 `OPENAI_API_KEY` 或 `OPENAI_MODEL` 时，流式接口会返回明确的 SSE `error` 事件；不会用固定回答伪装成模型输出。订单、物流与知识检索依赖后端服务及数据状态，查询结果以实际工具响应为准。
 
 每次模型调用最多加载最近 16 条消息，单条最多 2,000 字符，并将总历史上下文限制在 12,000 字符；模型回答上限为 800 tokens。
 
-第一版仅提供普通用户 API。下方契约表中列出的 `/handoff` 与 `/staff/*` 属于预留前端接口，当前后端没有实现；remote 模式不会发起转人工请求。
+普通用户对话 API 与员工建库 `/api/rag/*` 已有后端实现。下方契约中 `/handoff` 与 `/staff/*` 是 mock 接待工作台使用的预留接口，当前后端没有实现；remote 模式不会发起转人工请求。
 
 前端使用下列 JSON 形状作为契约。后端字段如需不同，可只在 `src/api/remote.ts` 做映射，不需要改页面。
 
@@ -130,6 +131,8 @@ npm run dev
 - `POST /api/staff/conversations/{id}/accept`：接受 `{}`，返回已接入的 Conversation。
 - `POST /api/staff/conversations/{id}/messages`：接受 `{ "text": "..." }`，返回已创建 Message。
 - `POST /api/staff/conversations/{id}/close`：接受 `{}`，返回已结束的 Conversation。
+
+员工建库接口均要求登录 Cookie 中的员工身份；mock 模式不会调用。`GET /api/rag/overview` 返回服务健康、知识块/批次/候选状态和文档列表；`GET /api/rag/milvus` 只读查看真实 Milvus 集合的维度、记录统计数和分页标量字段，并按主键核对 MySQL 状态；`GET /api/rag/preview?file=...` 只读预览知识目录中的 Markdown 切块；`GET /api/rag/chunks` 与 `GET /api/rag/mining` 查看入库块和挖掘摘要；`GET /api/rag/jobs` 查看当前 API 进程内的任务。`POST /api/rag/jobs/{kind}` 支持 `import-markdown`、`import-markdown-all`、`import-faq`、`mine`、`vectorize`、`cleanup`，其中单文档导入的请求体是 `{ "file": "知识目录内相对路径.md" }`。`POST /api/rag/embedding/start` 和 `/stop` 控制当前 API 进程亲自启动的本地 BGE 服务。写任务返回 202 表示已排队，冲突返回 409；任务结果从 `/jobs` 查询。`mine` 只运行一轮，不自动补向量，需另触发 `vectorize`。详见 [`docs/RAG.md`](../docs/RAG.md#员工建库控制台)。
 
 Conversation 建议包含 `id`、`userId`、`userName`（队列展示用，可选）、`subject`、`status`（`bot | waiting | staff | closed`）、`createdAt`、`updatedAt`、`assignedStaffId`、`assignedStaffName`、`lastMessagePreview`。时间用 ISO 8601 字符串。Message 包含 `id`、`conversationId`、`role`（`user | assistant | staff | system`）、`content`、`createdAt`、`status`（`complete | streaming | error | stopped`），订单回答可提供 `orderCard` 与 `toolStatuses`。`orderCard` 包含 `orderId`、`product`、`amount`、`status`（`物流中 | 已签收 | 退款中`）、`logistics`，以及可选的 `carrier`、`updatedAt`。
 
@@ -162,12 +165,13 @@ data: {"error":"订单服务暂时不可用"}
 
 ## 代码组织
 
-- `src/pages/`：登录、用户会话、人工客服工作台。
+- `src/pages/`：登录、用户会话、mock 人工客服工作台及 `RagConsole.tsx` 员工建库控制台。
 - `src/components/`：品牌、模式提示、会话状态等共享 UI。
 - `src/api/contracts.ts`：页面使用的统一适配器接口。
 - `src/api/mock.ts`：本地持久化、跨标签同步和模拟 Agent 行为。
 - `src/data/demoData.ts`：演示账号和各用户独立的订单数据。
 - `src/api/remote.ts`：Cookie、HTTP 和增量 SSE 解析。
+- `src/api/rag.ts`：员工建库 API、Cookie 请求和错误处理。
 - `src/types.ts`：身份、会话、消息、订单与流事件类型。
 
 TanStack Query 管理服务端数据及刷新；不使用额外全局状态库。普通用户与客服使用独立路由，最终权限仍由 API 服务端校验。

@@ -108,6 +108,7 @@ export interface RagOverview {
     exitCode: number | null;
     model: string | null;
     dimension: number | null;
+    dimensionPending: boolean;
     healthError: string | null;
     canStart: boolean;
   };
@@ -118,6 +119,24 @@ export interface RagOverview {
   documents: string[];
   databaseError: string | null;
   documentsError: string | null;
+}
+
+export interface RagMilvusSnapshot {
+  collection: string;
+  exists: boolean | null;
+  dimension: number | null;
+  count: number | null;
+  items: Array<{
+    chunkId: string;
+    sourceType: string;
+    sourcePath: string;
+    category: string;
+    sectionPath: string;
+    contentType: string;
+    mysqlStatus: string;
+  }>;
+  error: string | null;
+  mysqlError: string | null;
 }
 
 export interface RagCandidate {

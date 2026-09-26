@@ -1,6 +1,6 @@
 # Aiden RAG
 
-本文说明 Aiden 的 RAG 设计。已实现三段能力：把既有文档与 FAQ 建成知识库、从历史客服对话里挖出问答知识，以及 `search_faq` 的在线语义检索。
+本文说明 Aiden 当前 RAG 实现：文档与 FAQ 建库、历史客服对话挖掘、`search_faq` 在线语义检索，以及员工建库控制台。
 
 ## 全景
 
@@ -27,7 +27,7 @@ graph TD
 - **离线和在线必须同源**。两端共用 `build_embedding_text` 的模板与同一个 `EmbeddingClient`（同一模型、同一 L2 归一化），否则相似度不可比。
 - **知识只经工具结果进入模型**。`search_faq` 的返回值作为一轮工具结果交给模型，不拼进系统提示词；提示词只约束"只能依据召回内容作答"。
 
-三段的详细说明分别在「离线建库」「在线语义检索」「历史对话挖掘」三节，其中在线一节包含一次提问从入口到 SSE 的完整链路。
+详细说明分别在「离线建库」「在线语义检索」「历史对话挖掘」「员工建库控制台」四节，其中在线一节包含一次提问从入口到 SSE 的完整链路。
 
 `docs/Aiden.md` 的 RAG 章记录目标设计与选型过程，其中包含尚未实现的规划内容；已实现的行为以本文为准。
 
@@ -132,7 +132,7 @@ def build_embedding_text(category, questions, answer):
 
 FAQ 块天然带真实问题，直接用它作为 questions，用自己的分类作为 category。
 
-政策或手册块没有天然问法，因此用章节标题充当。这里取的是直接上级标题与本节标题两项，例如「七天无理由退货」加「不适用情形」。这个选择有实测依据：如果只取本节标题，会丢掉「这是哪份政策的哪一条」的限定；如果取完整路径，又和 category 重复。
+政策或手册块没有天然问法，`questions` 只填所属章节标题；`category` 填完整上级标题路径。例如 `退货政策 > 七天无理由退货 > 不适用情形`，对应 `questions=["不适用情形"]`、`category="退货政策 > 七天无理由退货"`。根章节没有上级标题时，分类退回文档标题。完整章节路径另存为元数据。
 
 只取文档标题是错的，这一点在开发中被实测抓到。最初实现让同一份文档里所有块的 questions 完全相同，向量化文本只剩「答案」部分有区别，检索直接退化：
 
@@ -142,7 +142,7 @@ FAQ 块天然带真实问题，直接用它作为 questions，用自己的分类
 | top-3 命中 | 13/14 = 93% | 14/14 = 100% |
 | 「七天无理由退货要满足什么条件」 | 第 9 名 | 第 1 名，相似度 0.82 |
 
-这组数据来自 14 条真实问法对 36 个知识块的检索评测。它支持了 `docs/Aiden.md` 里的一段判断：检索质量的瓶颈很少卡在 embedding 参数规模上，更多卡在切分做得好不好。
+这组数据来自旧版标题映射下 14 条问法对 36 个知识块的历史评测，只说明当时从“所有块共用文档标题”改进后的效果。当前映射已经改为“本节标题 + 完整上级路径”，切分规则也有调整；这些数值不能作为当前版本的检索质量证明，需重新建库评测。
 
 #### 关键条款
 
@@ -154,33 +154,13 @@ FAQ 块天然带真实问题，直接用它作为 questions，用自己的分类
 
 #### 不切半截句子
 
-所有文本切分都发生在完整句子边界上。句子边界由 `app.services.rag.length` 中的 `split_sentences` 识别：先按硬换行分段，再按中文句末标点切开，最后处理西文句点。西文句点只在小写或数字之后、且后面跟着空白与大写时才当句末，避免切开 `3.14`、`No. 1` 这类写法。
+正文需要拆块时，以完整句子为打包单位。句子边界由 `app.services.rag.length` 中的 `split_sentences` 识别：先按硬换行分段，再按中文句末标点切开，最后处理西文句点。西文句点只在小写或数字之后、且后面跟着空白与大写时才当句末，避免切开 `3.14`、`No. 1` 这类写法。未超预算且没有特殊块或超长句的章节直属正文可整体保留。
 
-相邻块之间保留重叠，让跨块语义不在句子中间断开。重叠同样只从上一块尾部按完整句子回退取得，总量受 `RAG_OVERLAP_TOKENS` 限制。
+相邻正文块尽量保留重叠：只从上一块**新增内容的尾部完整句子**回退，同时检查 `RAG_OVERLAP_TOKENS` 和“重叠 + 下一句”的单块预算。尾句放不下时省略重叠，不复制半句；表格和待人工审核块不参与正文重叠。
 
 #### 超长章节递归下钻
 
-子标题是天然的语义边界。章节超过单块预算时，先递归切子章节；没有更深标题可下钻，或到达 `RAG_MAX_HEADING_DEPTH` 上限，才按段落打包。这样切出来的块天然落在文档已有的结构上，而不是按字数硬切。递归一定会收敛，因为每下钻一层标题深度就加一。
-
-打包时有一个容易忽略的细节：unit 之间最终会用换行拼成一块，而长度计量的结果依赖整段文本，子词边界会随拼接变化。因此累计器不累加各单位自己的 token 数，而是记录拼接后的长度，再统一换算 token，预算判断针对的才是最终要送去向量化的那段文本。
-
-```python
-@dataclass
-class _ChunkAccumulator:
-    """打包过程中的可变状态。"""
-
-    units: list[_SentenceUnit] = field(default_factory=list)
-    assembled_length: int = 0
-    new_units: int = 0
-
-    def project_length(self, unit):
-        """把某个单位并入本块后，拼接文本会变成多长。"""
-        if not self.units:
-            return len(unit.text)
-        return self.assembled_length + 1 + len(unit.text)
-```
-
-`new_units` 记录本块新增的单位数，不含从上一块搬来的重叠前缀。只有重叠、没有新增内容的块不输出，否则会在内容本身重复时产出完全一样的块。
+子标题是天然的语义边界。`chunk_section` 先处理章节直属内容，再递归处理每个子章节；即使达到 `RAG_MAX_HEADING_DEPTH`，子章节也不会被丢弃。需要拆分的正文按完整句子装箱。每次尝试加入句子时都计量**实际拼接后的文本**，精确分词模式直接用 tokenizer 编码该文本，不能用字符长度推算。只有重叠、没有新句子的块不会输出。解析器也保留同名标题为独立章节，并将 Markdown 代码围栏识别为代码块。
 
 #### 异常长句显式标记
 
@@ -192,26 +172,15 @@ class _ChunkAccumulator:
 
 Markdown 表格单独处理。表头是表格语义的一部分，因此大表格按数据行分块时，每块都会复制表头两行，让单块脱离上下文也能独立理解。
 
-```python
-def flush():
-    """把当前累计的数据行连同表头输出为一块。"""
-    units.append(_SentenceUnit(
-        text="\n".join([*header_rows, *current_rows]),
-        content_type="table",
-        line_count=len(current_rows),
-        break_after=True,          # 表格块之间必须硬断开
-    ))
-```
+每个表格块独立输出，不与正文或其它表格块合并，也不参与重叠。行数限制和整块 token 预算同时生效。
 
-`break_after` 要求表格块与下一块硬断开，且不保留跨块重叠。否则打包时会把这些各带表头的表格块又合并回去，或让下一块把上一块的表体再抄一遍，造成数据行重复。
-
-单行加表头就超过预算时，整行独立成块并标记 `need_manual_review`，不做静默截断。
+单行加表头就超过预算时，整行独立成块并标记 `need_manual_review`；表头本身超预算、代码块超预算时也标记待审核，不做静默截断。
 
 ### 长度计量
 
 长度一律以模型的 token 为准，由 `app.services.rag.length` 中的 `get_length_meter` 提供，有两种模式。
 
-配置 `EMBEDDING_TOKENIZER_PATH` 指向本地 `tokenizer.json` 时按子词精确计数，长度判断与模型侧一致。这是推荐用法，模型权重下载后 `tokenizer.json` 就在 HuggingFace 缓存目录里。
+配置 `EMBEDDING_TOKENIZER_PATH` 指向本地 `tokenizer.json` 且安装 `tokenizers` 时按实际文本的子词数精确计量。这是推荐用法；设置 `RAG_REQUIRE_EXACT_TOKENIZER=true` 时，精确计量不可用会直接报错。
 
 没有配置时退回按字符估算。中文一个汉字常常对应多个子词，估算会偏乐观，因此配置里预留了 `RAG_MEASUREMENT_UNCERTAINTY_TOKENS` 和 `RAG_SAFETY_MARGIN_TOKENS`，从预算里扣掉，避免真实 token 数越过模型上限。
 
@@ -286,7 +255,7 @@ self._client.upsert(collection_name=self._collection, data=batch)
 
 这样重跑时读到仍是 pending 的块，重新算向量再写一遍，因为主键相同只覆盖同一条记录，不会新增。这个窗口因此从根上消失，不需要额外的去重逻辑。
 
-需要说明这里与 `docs/Aiden.md` RAG 章的差异。该章写 Milvus 会为记录分配 ID、再由应用回填，实际实现是反过来。理由是：若 vector_id 由 Milvus 生成，中断时应用既不知道上次写入的向量 ID，也无法删除它，重跑只能重复插入。
+早期方案曾设想由 Milvus 分配 ID、再由应用回填；当前 `docs/Aiden.md` 已同步为实际实现。使用 MySQL 主键作为 Milvus 主键的理由是：若 `vector_id` 由 Milvus 生成，中断时应用不知道上次写入的向量 ID，重跑可能重复插入。
 
 #### 幂等键
 
@@ -349,19 +318,19 @@ BGE-M3 本身只是模型权重，不会响应 HTTP 请求。应用侧按 OpenAI
 
 三点使用注意。
 
-服务是前台进程，需要单独开一个终端并保持开启；重启电脑后要重新启动，它没有装成 Windows 服务。首次启动会自动下载模型权重，bge-small-zh-v1.5 约 0.2 GB，bge-m3 约 2.3 GB，之后从本地缓存读取。
+手动运行脚本时，服务是前台进程，需保持终端开启；员工控制台也可在满足本地地址与解释器配置时启动后台子进程。它没有装成 Windows 服务，重启后需要重新启动。首次启动可能下载模型权重，bge-small-zh-v1.5 约 0.2 GB，bge-m3 约 2.3 GB，之后从本地缓存读取。
 
 不要传 `--fp16`。该参数只在 GPU 上有效，CPU 推理时 FlagEmbedding 会强制使用 float32，传了也不会生效。
 
 `--device` 默认是自动选择，本机没有可用的 CUDA 时会落到 CPU，无需显式指定。
 
-CPU 推理速度完全够用。模型加载约 5 秒，单条文本编码在几十毫秒量级；知识库只有几十到几百块时，整库向量化几秒内完成，单次查询的编码开销相对模型调用可以忽略。若日后知识库规模大幅增长或需要频繁重建，再考虑换 GPU，届时执行 `setup_embedding_server.ps1 -Gpu` 装 CUDA 版 torch 并给服务加 `--fp16` 即可。
+旧版小模型在本机的加载和编码曾达到秒级与几十毫秒量级；这些耗时不能外推到 BGE-M3。BGE-M3 的 CPU 加载、整库向量化和在线编码耗时需在目标机器上实测。若需要 GPU，可执行 `setup_embedding_server.ps1 -Gpu` 安装 CUDA 版 torch，并给服务加 `--fp16`。
 
 启动成功的标志是在终端看到服务开始监听，可用 `/health` 确认：
 
     Invoke-RestMethod http://127.0.0.1:8001/health
 
-返回的 `dimension` 在第一次编码之后才会有值，刚启动时为 null，这是正常的。
+返回的 `dimension` 在第一次编码之后才会有值，刚启动时为 null。员工控制台会将模型名已匹配、维度尚为 null 的服务显示为“维度待验证”，不会误报配置不一致；首次编码后才比较实际维度，若与后端配置不同则明确报错。实际向量化调用也会校验维度。
 
 `backend/scripts/verify_embedding_service.ps1` 做一键探测，并把实际返回的向量维度回写到 `backend/.env`。
 
@@ -513,7 +482,7 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 用规范的 `#`、`##`、`###` 标题组织章节。章节标题会作为该块没有天然问题时的问法，上级标题会成为分类，因此标题要写得像用户会问的说法，而不是内部编号。
 
-一个章节讲一件事。章节过长会触发递归下钻；如果连子标题都没有，就只能按段落硬切，切出来的块语义完整性会变差。
+一个章节讲一件事。过长的直属正文按完整句子装箱，子章节按标题层级单独处理；若长段落没有句号等可识别边界，整句会被保留并标记待人工审核。
 
 表格用标准 Markdown 表格语法，包含表头和分隔行，这样才被识别为表格并按行分块。表格前加一句说明它的用途，有助于这块被正确检索到。
 
@@ -521,20 +490,20 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 ### 已验证的范围
 
-用 `bge-small-zh-v1.5`（512 维）与真实 Milvus 验证过的内容。当前库内共 39 个知识块，其中 38 个已向量化（Markdown 4 个来源 36 块、`faq` 表 2 行 2 块），另有 1 块是验收时写入后置为 `superseded` 的临时测试块：
+以下是旧版用 `bge-small-zh-v1.5`（512 维）与真实 Milvus 验证过的历史记录。当时库内共 39 个知识块，其中 38 个已向量化（Markdown 4 个来源 36 块、`faq` 表 2 行 2 块），另有 1 块是验收时写入后置为 `superseded` 的临时测试块。当前切分与标题映射修复后仅做过静态核对，未重新运行真实建库、BGE-M3 或检索评测；下列记录不能代表当前数据状态：
 
 - 切分：36 个 Markdown 块每块不超预算、每行都来自原文、表格分块复制表头且数据行不丢失不重复、异常长句整句保留并标记待人工处理
 - 长度计量：精确分词模式下在 512 与 8192 两套配置下均通过
-- 迁移：`alembic upgrade head` 建出 `knowledge_chunks` 表（`0004_knowledge_chunks`），字段与唯一索引齐全；历史对话挖掘又新增 `0005_conversation_mining`，当前库内版本为 `0005 (head)`
+- 迁移：`alembic upgrade head` 建出 `knowledge_chunks` 表（`0004_knowledge_chunks`），字段与唯一索引齐全；历史对话挖掘又新增 `0005_conversation_mining`，当时验收库版本为 `0005 (head)`
 - 幂等：内容未变时重导入零新增、零作废、不重置状态，重跑向量化是空操作
 - 中断补齐：模拟回填前中断后重跑，Milvus 唯一主键数等于块总数，无重复向量
 - 一致性：MySQL 已回填的 `vector_id` 与 Milvus 主键集合完全相同，无孤儿向量
 - Milvus：集合按 HNSW 与 COSINE 建索引，同名主键连续 upsert 两次后记录数仍为 1
 - 检索：14 条真实问法的离线评测，top-1 命中 86%，top-3 命中 100%
 
-这组检索指标来自 `backend/.tmp/evaluate_retrieval.py`，它把知识块编码后逐条检索、直接比较排名，**不经过 `search_faq`、Milvus 或 MySQL**，因此衡量的是切分与向量化文本的质量，不是在线链路的端到端指标；在线链路自身的验证结果见「在线语义检索」一节的「已验证的范围」。
+这组旧版检索指标来自 `backend/.tmp/evaluate_retrieval.py`，它把知识块编码后逐条检索、直接比较排名，**不经过 `search_faq`、Milvus 或 MySQL**，因此不是在线链路的端到端指标；在线链路自身的历史验证结果见「在线语义检索」一节的「已验证的范围」。
 
-尚未验证的部分：真实 BGE-M3（1024 维）尚未跑过，当前使用的是 bge-small-zh-v1.5。离线建库已经接入 Agent 工具：`search_faq` 走 Milvus 向量召回，见下一节。
+尚未验证的部分：真实 BGE-M3（1024 维）尚未跑过；当前实际运行配置和数据库状态需以部署环境为准。离线建库已接入 Agent 工具：`search_faq` 走 Milvus 向量召回，见下一节。
 
 ## 在线语义检索
 
@@ -689,14 +658,14 @@ graph TD
     mask --> llm["调用 LLM 抽取结构化问答对"]
     llm --> validate["逐条结构 依据 脱敏校验"]
     validate --> stage["通过与被拒候选都写入<br/>conversation_qa_candidates"]
-    stage --> wait{"本轮所有批次<br/>都抽完了吗"}
+    stage --> wait{"全局待处理池<br/>都抽完了吗"}
     wait -->|还有批次| batch
     wait -->|全部完成| dedupe["整体去重<br/>跨对话 跨批次"]
     dedupe --> mysql["写入 knowledge_chunks<br/>状态 pending"]
     mysql --> embed["复用 vectorize_pending<br/>BGE 服务与 Milvus"]
 ```
 
-流程被刻意切成「抽取」与「去重入库」两段，中间以「本轮所有批次是否都抽完」为闸门。只要还有批次没抽完（达到批次上限或抽取失败），去重就整体推迟到下一次运行。理由是重复问法会跨批次出现，只在单个模型批次内部去重必然漏掉。
+流程切成「抽取」与「去重入库」两段。闸门检查**所有轮次**的 `pending`、`extracting`、`failed` 批次；只要还有未完成批次，整体去重就推迟。`extracted` 与 `ready` 批次中仍为 `staged` 的候选会跨 `run_id` 汇集去重。`run_id` 仅追溯认领和抽取发生在哪一轮，不限定去重范围。
 
 代码分层：
 
@@ -785,9 +754,9 @@ graph TD
 
 ### 整体去重
 
-去重跑在**本轮全部候选**上（跨对话、跨批次），同时读入已有 `knowledge_chunks`。判定顺序是：
+去重跑在**全局待处理候选池**上（跨运行、跨对话、跨批次），同时读入已有 `knowledge_chunks`。判定顺序是：
 
-1. 同一问法在本轮出现多个**不互为同义**的答案 → 冲突，全部留待人工确认，不入库；
+1. 同一问法在待处理池中出现多个**不互为同义**的答案 → 冲突，全部留待人工确认，不入库；
 2. 该问法与已有正式知识相同或同义：候选答案与已有答案等价 → 判为已入库，不重复生成正式知识与向量；不等价 → 冲突，留待人工确认，不自动改写已有知识；
 3. 其余候选先按「问法 + 答案」分组，再把**语义等价的问法**合并成一条知识，questions 保留全部真实问法。
 
@@ -823,7 +792,7 @@ graph TD
 | pending | 窗口已确定，尚未调用模型 | 否 |
 | extracting | 已被某次运行认领，正在调模型 | 否 |
 | extracted | 抽取完成、候选已写入暂存表 | 否 |
-| ready | 本运行全部批次已抽取完成，可以整体去重 | 否 |
+| ready | 抽取已完成，等待全局候选池整体去重 | 否 |
 | promoted | 本批次参与的去重与入库已完成 | 是 |
 | skipped | 已处置但没产生知识（候选全是重复或冲突、单轮超长、窗口内无完整轮次） | 是 |
 | failed | 调用模型或校验失败，保留错误信息，可重跑 | 否 |
@@ -873,7 +842,7 @@ select(ConversationMiningBatch)
 
 退出码约定：0 本轮工作完整结束，1 还有遗留（批次上限、抽取失败或存在待处理候选），2 配置或外部服务出错，3 已有实例在运行，130 收到中断。
 
-这是独立的离线任务，**不绑定 FastAPI**：不在应用导入阶段启动任何线程或循环，也不由 HTTP 请求触发。定时执行由入口自己的「跑一轮、按周期等待、再跑一轮」循环完成，因此 API 进程重启与在线流量都不影响抽取节奏。按 `Ctrl+C` 时当前批次会跑完并把状态写回数据库。
+定时循环由独立 CLI 进程执行，不在 FastAPI 导入阶段启动。仓库根目录的 `start.ps1` 默认不启动挖掘；仅显式运行 `.\start.ps1 -EnableConversationMining` 才启动该定时进程。员工建库控制台也可经鉴权的 HTTP 请求启动**一轮**挖掘，它与 CLI 共用实例锁；控制台这一轮只写暂存候选和正式知识，向量补齐另由 `vectorize` 任务触发。CLI 周期运行与 API 生命周期独立，按 `Ctrl+C` 时当前批次会跑完并写回状态。
 
 ### 配置
 
@@ -910,7 +879,7 @@ select(ConversationMiningBatch)
 
 ### 已验证的范围
 
-用 stub 的 OpenAI 兼容对话与向量端点（真实 LLM 密钥与 BGE-M3 服务在本机未配置）验证：
+以下是改动前用 stub 的 OpenAI 兼容对话与向量端点验证的历史记录（真实 LLM 密钥与 BGE-M3 服务在本机未配置）：
 
 - 去重规则：13 项判定全部通过，覆盖同问法同答案合并、同问法不同答案冲突不入库、语义等价答案合并、已有知识同答案判重复、同义问法 + 同答案判重复、同义问法 + 不同答案冲突、同义问法合并且保留两种问法、同义问法但答案不同不合并、向量不可用时降级并给出提示
 - 端到端：10 个批次抽取 → 5 条候选经整体去重合并成 3 条知识（questions 分别保留 2、1、2 个真实问法），4 条候选按 4 种原因留待处理
@@ -919,4 +888,38 @@ select(ConversationMiningBatch)
 - 并发：持锁时启动第二个实例被拒绝（退出码 3）
 - 迁移：`alembic upgrade head` 建出两张表，`content_type` 为 varchar(64)，检查约束与索引齐全
 
-尚未验证：真实 LLM 的抽取质量与真实 BGE-M3 的语义阈值标定（`MINING_QUESTION_SIMILARITY` 与 `MINING_ANSWER_SIMILARITY` 需要接入真实模型后重新标定），以及真实 Milvus 写入。
+跨轮候选汇集、全局未完成闸门、实例锁与控制台入口改动后，只做过静态检查；尚未重跑真实 LLM、MySQL、BGE-M3、Milvus 全链路。真实模型下仍需标定 `MINING_QUESTION_SIMILARITY` 与 `MINING_ANSWER_SIMILARITY`。
+
+## 员工建库控制台
+
+remote 模式下用员工账号登录后进入 `/staff/rag`。该页面调用员工 Cookie 鉴权的 `/api/rag`；mock 模式只展示不可建库提示，不生成模拟写入结果。员工账号需在完成 Alembic 迁移后，从 `backend` 目录人工执行 `python -m scripts.init_staff_user` 创建；脚本从运行环境读取 `AIDEN_STAFF_EMAIL`、`AIDEN_STAFF_NAME`、`AIDEN_STAFF_PASSWORD`（密码至少 12 字符），只新增账号，不覆盖已有邮箱或密码。启动 API 不会自动创建员工账号。
+
+```
+     cd D:\myproject\Aiden\backend
+     $env:AIDEN_STAFF_EMAIL = '你的邮箱@example.com'
+     $env:AIDEN_STAFF_NAME = '你的姓名'
+     $secret = Read-Host '输入员工密码（至少 12 位）' -AsSecureString
+     $env:AIDEN_STAFF_PASSWORD = [System.Net.NetworkCredential]::new('', $secret).Password
+     .\.venv\Scripts\python.exe -m scripts.init_staff_user
+     Remove-Item Env:AIDEN_STAFF_PASSWORD
+```
+
+
+
+| API | 行为 |
+| --- | --- |
+| `GET /api/rag/overview` | 查看向量服务健康状态、知识块/批次/候选状态统计、知识目录文件列表与 Milvus 集合配置 |
+| `GET /api/rag/milvus?limit=20&offset=0` | 只读查看 Milvus 集合是否存在、实际维度、记录统计数及分页标量字段；按主键回 MySQL 标出当前状态 |
+| `GET /api/rag/preview?file=...` | 用正式解析与切分函数预览知识目录内的 Markdown；只读，不访问 MySQL 或 Milvus |
+| `GET /api/rag/chunks`、`GET /api/rag/mining` | 分页查看入库块及批次、候选摘要；不返回原始对话或模型凭据 |
+| `GET /api/rag/jobs` | 查看当前 API 进程内的最近任务和结果 |
+| `POST /api/rag/jobs/{kind}` | 排队执行 `import-markdown`、`import-markdown-all`、`import-faq`、`mine`、`vectorize` 或 `cleanup` |
+| `POST /api/rag/embedding/start`、`POST /api/rag/embedding/stop` | 启动或关闭本 API 进程拥有的本地向量服务子进程 |
+
+写任务返回 HTTP 202，表示已经排队，实际状态需查询 `/jobs`；不支持的参数返回 400，同时运行另一项建库任务返回 409。`mine` 只运行一轮并关闭自动向量化，之后需单独执行 `vectorize`；`cleanup` 删除已作废块对应的 Milvus 向量。导入 Markdown 只接受配置知识目录内已有的 `.md` 相对路径，预览不会导入或写库。`import-faq` 读取现有启用中的 FAQ 行。
+
+页面的“Milvus 集合配置”显示的是后端预期值，“Milvus 实际数据”才读取真实集合。后者只展示少量主键和标量字段，不返回高维向量或正文；集合记录统计数可能短暂滞后于写入。MySQL 中 `vector_status` 为 `vectorized` 的数量和 Milvus 统计数可以互相核对，但两者短暂不同并不直接证明数据损坏；分页记录的 MySQL 状态可帮助定位待回填、已作废或孤儿向量。
+
+向量服务启动只支持后端配置的本机 `http://127.0.0.1:<端口>/v1` 地址。解释器从服务器环境变量 `AIDEN_EMBEDDING_PYTHON` 读取；Windows 默认路径为 `D:\bge-m3-env\Scripts\python.exe`。健康检查会校验模型名和维度；外部已经运行的服务可查看状态，但控制台不会接管或关闭它。关闭操作只终止当前 API 进程亲自启动的子进程。BGE 权重、Python 环境、MySQL、Milvus 与抽取 LLM 都须按部署配置准备，控制台不会自动安装它们。
+
+任务列表和 BGE 进程句柄只保存在当前 API 进程内：重启后任务历史消失，多 worker 之间也不共享列表或句柄。写任务用本机文件锁防止多个 API 进程同时执行；挖掘任务还与 CLI 共用挖掘实例锁。遇到中断，应以 MySQL `vector_status`、批次及候选状态判断续跑，再重新触发对应任务。控制台前后端做过静态检查，真实服务启停及完整建库链路尚未验收。

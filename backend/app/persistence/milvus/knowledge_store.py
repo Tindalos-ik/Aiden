@@ -229,6 +229,26 @@ class KnowledgeVectorStore:
         self._client.flush(collection_name=self._collection)
         return len(ids)
 
+    def inspect(self, *, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+        """只读查看集合与少量标量字段，不读取高维向量或修改集合。"""
+        if not self._client.has_collection(self._collection):
+            return {"exists": False, "dimension": None, "count": 0, "rows": []}
+        stats = self._client.get_collection_stats(collection_name=self._collection)
+        rows = self._client.query(
+            collection_name=self._collection,
+            filter=f'{CHUNK_ID_FIELD} != ""',
+            output_fields=[CHUNK_ID_FIELD, "source_type", "source_path", "category", "section_path", "content_type"],
+            limit=limit,
+            offset=offset,
+        )
+        row_count = stats.get("row_count")
+        return {
+            "exists": True,
+            "dimension": self._existing_dimension(),
+            "count": int(row_count) if row_count is not None else None,
+            "rows": rows,
+        }
+
     def _to_row(self, vector: KnowledgeVector) -> dict[str, Any]:
         """把知识向量转成 Milvus 行；空字符串用于占位，避免 VARCHAR 字段收到 None。"""
         return {

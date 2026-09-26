@@ -1,6 +1,6 @@
 # 客服 Agent 只读工具
 
-本文说明已接入的订单、物流和知识检索工具。工具实现位于 [`backend/app/services/tools/customer.py`](../backend/app/services/tools/customer.py)，订单与物流查询位于 [`backend/app/persistence/mysql/queries.py`](../backend/app/persistence/mysql/queries.py)，知识检索链路位于 [`backend/app/services/rag/retrieval.py`](../backend/app/services/rag/retrieval.py) 与 [`backend/app/persistence/milvus/knowledge_store.py`](../backend/app/persistence/milvus/knowledge_store.py)。数据库表结构和本地准备方法见 [`database-schema.md`](database-schema.md)，演示数据问题见 [`测试回答.md`](测试回答.md)，检索原理与配置见 [`RAG.md`](RAG.md#在线语义检索)。
+本文说明已接入的订单、物流和知识检索工具。工具实现位于 [`backend/app/services/tools/customer.py`](../backend/app/services/tools/customer.py)，订单与物流查询位于 [`backend/app/persistence/mysql/queries.py`](../backend/app/persistence/mysql/queries.py)，知识检索链路位于 [`backend/app/services/rag/retrieval.py`](../backend/app/services/rag/retrieval.py) 与 [`backend/app/persistence/milvus/knowledge_store.py`](../backend/app/persistence/milvus/knowledge_store.py)。数据库表结构和本地准备方法见 [`数据层.md`](数据层.md)，演示数据问题见 [`测试回答.md`](测试回答.md)，检索原理与配置见 [`RAG.md`](RAG.md#在线语义检索)。
 
 ## 工具一览
 

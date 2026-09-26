@@ -106,6 +106,7 @@ def embedding_status() -> dict[str, Any]:
     healthy = False
     model = None
     dimension = None
+    dimension_pending = False
     health_error = None
     if target:
         try:
@@ -116,13 +117,20 @@ def embedding_status() -> dict[str, Any]:
             if isinstance(payload, dict):
                 model = payload.get("model")
                 dimension = payload.get("dimension")
+                status_ok = payload.get("status") == "ok"
+                model_matches = model == rag_settings.embedding_model
+                dimension_pending = status_ok and model_matches and dimension is None
                 healthy = (
-                    payload.get("status") == "ok"
-                    and model == rag_settings.embedding_model
-                    and dimension == rag_settings.embedding_dimension
+                    status_ok
+                    and model_matches
+                    and (dimension_pending or dimension == rag_settings.embedding_dimension)
                 )
-                if payload.get("status") == "ok" and not healthy:
-                    health_error = "服务响应的模型或向量维度与后端配置不一致"
+                if status_ok and not model_matches:
+                    health_error = f"模型不一致：服务为 {model}，后端配置为 {rag_settings.embedding_model}"
+                elif status_ok and dimension is not None and dimension != rag_settings.embedding_dimension:
+                    health_error = (
+                        f"向量维度不一致：服务为 {dimension}，后端配置为 {rag_settings.embedding_dimension}"
+                    )
         except (OSError, ValueError, URLError):
             pass
     return {
@@ -132,6 +140,7 @@ def embedding_status() -> dict[str, Any]:
         "exitCode": exit_code,
         "model": model,
         "dimension": dimension,
+        "dimensionPending": dimension_pending,
         "healthError": health_error,
         "canStart": bool(target and urlparse(rag_settings.embedding_base_url).hostname in {"127.0.0.1", "localhost"}),
     }
@@ -148,7 +157,7 @@ def start_embedding() -> dict[str, Any]:
         if _process is not None and _process.poll() is None:
             raise AlreadyRunningError("本应用启动的向量服务已经在运行")
         if embedding_status()["healthy"]:
-            raise AlreadyRunningError("配置端口已有健康的外部向量服务，请直接使用；控制台不会接管它")
+            raise AlreadyRunningError("配置端口已有运行中的外部向量服务，请直接使用；控制台不会接管它")
         try:
             with socket.create_connection(("127.0.0.1", target[1]), timeout=0.5):
                 raise AlreadyRunningError("配置端口已有其他服务占用；控制台不会接管或停止它")
@@ -222,6 +231,56 @@ def overview() -> dict[str, Any]:
         "documents": documents,
         "databaseError": database_error,
         "documentsError": documents_error,
+    }
+
+
+def milvus_snapshot(limit: int = 20, offset: int = 0) -> dict[str, Any]:
+    """员工只读核对 Milvus 实际数据；回表状态只用于解释样本，不用于在线检索。"""
+    from app.persistence.milvus.knowledge_store import KnowledgeVectorStore
+
+    try:
+        snapshot = KnowledgeVectorStore().inspect(limit=limit, offset=offset)
+    except Exception as exc:
+        return {
+            "collection": rag_settings.milvus_collection,
+            "exists": None,
+            "dimension": None,
+            "count": None,
+            "items": [],
+            "error": _safe_error(exc),
+            "mysqlError": None,
+        }
+
+    rows = snapshot.pop("rows")
+    mysql_error = None
+    try:
+        by_id = {
+            row.id: row
+            for row in knowledge_repo.get_chunks_by_ids([str(item["chunk_id"]) for item in rows])
+        }
+    except Exception as exc:
+        by_id = {}
+        mysql_error = _safe_error(exc)
+    return {
+        "collection": rag_settings.milvus_collection,
+        **snapshot,
+        "items": [
+            {
+                "chunkId": str(item["chunk_id"]),
+                "sourceType": item.get("source_type") or "",
+                "sourcePath": item.get("source_path") or "",
+                "category": item.get("category") or "",
+                "sectionPath": item.get("section_path") or "",
+                "contentType": item.get("content_type") or "",
+                "mysqlStatus": "unavailable" if mysql_error else (
+                    by_id[str(item["chunk_id"])].vector_status
+                    if str(item["chunk_id"]) in by_id else "missing"
+                ),
+            }
+            for item in rows
+        ],
+        "error": None,
+        "mysqlError": mysql_error,
     }
 
 

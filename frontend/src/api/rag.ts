@@ -1,4 +1,4 @@
-import type { RagChunk, RagJob, RagMiningSnapshot, RagOverview } from '../types';
+import type { RagChunk, RagJob, RagMilvusSnapshot, RagMiningSnapshot, RagOverview } from '../types';
 import { apiMode } from './index';
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
@@ -22,6 +22,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const ragApi = {
   overview: () => request<RagOverview>('/overview'),
+  milvus: (offset = 0) => request<RagMilvusSnapshot>(`/milvus?limit=20&offset=${offset}`),
   preview: (file: string) => request<{ file: string; title: string; chunks: RagChunk[] }>(`/preview?file=${encodeURIComponent(file)}`),
   chunks: (offset = 0) => request<{ items: RagChunk[] }>(`/chunks?limit=20&offset=${offset}`),
   mining: () => request<RagMiningSnapshot>('/mining'),

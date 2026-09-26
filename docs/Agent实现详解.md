@@ -377,9 +377,9 @@ data: {}
 | 订单物流查询 | 独立政策查询（版本与生效期）和售后进度查询 |
 | 在线语义检索：`search_faq` 的向量召回与失效过滤 | 创建工单、人工转接和员工接管流程 |
 | SSE 文本回答 | 运营工作台和完整链路 trace |
-| 离线建库：Markdown 与 FAQ 向量化到 Milvus | 关键词召回、混合检索与重排 |
+| 离线建库：Markdown、FAQ 和历史对话问答入库，员工可用 `/staff/rag` 预览切块并触发任务 | 关键词召回、混合检索与重排 |
 
-离线建库的实现位于 `backend/app/services/rag/`，从 `backend/scripts/build_knowledge_base.py` 触发；它把知识写入 MySQL 与 Milvus。在线检索由 `backend/app/services/rag/retrieval.py` 的 `semantic_search()` 提供，`search_faq` 已经是它的调用方：问题经同一套 BGE dense 模型编码，在 Milvus 召回候选，再回 MySQL `knowledge_chunks` 取权威原文。表结构、向量状态与建库命令见 [`数据层.md`](数据层.md) 的离线建库一节，检索细节见 [`RAG.md`](RAG.md#在线语义检索)。
+离线建库的实现位于 `backend/app/services/rag/`，可从 `backend/scripts/build_knowledge_base.py`、`backend/scripts/mine_conversation_knowledge.py` 或员工控制台触发；文档、FAQ 与对话抽取结果先写 MySQL，再补齐 Milvus 向量。在线检索由 `backend/app/services/rag/retrieval.py` 的 `semantic_search()` 提供，`search_faq` 已经是它的调用方：问题经同一套 BGE dense 模型编码，在 Milvus 召回候选，再回 MySQL `knowledge_chunks` 取权威原文。表结构、向量状态与建库命令见 [`数据层.md`](数据层.md) 的离线建库一节，控制台和检索细节见 [`RAG.md`](RAG.md)。
 
 判断功能是否可用时，沿路由、图节点、工具和数据库查询找到实际调用链。`docs/Aiden.md` 主要呈现目标设计；可配合阅读 `docs/语义识别与意图路由前置层.md`、`docs/tools.md` 和 `docs/数据层.md`。
 

@@ -237,6 +237,10 @@ graph TD
 | `POST /api/conversations` | 新建会话 | 请求体为 `{}`，成功状态为 `201` |
 | `GET /api/conversations/{conversation_id}/messages` | 读取会话历史 | 先检查会话归属；找不到或不属于当前用户时返回 `404` |
 | `POST /api/conversations/{conversation_id}/messages/stream` | 发送消息并接收流式回答 | 请求体含 `text`，可带 `clientMessageId`；成功响应为 SSE |
+| `GET /api/rag/overview`、`/preview`、`/chunks`、`/mining`、`/jobs` | 员工查看建库状态 | 所有路由经 `current_staff` 验证 Cookie；预览不写 MySQL 或 Milvus |
+| `GET /api/rag/milvus` | 员工查看 Milvus 实际集合 | 只读返回集合状态、记录统计数和分页标量字段，并回 MySQL 标示状态 |
+| `POST /api/rag/jobs/{kind}` | 员工排队建库任务 | `kind` 支持文档/FAQ 导入、对话挖掘一轮、向量化、作废向量清理；成功返回 `202` |
+| `POST /api/rag/embedding/start`、`/stop` | 员工管理本地向量服务 | 只管理当前 API 进程启动的子进程；成功返回 `202` |
 
 例如，会话相关路由中 `actor: dict = Depends(current_actor)` 会让 FastAPI 先取登录 Cookie 并查验用户。路由再把 `actor["id"]` 传给数据访问函数，因此查询会话和消息时会按用户 id 做归属过滤。
 
@@ -254,9 +258,9 @@ graph TD
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-启动后可打开 `http://127.0.0.1:8000/docs` 查看当前注册的接口。`/api/health` 返回成功只代表 API 进程已响应，并不能证明数据库迁移、登录或模型配置都正常。聊天模型还需要 `backend/.env` 中的模型配置；具体数据库准备方式见 [`database-schema.md`](database-schema.md)。
+启动后可打开 `http://127.0.0.1:8000/docs` 查看当前注册的接口。`/api/health` 返回成功只代表 API 进程已响应，并不能证明数据库迁移、登录或模型配置都正常。聊天模型还需要 `backend/.env` 中的模型配置；具体数据库准备方式见 [`数据库.md`](数据库.md)。
 
-有一点容易混淆：前端 [`remote.ts`](../frontend/src/api/remote.ts) 也写有客服接管和员工工作台请求，但当前后端注册的路由只有认证和会话两组，并且登录路由明确拒绝员工登录。因此，前端文件里出现一个 URL 并不代表 FastAPI 已经提供了那个接口；判断服务端当前能力，应以 `backend/app/main.py` 注册的路由及 `backend/app/api/routes/` 中实际定义的接口为准。
+员工登录已用于 `/staff/rag` 建库控制台，API 路由在 [`rag_admin.py`](../backend/app/api/routes/rag_admin.py)，具体任务与限制见 [`RAG.md`](RAG.md#员工建库控制台)。前端 [`remote.ts`](../frontend/src/api/remote.ts) 仍保留客服接管请求定义，但后端尚无 `/api/staff/*` 接待接口；员工能建库，不代表能在 remote 模式接管会话。判断服务端能力以 `backend/app/main.py` 注册的路由和实际接口为准。
 
 
 
