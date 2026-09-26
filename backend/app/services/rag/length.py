@@ -25,11 +25,12 @@ MeasurementMode = Literal["exact", "estimate"]
 
 # 段落内的硬换行：Markdown 里同一段很少跨行，硬换行通常意味着语义断点。
 _LINE_BREAK = re.compile(r"\n+")
-# 中日韩句末标点：这些标点后一定是句子边界，可以直接切开。
-_CJK_SENTENCE_END = re.compile(r"(?<=[。！？；!?])")
-# 西文句点只在小写/数字之后、空白与大写出现时才当作句末，避免切开 3.14、No. 1 等写法。
-_LATIN_SENTENCE_END = re.compile(r"(?<=[a-z0-9\)\]\"'%])\.(?=\s+[A-Z\u4e00-\u9fff])")
-# 省略号、连续标点等整体视为一个句末标记，避免被 _CJK_SENTENCE_END 拆成多段。
+# 连续句末标点和省略号作为一个边界；西文句点只在后接空白与大写/汉字时切开，
+# 避免把小数点及常见缩写中的句点当成句末。
+_SENTENCE_END = re.compile(
+    r"(?:[。！？；!?]|…{2,}|\.{3,})+|(?<=[A-Za-z0-9\)\]\"'%])\.(?=[\"'”’）\]】》」』]*\s+[A-Z\u4e00-\u9fff])"
+)
+_SENTENCE_CLOSERS = frozenset("\"'”’）]】》」』")
 _TRAILING_WHITESPACE = re.compile(r"^[ \t\u3000]+|[ \t\u3000]+$")
 
 
@@ -102,11 +103,9 @@ class LengthMeter:
         return max(1, int(len(text) / self._chars_per_token + 0.999))
 
     def tokens_for_length(self, length: int) -> int:
-        """按字符长度换算 token 数，不构造实际文本。
-
-        切分时频繁判断“再加这段会不会超预算”，用长度换算可以避免反复拼接整段正文。两种
-        模式的换算口径都与 `estimate_tokens` 保持一致，否则预算判断会与实际计量口径不同。
-        """
+        """仅在估算模式下按字符长度换算；精确模式必须计量实际文本。"""
+        if self._tokenizer is not None:
+            raise ValueError("精确分词模式不能从字符长度推算 token 数，请传入实际文本。")
         if length <= 0:
             return 0
         return max(1, int(length / self._chars_per_token + 0.999))
@@ -125,35 +124,29 @@ def get_length_meter() -> LengthMeter:
 def split_sentences(text: str) -> list[str]:
     """把一段正文切成完整句子，保留标点且不产生半截句子。
 
-    处理顺序：先按硬换行分段，再在每段内按中文句末标点切分，最后处理西文句点。切分只
-    在标点之后发生，因此每个返回值都是原文档中的完整连续子串；空白片段会被丢弃。
+    先按硬换行分段，再按句末标点切分；连续标点和闭合引号留在前一句。未带句末标点的行尾
+    视为段落边界，绝不按字符数截断正文。
     """
     sentences: list[str] = []
     for line in _LINE_BREAK.split(text):
         stripped_line = _TRAILING_WHITESPACE.sub("", line)
         if not stripped_line:
             continue
-        for chunk in _CJK_SENTENCE_END.split(stripped_line):
-            if not chunk:
+        cursor = 0
+        for match in _SENTENCE_END.finditer(stripped_line):
+            if match.start() < cursor:
                 continue
-            # 西文句点再切一次：上一步已保证不会在 CJK 标点内部误切。
-            for part in _split_on_latin_period(chunk):
-                cleaned = _TRAILING_WHITESPACE.sub("", part)
-                if cleaned:
-                    sentences.append(cleaned)
+            end = match.end()
+            while end < len(stripped_line) and stripped_line[end] in _SENTENCE_CLOSERS:
+                end += 1
+            sentence = _TRAILING_WHITESPACE.sub("", stripped_line[cursor:end])
+            if sentence:
+                sentences.append(sentence)
+            cursor = end
+        remainder = _TRAILING_WHITESPACE.sub("", stripped_line[cursor:])
+        if remainder:
+            sentences.append(remainder)
     return sentences
-
-
-def _split_on_latin_period(text: str) -> list[str]:
-    """按西文句末句点切分，并让句点留在前一句末尾。"""
-    parts: list[str] = []
-    cursor = 0
-    for match in _LATIN_SENTENCE_END.finditer(text):
-        end = match.start() + 1  # 句点本身归入前一句
-        parts.append(text[cursor:end])
-        cursor = end
-    parts.append(text[cursor:])
-    return parts
 
 
 def longest_sentence_tokens(sentences: list[str], meter: LengthMeter | None = None) -> int:
