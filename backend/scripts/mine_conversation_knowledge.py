@@ -14,8 +14,8 @@
     # 查看当前进度：批次状态、候选状态、留待处理的候选
     python -m scripts.mine_conversation_knowledge stats
 
-    # 从上次中断处继续：把遗留的 extracting 批次放回 pending 后重跑一次
-    python -m scripts.mine_conversation_knowledge --once --reset-stale
+    # 从上次中断处继续：默认把遗留的 extracting 批次放回 pending 后重跑一次
+    python -m scripts.mine_conversation_knowledge
 
 **这是离线任务，不绑定 FastAPI。** 它不在应用导入阶段启动任何线程或循环，也不由 HTTP 请求触发；
 定时执行由本入口自己的“跑一轮、按周期等待、再跑一轮”循环完成，因此 API 进程的重启与在线流量都
@@ -65,8 +65,8 @@ def _check_llm_configured() -> bool:
     return False
 
 
-def _run_one_round(*, vectorize: bool, reset_stale: bool, verbose: bool) -> dict:
-    """执行一轮完整任务：抽取 -> 暂存 -> 整体去重 -> 入库 -> 补向量。
+def _run_one_round(*, staging_only: bool, reset_stale: bool, verbose: bool) -> dict:
+    """执行一轮任务；仅暂存模式不触发整体去重、正式入库或向量化。
 
     返回可序列化的统计，供单次模式直接输出，也供定时模式逐轮打印。`reset_stale` 为真时先把上次
     中断留下的 `extracting` 批次放回 `pending`，这是“从上次中断处继续”的开关。
@@ -79,7 +79,7 @@ def _run_one_round(*, vectorize: bool, reset_stale: bool, verbose: bool) -> dict
             print(f"  {message}")
 
     result = conversation_mining.run_pipeline(
-        client=client, vectorize=vectorize, on_progress=progress
+        client=client, promote=not staging_only, on_progress=progress
     )
     payload = {
         "run_id": result.extraction.run_id,
@@ -98,14 +98,20 @@ def _run_one_round(*, vectorize: bool, reset_stale: bool, verbose: bool) -> dict
 
 
 def _run_once(args: argparse.Namespace) -> int:
-    """手动运行一次，处理完本次批次即退出。"""
+    """手动运行一次，使用与定时模式相同的实例锁保护完整抽取与入库流程。"""
     if not _check_llm_configured():
         return 2
-    payload = _run_one_round(
-        vectorize=not args.staging_only,
-        reset_stale=not args.no_reset_stale,
-        verbose=not args.quiet,
-    )
+    lock_path = Path(args.lock_file).expanduser() if args.lock_file else default_lock_path()
+    control = MiningRuntimeControl(lock_path=lock_path)
+    control.acquire()
+    try:
+        payload = _run_one_round(
+            staging_only=args.staging_only,
+            reset_stale=not args.no_reset_stale,
+            verbose=not args.quiet,
+        )
+    finally:
+        control.release()
     payload["command"] = "once"
     _print_json(payload)
     # 退出码：0 表示本轮工作已完整结束；1 表示还有遗留（批次上限或抽取失败），可再次运行继续。
@@ -140,7 +146,7 @@ def _run_scheduled(args: argparse.Namespace) -> int:
             print(f"[第 {round_index} 轮] {time.strftime('%Y-%m-%d %H:%M:%S')}")
             try:
                 payload = _run_one_round(
-                    vectorize=not args.staging_only,
+                    staging_only=args.staging_only,
                     reset_stale=not args.no_reset_stale,
                     verbose=not args.quiet,
                 )

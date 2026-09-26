@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.persistence.mysql.database import get_session_factory
@@ -208,19 +208,29 @@ def _to_message_row(message: Message) -> MiningMessageRow:
 
 
 def list_conversations_with_trusted_messages(limit: int) -> list[str]:
-    """列出存在可信消息的会话 id，按最新活动时间升序排列。
+    """列出锚点之后仍有可信答案的会话 id，按答案时间升序排列。
 
-    只选择有 `complete` 状态消息的会话：整段对话都没有可信消息的会话没有抽取价值，提前排除
-    可以省掉后续空读。升序（最早活动的先处理）让积压数据按时间顺序补齐，也让人工核对时更容易
-    预测下一个被处理的会话。
+    已处理完的会话必须退出前 `limit` 名额，否则会话上限较小时，后面的会话会被永久饿死。
+    只看可信答案，末尾尚未得到答复的用户消息留待下一轮有答案后再处理。
     """
     factory = get_session_factory()
     with factory() as session:
+        anchors = (
+            select(
+                ConversationMiningBatch.conversation_id.label("conversation_id"),
+                func.max(ConversationMiningBatch.last_message_at).label("last_message_at"),
+            )
+            .where(ConversationMiningBatch.status.in_(BATCH_STATUS_ANCHOR_ADVANCING))
+            .group_by(ConversationMiningBatch.conversation_id)
+            .subquery()
+        )
         rows = session.execute(
             select(Message.conversation_id, func.max(Message.created_at).label("last_at"))
+            .outerjoin(anchors, anchors.c.conversation_id == Message.conversation_id)
             .where(
                 Message.status == TRUSTED_MESSAGE_STATUS,
-                Message.sender_role.in_(("user",) + ANSWER_ROLES),
+                Message.sender_role.in_(ANSWER_ROLES),
+                or_(anchors.c.last_message_at.is_(None), Message.created_at > anchors.c.last_message_at),
             )
             .group_by(Message.conversation_id)
             .order_by(func.max(Message.created_at).asc(), Message.conversation_id.asc())
@@ -338,7 +348,8 @@ def claim_pending_batches(run_id: str, *, limit: int = CLAIM_BATCH_LIMIT) -> lis
     SELECT 会跳过这些行，因此同一批次不会被两个运行同时抽取。`SKIP LOCKED` 而不是等待，是为了
     让并发运行各干各的而不是串行排队。
 
-    `failed` 状态的批次也会被重新认领，这就是“从失败批次继续”的实现；错误信息在抽取时覆盖。
+    `failed` 状态的批次由下一轮重新认领；同一轮失败后不会反复认领并耗尽批次预算。
+    错误信息在下次认领时覆盖。
     """
     factory = get_session_factory()
     now = utc_now_naive()
@@ -349,8 +360,15 @@ def claim_pending_batches(run_id: str, *, limit: int = CLAIM_BATCH_LIMIT) -> lis
                 session.scalars(
                     select(ConversationMiningBatch)
                     .where(
-                        ConversationMiningBatch.status.in_(
-                            (BATCH_STATUS_PENDING, BATCH_STATUS_FAILED)
+                        or_(
+                            ConversationMiningBatch.status == BATCH_STATUS_PENDING,
+                            and_(
+                                ConversationMiningBatch.status == BATCH_STATUS_FAILED,
+                                or_(
+                                    ConversationMiningBatch.run_id.is_(None),
+                                    ConversationMiningBatch.run_id != run_id,
+                                ),
+                            ),
                         )
                     )
                     .order_by(
@@ -516,11 +534,11 @@ def upsert_candidates(drafts: list[CandidateDraft]) -> int:
         return written
 
 
-def list_staged_candidates(run_id: str, *, limit: int = 5000) -> list[StagedCandidate]:
-    """读取某次运行抽取出的全部待去重候选。
+def list_staged_candidates() -> list[StagedCandidate]:
+    """读取所有已抽取或待入库批次的待去重候选，包含以前运行留下的候选。
 
-    只取 `staged`：已经是 `promoted` 或 `rejected` 的候选在上一轮已经处理过，重复处理会把它
-    再算进本轮去重结果，导致同一知识被反复重写出新块。
+    `run_id` 只用于追溯抽取轮次，不能限定整体去重范围。一次运行因失败或上限暂停后，已抽取
+    批次仍带旧 `run_id`；续跑必须将其与新批次一起去重。这里不截断结果，避免遗漏尾部候选。
     """
     factory = get_session_factory()
     with factory() as session:
@@ -531,7 +549,7 @@ def list_staged_candidates(run_id: str, *, limit: int = 5000) -> list[StagedCand
                 ConversationMiningBatch.id == ConversationQaCandidate.batch_id,
             )
             .where(
-                ConversationMiningBatch.run_id == run_id,
+                ConversationMiningBatch.status.in_((BATCH_STATUS_EXTRACTED, BATCH_STATUS_READY)),
                 ConversationQaCandidate.status == CANDIDATE_STATUS_STAGED,
             )
             .order_by(
@@ -539,7 +557,6 @@ def list_staged_candidates(run_id: str, *, limit: int = 5000) -> list[StagedCand
                 ConversationQaCandidate.created_at.asc(),
                 ConversationQaCandidate.id.asc(),
             )
-            .limit(limit)
         )
         return [
             StagedCandidate(
@@ -559,11 +576,11 @@ def list_staged_candidates(run_id: str, *, limit: int = 5000) -> list[StagedCand
         ]
 
 
-def run_has_unfinished_batches(run_id: str) -> bool:
-    """判断本次运行是否还有没抽取完的批次。
+def has_unfinished_batches() -> bool:
+    """判断整个待处理批次池是否还有没抽取完的批次。
 
-    只要存在 `pending`、`extracting` 或 `failed` 的批次，就说明本轮候选还不完整，整体去重必须
-    推迟——只在部分候选上做去重，会把“跨批次重复问法”漏掉，正是本阶段要避免的问题。
+    `pending` 可能尚未被任何运行认领，因此 `run_id` 为空；`failed` 也可能属于旧运行。
+    两者均须阻止整体去重，直到对应候选进入同一个去重池。
     """
     factory = get_session_factory()
     with factory() as session:
@@ -571,7 +588,6 @@ def run_has_unfinished_batches(run_id: str) -> bool:
             select(func.count())
             .select_from(ConversationMiningBatch)
             .where(
-                ConversationMiningBatch.run_id == run_id,
                 ConversationMiningBatch.status.in_(
                     (BATCH_STATUS_PENDING, BATCH_STATUS_EXTRACTING, BATCH_STATUS_FAILED)
                 ),
@@ -580,15 +596,14 @@ def run_has_unfinished_batches(run_id: str) -> bool:
         return bool(count)
 
 
-def mark_run_ready(run_id: str) -> int:
-    """把本次运行中已抽取的批次置为 `ready`，返回条数。"""
+def mark_extracted_batches_ready() -> int:
+    """把所有轮次已抽取的批次置为 `ready`，返回条数。"""
     factory = get_session_factory()
     with factory() as session:
         with session.begin():
             result = session.execute(
                 update(ConversationMiningBatch)
                 .where(
-                    ConversationMiningBatch.run_id == run_id,
                     ConversationMiningBatch.status == BATCH_STATUS_EXTRACTED,
                 )
                 .values(status=BATCH_STATUS_READY)
@@ -653,11 +668,12 @@ def mark_candidates_decided(
                 )
 
 
-def list_existing_chunks(limit: int = 5000) -> list[ExistingChunk]:
+def list_existing_chunks() -> list[ExistingChunk]:
     """读取已有正式知识块，供去重时判断“这个问法/答案是不是已经入库了”。
 
     只读未作废的块（`vectorized`、`pending`、`need_manual_review`）：`superseded` 的块已经无效，
-    拿它参与去重会让本该入库的新知识被误判为重复。
+    拿它参与去重会让本该入库的新知识被误判为重复。不能截断已有知识，否则尾部知识
+    无法参与去重，续跑可能生成重复块。
     """
     factory = get_session_factory()
     with factory() as session:
@@ -665,7 +681,6 @@ def list_existing_chunks(limit: int = 5000) -> list[ExistingChunk]:
             select(KnowledgeChunk)
             .where(KnowledgeChunk.vector_status != "superseded")
             .order_by(KnowledgeChunk.source_type.asc(), KnowledgeChunk.source_id.asc())
-            .limit(max(1, limit))
         )
         return [
             ExistingChunk(
@@ -680,17 +695,33 @@ def list_existing_chunks(limit: int = 5000) -> list[ExistingChunk]:
         ]
 
 
-def list_run_batch_ids(run_id: str) -> list[str]:
-    """列出本次运行的批次主键；用于把入库结果回写到对应的批次进度行。"""
+def list_ready_batch_ids() -> list[str]:
+    """列出所有等待入库结论的批次主键，包含之前运行留下的 `ready`。"""
     factory = get_session_factory()
     with factory() as session:
         rows = session.scalars(
             select(ConversationMiningBatch.id).where(
-                ConversationMiningBatch.run_id == run_id,
                 ConversationMiningBatch.status == BATCH_STATUS_READY,
             )
         )
         return list(rows)
+
+
+def list_ready_batches_with_promoted_candidates() -> set[str]:
+    """找出已有正式知识结论的 ready 批次，用于恢复候选已决但批次未终结的中断。"""
+    factory = get_session_factory()
+    with factory() as session:
+        return set(
+            session.scalars(
+                select(ConversationQaCandidate.batch_id)
+                .join(ConversationMiningBatch, ConversationMiningBatch.id == ConversationQaCandidate.batch_id)
+                .where(
+                    ConversationMiningBatch.status == BATCH_STATUS_READY,
+                    ConversationQaCandidate.status == CANDIDATE_STATUS_PROMOTED,
+                )
+                .distinct()
+            )
+        )
 
 
 def latest_run_id() -> str | None:

@@ -1,5 +1,9 @@
 #requires -Version 5.1
 
+# 显式启用本地对话挖掘定时进程：.\start.ps1 -EnableConversationMining
+# 默认启动不运行挖掘，不会因启动网站而调用抽取模型。
+param([switch]$EnableConversationMining)
+
 $ErrorActionPreference = 'Stop'
 
 $root = $PSScriptRoot
@@ -132,6 +136,7 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $apiStdout = Join-Path $logDir 'api.stdout.log'
 $apiStderr = Join-Path $logDir 'api.stderr.log'
 $apiProcess = $null
+$miningProcess = $null
 
 try {
     Write-Host 'Starting FastAPI...'
@@ -154,6 +159,23 @@ try {
     }
     if (-not $apiReady) { throw "FastAPI did not start. Check $apiStderr" }
 
+    if ($EnableConversationMining) {
+        # CLI 的默认锁覆盖手动 once 与 schedule；第二个实例会立即退出，不会重复调用模型。
+        $miningStdout = Join-Path $logDir 'mining.stdout.log'
+        $miningStderr = Join-Path $logDir 'mining.stderr.log'
+        Write-Host 'Starting conversation mining schedule...'
+        $miningProcess = Start-Process -FilePath $python `
+            -ArgumentList @('-u', '-m', 'scripts.mine_conversation_knowledge', 'schedule') `
+            -WorkingDirectory $backend -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $miningStdout -RedirectStandardError $miningStderr
+        Start-Sleep -Seconds 2
+        $miningProcess.Refresh()
+        if ($miningProcess.HasExited) {
+            throw "Conversation mining schedule exited (code $($miningProcess.ExitCode)). Check $miningStdout and $miningStderr"
+        }
+        Write-Host "Conversation mining schedule: every MINING_INTERVAL_SECONDS seconds; logs: $miningStdout and $miningStderr"
+    }
+
     $env:VITE_API_MODE = 'remote'
     $env:VITE_API_BASE_URL = '/api'
     Write-Host 'FastAPI: http://127.0.0.1:8000/api/health'
@@ -169,6 +191,12 @@ try {
         Pop-Location
     }
 } finally {
+    if ($miningProcess) {
+        $miningProcess.Refresh()
+        if (-not $miningProcess.HasExited) {
+            Stop-Process -Id $miningProcess.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
     if ($apiProcess) {
         $apiProcess.Refresh()
         if (-not $apiProcess.HasExited) {

@@ -7,8 +7,8 @@
    否则答案会与问题分离，抽取出来的知识必然残缺。
 2. **逐批调模型抽取。** 调用前对整段对话脱敏；模型输出按固定结构逐条校验，通过校验的候选与被拒
    候选都写入暂存表。这一步**只写暂存**，不碰 `knowledge_chunks`。
-3. **等全部批次抽取完再整体去重。** 只要本轮还有未抽取或失败的批次，就去重阶段直接返回：只在部分
-   候选上做去重，跨批次的重复问法就漏掉了，这正是“去重不能只在单个 LLM 批次内完成”的含义。
+3. **等全部待处理批次抽取完再整体去重。** 未完成批次可能属于旧轮次或尚无 `run_id`；只要仍有
+   `pending`、`extracting` 或 `failed`，就推迟去重。下一轮同时读取旧轮次和新轮次的暂存候选。
 4. **去重后按答案分组入库。** 相同答案的不同真实问法合并成一条知识（questions 保存全部问法）；
    答案冲突的候选留在暂存表标为待处理；与已有知识答案一致的候选视为已入库，避免重复生成正式知识
    与重复向量。
@@ -65,8 +65,8 @@ REASON_ANSWER_CONFLICT = "同一问法存在相互冲突的答案，留待人工
 
 # 无法抽取的窗口的原因。
 REASON_OVERSIZED_TURN = "单轮问答超过单批字符上限，需人工拆分后重跑"
-# 批次里的候选全部是“已入库的重复”或“答案冲突”时，批次本身不产生新知识，但仍需推进续跑锚点。
-REASON_BATCH_NO_NEW_KNOWLEDGE = "本批次候选均为重复或答案冲突，未产生新知识，已留待处理"
+# 批次没有可入库的新知识（包括没有有效候选）时，仍需记录结论并推进续跑锚点。
+REASON_BATCH_NO_NEW_KNOWLEDGE = "本批次无可入库的新知识，候选结论已记录"
 
 # 规范化问法时去掉的标点：全角与半角都要覆盖，否则“怎么退货？”与“怎么退货”会被当成两种问法。
 _PUNCTUATION = re.compile(r"[\s\u3000!-/:-@\[-`{-~！-＠［-｀｛-～、。，；：？！“”‘’（）《》【】—…·]+")
@@ -106,7 +106,7 @@ class PromotionRunResult:
 
 @dataclass
 class PipelineResult:
-    """一次完整任务的统计；`skipped_dedupe` 为真表示本轮候选不完整，去重被推迟。"""
+    """一次任务的统计；`skipped_dedupe` 为真表示待处理池尚不完整，去重被推迟。"""
 
     extraction: ExtractionRunResult
     promotion: PromotionRunResult | None = None
@@ -372,8 +372,8 @@ def run_extraction(
 ) -> ExtractionRunResult:
     """执行抽取阶段：读消息、切批、逐批调模型、写暂存。
 
-    只做抽取与暂存。批次全部抽取完成后由 `run_promotion` 做整体去重与入库，两个阶段分开是刻意的
-    ——只有确认本轮没有剩余批次，去重才看得到完整候选集。
+    只做抽取与暂存。待处理批次全部抽取完成后由 `run_promotion` 做整体去重与入库；
+    旧轮次已抽取的批次会保留在暂存池，直至全部批次可一起去重。
     """
     def report(message: str) -> None:
         if on_progress is not None:
@@ -884,8 +884,8 @@ def run_promotion(
 ) -> PromotionRunResult:
     """执行整体去重与入库阶段。
 
-    前置条件是本轮所有批次都已抽取完成：由 `run_pipeline` 用
-    `staging_repo.run_has_unfinished_batches` 判定，判定不通过时根本不会走到这里。在部分候选上
+    前置条件是所有待处理批次都已抽取完成：由 `run_pipeline` 用
+    `staging_repo.has_unfinished_batches` 判定，判定不通过时根本不会走到这里。在部分候选上
     做去重会让跨批次的重复问法漏网，所以这个前置条件是硬性的。
 
     去重规则（详见 `dedupe_candidates`）：
@@ -902,21 +902,39 @@ def run_promotion(
         if on_progress is not None:
             on_progress(message)
 
-    staged = staging_repo.list_staged_candidates(run_id)
+    if staging_repo.has_unfinished_batches():
+        raise RuntimeError("仍有未抽取完成的批次，不能在部分候选上整体去重入库")
+
+    staged = staging_repo.list_staged_candidates()
     if not staged:
-        staging_repo.mark_run_ready(run_id)
-        batch_ids = staging_repo.list_run_batch_ids(run_id)
+        staging_repo.mark_extracted_batches_ready()
+        batch_ids = staging_repo.list_ready_batch_ids()
+        promoted_batch_ids = staging_repo.list_ready_batches_with_promoted_candidates()
         for batch_id in batch_ids:
-            staging_repo.mark_batch_promoted(batch_id)
+            if batch_id in promoted_batch_ids:
+                staging_repo.mark_batch_promoted(batch_id)
+            else:
+                staging_repo.mark_batch_skipped(batch_id, REASON_BATCH_NO_NEW_KNOWLEDGE)
         return PromotionRunResult(
             run_id=run_id, staged_candidates=0, distinct_questions=0, promoted_knowledge=0,
             merged_candidates=0, promoted_candidates=0, duplicate_candidates=0,
-            conflict_candidates=0, batches_promoted=len(batch_ids), vectors_written=0,
+            conflict_candidates=0, batches_promoted=len(promoted_batch_ids), vectors_written=0,
         )
 
     plan = build_dedupe_plan(staged, staging_repo.list_existing_chunks())
     semantic = similarity or _new_similarity()
     items, rejected, downgrade_note = dedupe_candidates(plan, similarity=semantic)
+
+    planned_promoted = {
+        candidate.id
+        for item in items
+        for entry in item.entries
+        for candidate in entry.candidates
+    }
+    planned_rejected = {candidate_id for candidate_id, _ in rejected}
+    staged_ids = {candidate.id for candidate in staged}
+    if planned_promoted & planned_rejected or (planned_promoted | planned_rejected) != staged_ids:
+        raise RuntimeError("整体去重未给所有暂存候选唯一结论，停止入库")
 
     promoted_ids: list[str] = []
     chunk_id_by_candidate: dict[str, str] = {}
@@ -944,17 +962,11 @@ def run_promotion(
     staging_repo.mark_candidates_decided(
         promoted_ids, rejected, chunk_id_by_candidate=chunk_id_by_candidate
     )
-    staging_repo.mark_run_ready(run_id)
-    # 只把“确实产生了结论”的批次计为已入库：入过库的、或候选全是重复/冲突而被拒的。前者推进了
-    # 知识，后者已经在本轮得到明确处置，重复扫描不会产生不同结果。
-    batch_ids = staging_repo.list_run_batch_ids(run_id)
-    decided_ids = {candidate_id for candidate_id, _ in rejected}
-    promoted_id_set = set(promoted_ids)
-    promoted_batch_ids = [
-        batch_id
-        for batch_id in batch_ids
-        if _batch_has_decided_candidates(staged, batch_id, decided_ids, promoted_id_set)
-    ]
+    staging_repo.mark_extracted_batches_ready()
+    # 已写入候选结论但中断在 ready 的旧批次也在这里恢复；有正式知识的为 promoted，其余为 skipped。
+    batch_ids = staging_repo.list_ready_batch_ids()
+    batches_with_promoted_candidates = staging_repo.list_ready_batches_with_promoted_candidates()
+    promoted_batch_ids = [batch_id for batch_id in batch_ids if batch_id in batches_with_promoted_candidates]
     skipped_batch_ids = [batch_id for batch_id in batch_ids if batch_id not in promoted_batch_ids]
     vectors_written = 0
     try:
@@ -970,8 +982,7 @@ def run_promotion(
         # 未补齐的块保持 pending，可直接用建库命令的 vectorize 子命令补上。
         for batch_id in promoted_batch_ids:
             staging_repo.mark_batch_promoted(batch_id)
-        # 候选已经判过但没有任何入库内容的批次：标记跳过，让续跑锚点前进，避免每次运行都重新抽取
-        # 同一段已经确认过是重复或冲突的历史。跳过的原因如实写在批次的 error_message 里。
+        # 没有任何新知识的批次标记跳过并推进续跑锚点；原因写入 error_message。
         for batch_id in skipped_batch_ids:
             staging_repo.mark_batch_skipped(batch_id, REASON_BATCH_NO_NEW_KNOWLEDGE)
 
@@ -985,34 +996,10 @@ def run_promotion(
         promoted_candidates=len(promoted_ids),
         duplicate_candidates=duplicate_candidates,
         conflict_candidates=conflict_candidates,
-        batches_promoted=len(batch_ids),
+        batches_promoted=len(promoted_batch_ids),
         vectors_written=vectors_written,
         notes=notes,
     )
-
-
-def _batch_has_decided_candidates(
-    staged: list[staging_repo.StagedCandidate],
-    batch_id: str,
-    decided_ids: set[str],
-    promoted_ids: set[str],
-) -> bool:
-    """判断一个批次的候选是否都已经有了明确结论。
-
-    两种情形都算“已处置”，可以推进续跑锚点：
-
-    * 批次里有候选被入库（出现在 `promoted_ids` 里）；
-    * 批次里所有候选都被判为重复或冲突（`decided_ids`）。
-
-    其余情形（例如批次里没有候选）返回 False，由调用方把批次标记为跳过并记录原因。这样既不会因为
-    一直抽取不出新知识而反复扫描同一段历史，也不会丢下未处理的候选。
-    """
-    batch_candidates = [candidate for candidate in staged if candidate.batch_id == batch_id]
-    if any(candidate.id in promoted_ids for candidate in batch_candidates):
-        return True
-    if not batch_candidates:
-        return False
-    return all(candidate.id in decided_ids for candidate in batch_candidates)
 
 
 def promote_group(
@@ -1076,24 +1063,28 @@ def run_pipeline(
     *,
     client: ConversationExtractionClient,
     vectorize: bool | None = None,
+    promote: bool = True,
     on_progress: Callable[[str], None] | None = None,
 ) -> PipelineResult:
-    """执行一次完整任务：抽取 -> 暂存 -> 整体去重 -> 入库 -> 补向量。
+    """执行一轮任务：抽取 -> 暂存，完整时可整体去重 -> 入库 -> 补向量。
 
-    这是定时任务每一轮调用的入口。返回结果里 `skipped_dedupe` 为真表示本轮还有批次没抽完（达到
-    批次上限、或部分批次失败），去重被有意推迟到下一次运行——这样跨批次重复问法不会漏掉。
+    这是定时任务每一轮调用的入口。返回结果里 `skipped_dedupe` 为真表示待处理池仍有批次没抽完
+    （达到批次上限、部分批次失败或中断后遗留），去重推迟到下一轮，旧候选继续留在暂存池。
     """
     run_id = staging_repo.generate_run_id()
     extraction = run_extraction(run_id=run_id, client=client, on_progress=on_progress)
     notes: list[str] = []
-    # 失败的批次不影响本轮对已抽取候选去重吗？会影响：失败窗口的候选缺席，跨窗口重复问法可能
-    # 漏判。因此只要还有未完成批次，就推迟去重，让下一次运行重试失败批次后再统一处理。
-    if staging_repo.run_has_unfinished_batches(run_id):
+    # 未认领的 pending 批次没有 run_id，失败批次也可能属于旧轮次；只检查本轮会漏掉它们。
+    if staging_repo.has_unfinished_batches():
         notes.append(
             "本轮仍有未抽取完成的批次（达到批次上限或抽取失败），整体去重推迟到下一次运行；"
             "已抽取的候选保留在暂存表。"
         )
         return PipelineResult(extraction=extraction, skipped_dedupe=True, notes=notes)
+
+    if not promote:
+        notes.append("仅暂存模式：候选保留在暂存表，后续完整运行再整体去重并入库。")
+        return PipelineResult(extraction=extraction, notes=notes)
 
     should_vectorize = mining_settings.vectorize_after_promote if vectorize is None else vectorize
     promotion = run_promotion(run_id=run_id, vectorize=should_vectorize, on_progress=on_progress)
