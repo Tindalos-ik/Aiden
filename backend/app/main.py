@@ -2,12 +2,21 @@ from fastapi import FastAPI
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.conversations import router as conversations_router
+from app.api.routes.rag_admin import router as rag_admin_router
+from app.services.rag.admin_console import stop_owned_embedding_on_shutdown
 
 
 # 应用导入阶段只注册路由；不连接 MySQL、不建表。表结构须先由 Alembic 升级。
 app = FastAPI(title="Aiden local support API", version="0.1.0")
 app.include_router(auth_router)
 app.include_router(conversations_router)
+app.include_router(rag_admin_router)
+
+
+@app.on_event("shutdown")
+def shutdown_owned_embedding() -> None:
+    """仅清理当前 API 进程亲自启动的本地向量子进程。"""
+    stop_owned_embedding_on_shutdown()
 
 
 @app.get("/api/health")

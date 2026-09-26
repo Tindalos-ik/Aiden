@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 
-from app.api.deps import current_actor
+from app.api.deps import current_identity
 from app.api.schemas import LoginRequest
 from app.config.settings import settings
 from app.persistence.mysql.chat import create_session, delete_session, verify_user
@@ -11,10 +11,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/login")
 def login(body: LoginRequest, response: Response) -> dict:
-    """验证普通用户并签发 HttpOnly Cookie；Cookie 明文不会写入 MySQL。"""
-    if body.role == "staff":
-        # 当前没有人工工作台，因此拒绝员工登录，避免把演示入口伪装成已接通。
-        raise HTTPException(status_code=403, detail="第一版尚未接入人工客服工作台，请选择普通用户登录")
+    """验证用户或员工并签发 HttpOnly Cookie；Cookie 明文不会写入 MySQL。"""
     actor = verify_user(body.account, body.password, body.role)
     if not actor:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
@@ -33,8 +30,8 @@ def login(body: LoginRequest, response: Response) -> dict:
 
 
 @router.get("/me")
-def me(actor: dict = Depends(current_actor)) -> dict:
-    """返回认证依赖已经验证过的当前用户公开资料。"""
+def me(actor: dict = Depends(current_identity)) -> dict:
+    """返回当前会话公开资料；员工和普通用户都可恢复登录状态。"""
     return actor
 
 

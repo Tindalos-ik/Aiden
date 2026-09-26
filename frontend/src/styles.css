@@ -400,3 +400,28 @@ button { -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+.rag-shell { min-height: 100vh; }
+.rag-main { width: min(1320px, calc(100% - 48px)); margin: 0 auto; padding: 30px 0 64px; display: grid; gap: 20px; }
+.rag-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.rag-heading h2 { margin: 6px 0 4px !important; }
+.rag-heading p { margin-bottom: 0; }
+.rag-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.rag-card { border-radius: 16px; }
+.rag-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.rag-stat { border-radius: 12px; }
+.rag-config { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.rag-config span { display: flex; flex-direction: column; color: #6b7485; gap: 3px; }
+.rag-config b { color: #23344d; overflow-wrap: anywhere; }
+.rag-hint { margin: 14px 0 0 !important; }
+.rag-file-select { min-width: 270px; max-width: 44vw; }
+.rag-stack { display: grid; gap: 10px; }
+.rag-preview-list { margin-top: 14px; max-height: 660px; overflow: auto; padding-right: 5px; }
+.rag-chunk { border-radius: 10px; }
+.rag-chunk .ant-card-head-title { white-space: normal; }
+.rag-chunk-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; color: #627084; font-size: 13px; }
+.rag-chunk-body { margin: 12px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.7; color: #26354a; }
+.rag-job-note { margin: 9px 0 0 !important; }
+.rag-result { max-height: 200px; overflow: auto; margin: 10px 0 0; padding: 10px; background: #f7f9fc; border-radius: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rag-status-tags { margin-bottom: 12px; }
+@media (max-width: 850px) { .rag-grid { grid-template-columns: 1fr; } .rag-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 580px) { .rag-main { width: calc(100% - 24px); padding-top: 18px; } .rag-heading { flex-direction: column; } .rag-file-select { min-width: 180px; max-width: 100%; } .rag-config { grid-template-columns: 1fr; } }

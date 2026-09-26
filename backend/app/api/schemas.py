@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    """登录请求体；role 保持前端现有契约，服务当前只允许 user 登录。"""
+    """登录请求体；role 同时用于员工和普通用户登录校验。"""
     account: str = Field(min_length=1, max_length=255)
     password: str = Field(min_length=1, max_length=255)
     role: Literal["user", "staff"] = "user"

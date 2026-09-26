@@ -70,3 +70,66 @@ export interface LoginInput {
   password: string;
   role?: Role;
 }
+
+export interface RagChunk {
+  id?: string;
+  index?: number;
+  sourceType?: string;
+  sourcePath?: string | null;
+  sectionPath: string;
+  category: string;
+  questions: string[];
+  content: string;
+  contentType: string;
+  isKeyClause: boolean;
+  needsManualReview?: boolean;
+  reviewReason?: string | null;
+  vectorStatus?: string;
+  vectorId?: string | null;
+}
+
+export interface RagJob {
+  id: string;
+  kind: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  progress: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  result: unknown;
+}
+
+export interface RagOverview {
+  embedding: {
+    healthy: boolean;
+    managed: boolean;
+    processState: string;
+    exitCode: number | null;
+    model: string | null;
+    dimension: number | null;
+    healthError: string | null;
+    canStart: boolean;
+  };
+  chunksByStatus: Record<string, number>;
+  batchesByStatus: Record<string, number>;
+  candidatesByStatus: Record<string, number>;
+  milvus: { collection: string; dimension: number; metric: string; index: string };
+  documents: string[];
+  databaseError: string | null;
+  documentsError: string | null;
+}
+
+export interface RagCandidate {
+  candidate_id: string;
+  question: string;
+  answer: string;
+  category: string;
+  status: string;
+  rejection_reason: string | null;
+}
+
+export interface RagMiningSnapshot {
+  batches: Array<{ id: string; runId: string | null; status: string; turnCount: number; candidateCount: number; error: string | null; updatedAt: string | null }>;
+  candidates: Record<string, RagCandidate[]>;
+}

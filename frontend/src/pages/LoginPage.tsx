@@ -16,7 +16,7 @@ export function LoginPage() {
     mutationFn: (input: LoginInput) => api.login(input),
     onSuccess: (actor) => {
       queryClient.setQueryData(['me'], actor);
-      navigate(actor.role === 'staff' ? '/staff' : '/app', { replace: true });
+      navigate(actor.role === 'staff' ? (apiMode === 'remote' ? '/staff/rag' : '/staff') : '/app', { replace: true });
     },
     onError: (error) => message.error(error instanceof Error ? error.message : '登录失败'),
   });
@@ -42,7 +42,7 @@ export function LoginPage() {
     </section>
     <section className="login-main">
       <div className="login-panel">
-        <div className="login-heading"><div className="login-mode"><ModePill /></div><Typography.Title level={2}>{apiMode === 'mock' ? '欢迎来到演示工作台' : '欢迎回来'}</Typography.Title><Typography.Paragraph type="secondary">{apiMode === 'mock' ? '选择一个演示身份，完整体验智能客服与人工协作流程。' : '使用本地开发演示账号登录智能客服。'}</Typography.Paragraph></div>
+        <div className="login-heading"><div className="login-mode"><ModePill /></div><Typography.Title level={2}>{apiMode === 'mock' ? '欢迎来到演示工作台' : '欢迎回来'}</Typography.Title><Typography.Paragraph type="secondary">{apiMode === 'mock' ? '选择一个演示身份，完整体验智能客服与人工协作流程。' : '普通用户可使用演示账号；员工使用单独初始化的账号进入建库控制台。'}</Typography.Paragraph></div>
         {apiMode === 'mock' ? <>
           <Alert className="demo-alert" type="info" showIcon message="演示模式" description="此工作台使用本地模拟数据，不会连接真实订单系统。演示数据保存在此浏览器中，可随时重置。" />
           <div className="demo-account-heading"><span>选择演示身份</span><span className="demo-account-hint">点击即可进入</span></div>
@@ -57,9 +57,9 @@ export function LoginPage() {
           </div>
           <div className="demo-footer"><span className="demo-footer-dot" /> 同一浏览器开两个标签页，可使用用户和客服身份演示转人工</div>
         </> : <Card className="remote-login-card" bordered={false}>
-          <Alert className="demo-alert" type="info" showIcon message="本地开发演示账号" description={<>普通用户：maya@aiden.demo / aiden123，或 chen@aiden.demo / aiden123。第一版尚未接入人工客服工作台。</>} />
+          <Alert className="demo-alert" type="info" showIcon message="本地开发演示账号" description={<>普通用户：maya@aiden.demo / aiden123，或 chen@aiden.demo / aiden123。员工账号需在服务端显式初始化，登录后进入 RAG 建库控制台。</>} />
           <Radio.Group value={role} onChange={(event) => setRole(event.target.value as Role)} optionType="button" buttonStyle="solid" className="role-selector">
-            <Radio.Button value="user">普通用户</Radio.Button><Radio.Button value="staff" disabled>人工客服（未接入）</Radio.Button>
+            <Radio.Button value="user">普通用户</Radio.Button><Radio.Button value="staff">员工建库</Radio.Button>
           </Radio.Group>
           <Form layout="vertical" onFinish={remoteLogin} requiredMark={false}>
             <Form.Item label="账号" name="account" rules={[{ required: true, message: '请输入账号' }]}><Input size="large" prefix={<MailOutlined />} placeholder="邮箱或账号" autoComplete="username" /></Form.Item>
