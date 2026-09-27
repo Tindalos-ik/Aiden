@@ -1,0 +1,5495 @@
+{
+  "dataset": "D:\\myproject\\Aiden\\backend\\evals\\customer_rag_v1.jsonl",
+  "collection": "knowledge_bm25",
+  "faithfulness_judge": "deepseek-flash",
+  "strategies": {
+    "dense": {
+      "overall": {
+        "count": 15,
+        "answerable": 12,
+        "recall@1": 0.5,
+        "recall@5": 0.9167,
+        "recall@10": 1.0,
+        "mrr": 0.7292,
+        "faithfulness": 1.0,
+        "unanswerable_refusal_rate": 1.0
+      },
+      "by_type": {
+        "colloquial": {
+          "count": 2,
+          "answerable": 2,
+          "recall@1": 1.0,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "exact_model": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 0.0,
+          "recall@5": 0.75,
+          "recall@10": 1.0,
+          "mrr": 0.3125,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "multi_evidence": {
+          "count": 2,
+          "answerable": 2,
+          "recall@1": 0.5,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "policy_boundary": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 0.75,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 0.875,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "unanswerable": {
+          "count": 3,
+          "answerable": 0,
+          "recall@1": null,
+          "recall@5": null,
+          "recall@10": null,
+          "mrr": null,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        }
+      },
+      "by_difficulty": {
+        "easy": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 0.25,
+          "recall@5": 0.75,
+          "recall@10": 1.0,
+          "mrr": 0.4375,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "medium": {
+          "count": 6,
+          "answerable": 4,
+          "recall@1": 0.5,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 0.75,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        },
+        "hard": {
+          "count": 5,
+          "answerable": 4,
+          "recall@1": 0.75,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        }
+      }
+    },
+    "bm25": {
+      "overall": {
+        "count": 15,
+        "answerable": 12,
+        "recall@1": 0.7083,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.8472,
+        "faithfulness": 1.0,
+        "unanswerable_refusal_rate": 1.0
+      },
+      "by_type": {
+        "colloquial": {
+          "count": 2,
+          "answerable": 2,
+          "recall@1": 1.0,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "exact_model": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 1.0,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "multi_evidence": {
+          "count": 2,
+          "answerable": 2,
+          "recall@1": 0.25,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 0.6667,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "policy_boundary": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 0.5,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 0.7083,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "unanswerable": {
+          "count": 3,
+          "answerable": 0,
+          "recall@1": null,
+          "recall@5": null,
+          "recall@10": null,
+          "mrr": null,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        }
+      },
+      "by_difficulty": {
+        "easy": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 1.0,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "medium": {
+          "count": 6,
+          "answerable": 4,
+          "recall@1": 0.5,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 0.7083,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        },
+        "hard": {
+          "count": 5,
+          "answerable": 4,
+          "recall@1": 0.625,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 0.8333,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        }
+      }
+    },
+    "hybrid": {
+      "overall": {
+        "count": 15,
+        "answerable": 12,
+        "recall@1": 0.75,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.9028,
+        "faithfulness": 1.0,
+        "unanswerable_refusal_rate": 1.0
+      },
+      "by_type": {
+        "colloquial": {
+          "count": 2,
+          "answerable": 2,
+          "recall@1": 1.0,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "exact_model": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 0.5,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 0.7083,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "multi_evidence": {
+          "count": 2,
+          "answerable": 2,
+          "recall@1": 0.5,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "policy_boundary": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 1.0,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "unanswerable": {
+          "count": 3,
+          "answerable": 0,
+          "recall@1": null,
+          "recall@5": null,
+          "recall@10": null,
+          "mrr": null,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        }
+      },
+      "by_difficulty": {
+        "easy": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 0.5,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 0.7083,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "medium": {
+          "count": 6,
+          "answerable": 4,
+          "recall@1": 1.0,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        },
+        "hard": {
+          "count": 5,
+          "answerable": 4,
+          "recall@1": 0.75,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        }
+      }
+    },
+    "hybrid_rerank": {
+      "overall": {
+        "count": 15,
+        "answerable": 12,
+        "recall@1": 0.8333,
+        "recall@5": 1.0,
+        "recall@10": 1.0,
+        "mrr": 0.9583,
+        "faithfulness": 1.0,
+        "unanswerable_refusal_rate": 1.0
+      },
+      "by_type": {
+        "colloquial": {
+          "count": 2,
+          "answerable": 2,
+          "recall@1": 1.0,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "exact_model": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 1.0,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "multi_evidence": {
+          "count": 2,
+          "answerable": 2,
+          "recall@1": 0.5,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "policy_boundary": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 0.75,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 0.875,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "unanswerable": {
+          "count": 3,
+          "answerable": 0,
+          "recall@1": null,
+          "recall@5": null,
+          "recall@10": null,
+          "mrr": null,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        }
+      },
+      "by_difficulty": {
+        "easy": {
+          "count": 4,
+          "answerable": 4,
+          "recall@1": 1.0,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": null
+        },
+        "medium": {
+          "count": 6,
+          "answerable": 4,
+          "recall@1": 0.75,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 0.875,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        },
+        "hard": {
+          "count": 5,
+          "answerable": 4,
+          "recall@1": 0.75,
+          "recall@5": 1.0,
+          "recall@10": 1.0,
+          "mrr": 1.0,
+          "faithfulness": 1.0,
+          "unanswerable_refusal_rate": 1.0
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "strategy": "dense",
+      "id": "model_lp50",
+      "query": "MH-LP50 能在 App 上收到废砂盒满的提醒吗？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "智能猫砂盆 Lite"
+        }
+      ],
+      "answer_facts": [
+        "不支持 App 联网",
+        "不支持满溢推送"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "ee0126cf-ec37-4c31-9419-65a25bd5ab50",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)",
+          "score": 0.6382380723953247
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.6253491044044495
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.6239261031150818
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.5712229609489441
+        },
+        {
+          "chunk_id": "4484ed3d-6e2a-4128-ad3a-6f0f64d8aec4",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ",
+          "score": 0.5662532448768616
+        },
+        {
+          "chunk_id": "faad48e0-ca77-4d36-a3bd-603a8e2d8adb",
+          "source_path": null,
+          "section_path": "售后",
+          "score": 0.5582414865493774
+        },
+        {
+          "chunk_id": "294b3080-b848-4fcf-9037-395e055a3ab4",
+          "source_path": "README.md",
+          "section_path": "知识文档目录",
+          "score": 0.5449896454811096
+        },
+        {
+          "chunk_id": "a63c5401-1df4-4e40-819d-ab2ca5071f86",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 发货时效多久",
+          "score": 0.5358099937438965
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.535243809223175
+        },
+        {
+          "chunk_id": "7bb19a8f-46d5-4b2f-8d90-375d16928c0b",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 如何申请退款",
+          "score": 0.5348491668701172
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.3333333333333333,
+      "answer": "根据现有资料，MH-LP50 **不能**在 App 上收到废砂盒满的提醒。\n\n具体依据如下：\n\n- [3] 明确说明 MH-LP50 的核心功能为“自动感应清理、物理除臭盖板；**不含 App 联网功能**”，清理提示为“**无 App 联网，不支持满溢推送提醒**，建议每 4 至 5 天倾倒一次废砂盒”。\n\n补充说明：具备“废砂盒满时 App 推送提醒”功能的是其他型号，例如 [1] 的 MH-LP200 和 [2] 的 MH-LP100，与 MH-LP50 不同。\n\n如果您需要 App 满溢提醒功能，可以考虑上述支持 App 联网的型号；具体库存与购买事宜我这边无法核实，建议以商品页面信息为准。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案核心结论及依据均直接来自证据[3]，补充说明也由证据[1][2]支持，未添加无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "model_w60",
+      "query": "MH-W60 滤芯隔多久换？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机 Pro 不锈钢"
+        }
+      ],
+      "answer_facts": [
+        "建议每 4 周更换"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "43155fa1-833d-4bcf-9fab-8a761fb1b0cd",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 换货流程怎么走",
+          "score": 0.6250911951065063
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 0.6213297247886658
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.6169577836990356
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.5971165895462036
+        },
+        {
+          "chunk_id": "c316181a-6151-44d1-a02f-65481e489679",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 家电 > 冰箱的保修期是多久",
+          "score": 0.5932155251502991
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.5931028127670288
+        },
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.5922670364379883
+        },
+        {
+          "chunk_id": "d9477fcb-4722-4c12-b55a-897eb1e2c655",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 保修说明",
+          "score": 0.5921068787574768
+        },
+        {
+          "chunk_id": "855f16fa-666e-4230-bfa7-d23db819e1b7",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 维修寄修流程",
+          "score": 0.5681077837944031
+        },
+        {
+          "chunk_id": "d0c10073-6417-4bc8-9a46-cf9a3dd0437a",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 换货流程",
+          "score": 0.5640648603439331
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 0.0,
+      "recall@10": 1.0,
+      "mrr": 0.16666666666666666,
+      "answer": "根据您提供的证据，关于 MH-W60 滤芯更换周期，可核实如下：\n\n- MH-W60（自动饮水机 Pro 不锈钢）的过滤配置为“双滤芯并联”，建议每 4 周更换一次滤芯 [6]。\n\n其他型号的滤芯更换周期与 MH-W60 不同，供参考：\n- MH-W20 建议每 2 周更换一次滤芯 [2]；\n- MH-W40 建议每 3 周更换一次滤芯 [3]。\n\n以上为规格手册中的建议周期，实际更换频率可能因使用环境和水质而异；如需针对您的具体情况确认，建议联系客服进一步核实。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实（MH-W60、MH-W20、MH-W40的滤芯更换周期）均被对应证据[6][2][3]直接支持，无证据外事实。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "model_fd30",
+      "query": "MH-FD30 断电了还能远程喂吗？",
+      "type": "exact_model",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动喂食器 摄像头版"
+        }
+      ],
+      "answer_facts": [
+        "断电期间不支持 App 远程手动投喂",
+        "可维持定时投喂约 48 小时"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.708126425743103
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.6565395593643188
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.6033005118370056
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.5785930752754211
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 0.5707200169563293
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 0.5651061534881592
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.558127224445343
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.5516551733016968
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.545587420463562
+        },
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.5414741039276123
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.5,
+      "answer": "根据现有资料，关于 MH-FD30 断电后的远程喂食情况，可以确认以下事实：\n\n- MH-FD30 断电期间**不支持 App 远程手动投喂** [2]。\n- 市电断开时，MH-FD30 会自动切换到内置应急电池，可维持**定时投喂约 48 小时** [2]。\n- 断电期间**不支持视频回看** [2]。\n\n也就是说，断电后虽然设备仍能按定时计划投喂，但无法通过 App 进行远程手动投喂。\n\n关于断电期间是否会有推送提醒、以及应急电池耗尽后的具体表现，现有证据中没有相关信息，无法核实。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均直接来自证据[2]：断电期间不支持App远程手动投喂、自动切换内置应急电池维持定时投喂约48小时、不支持视频回看。未添加无证据支持的事实，并明确说明推送提醒和电池耗尽表现无相关信息。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "model_cam1",
+      "query": "MH-CAM1 支持多大 TF 卡？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "全景看护摄像头"
+        }
+      ],
+      "answer_facts": [
+        "最大 128G TF 卡"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "506322a9-0b96-45a6-a9e2-6456197e9bc9",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机支持双卡双待吗",
+          "score": 0.6650259494781494
+        },
+        {
+          "chunk_id": "c37d298f-d51b-4923-99d0-9aacaddbba46",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 支持哪些支付方式",
+          "score": 0.6260415315628052
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.5947487354278564
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.582995593547821
+        },
+        {
+          "chunk_id": "deef9b8f-7d21-4011-a577-32269a9dd745",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员等级与积分规则",
+          "score": 0.5820664167404175
+        },
+        {
+          "chunk_id": "e23c2f9f-7cfe-4f92-9dc4-4d22555a00e1",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员运费权益",
+          "score": 0.5660096406936646
+        },
+        {
+          "chunk_id": "543bae5d-ea49-4070-8474-a66309a8d18d",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大号三档加热垫(型号 MH-HP20)",
+          "score": 0.5500020384788513
+        },
+        {
+          "chunk_id": "4017302a-e18c-4c99-b6cb-8683abe34cf7",
+          "source_path": "README.md",
+          "section_path": "知识文档目录",
+          "score": 0.5452334880828857
+        },
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.5413370728492737
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.5366206169128418
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.25,
+      "answer": "根据商品规格手册，MH-CAM1 支持最大 128G TF 卡 [4]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中的事实“MH-CAM1 支持最大 128G TF 卡”被证据[4]直接支持，且引用正确。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "colloquial_nest",
+      "query": "猫窝里面那个垫子直接丢洗衣机行不？",
+      "type": "colloquial",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "猫窝是否可以机洗"
+        }
+      ],
+      "answer_facts": [
+        "内部垫芯不可机洗",
+        "只能局部擦洗后晾干"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "4a1beabf-6ade-4a85-b353-1a81019ab4fa",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 猫窝是否可以机洗",
+          "score": 0.7679157257080078
+        },
+        {
+          "chunk_id": "60d3f5ec-24e3-4a53-9cc5-79a11252f0f3",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 四季保暖猫窝(型号 MH-NEST20)",
+          "score": 0.7133392095565796
+        },
+        {
+          "chunk_id": "543bae5d-ea49-4070-8474-a66309a8d18d",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大号三档加热垫(型号 MH-HP20)",
+          "score": 0.5839026570320129
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.5692843198776245
+        },
+        {
+          "chunk_id": "be5ee87f-8005-4d94-ba75-1623bee93121",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 衣服可以试穿后退货吗",
+          "score": 0.5466980934143066
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 0.5440596342086792
+        },
+        {
+          "chunk_id": "71613b9e-0f10-4c71-8b36-b42eefc3ea09",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 使用与保养 > 皮具如何防潮保存",
+          "score": 0.5378547310829163
+        },
+        {
+          "chunk_id": "21c36139-a3f5-4620-ab66-dc9024521446",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大型猫爬架(型号 MH-CT30)",
+          "score": 0.5344918370246887
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 0.5327991843223572
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.5308852195739746
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有资料，猫窝的**内部垫芯不可以机洗**，只能局部擦洗后晾干；进水后填充物会结块变形 [1][2]。\n\n可以机洗的是**猫窝外套**：需要先拆掉内部垫芯，装进洗衣袋，选轻柔模式冷水洗，洗后阴干、不要暴晒 [1]。\n\n所以如果您说的是猫窝里那个可拆卸的垫芯，不建议直接丢洗衣机；如果是拆下来的外套，则可以按上述方式机洗 [1][2]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据[1][2]直接支持，无额外无依据信息。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "colloquial_postage",
+      "query": "不够包邮的话邮费多少啊？",
+      "type": "colloquial",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "运费怎么算"
+        }
+      ],
+      "answer_facts": [
+        "未满 99 元收取 10 元运费"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "1a53805a-a3dc-4d83-a984-71c2139d470f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 运费怎么算",
+          "score": 0.7123027443885803
+        },
+        {
+          "chunk_id": "4d83fc17-7261-471d-8d8f-572581c4a1ef",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 运费与包邮",
+          "score": 0.6460206508636475
+        },
+        {
+          "chunk_id": "e23c2f9f-7cfe-4f92-9dc4-4d22555a00e1",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员运费权益",
+          "score": 0.614613950252533
+        },
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.6048988699913025
+        },
+        {
+          "chunk_id": "deef9b8f-7d21-4011-a577-32269a9dd745",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员等级与积分规则",
+          "score": 0.5923861265182495
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 0.5856875777244568
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.5820391774177551
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.5724051594734192
+        },
+        {
+          "chunk_id": "7edb11cc-187a-48f7-adbf-af71e5f6957e",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 鞋子的尺码不准怎么办",
+          "score": 0.5716553926467896
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.5705275535583496
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "关于未满包邮门槛时的运费，现有证据中存在不一致，我按来源分别说明：\n\n- 有资料显示：单笔订单满 99 元包邮，未满收取 **10 元**运费，偏远地区运费另计 [1]。\n- 另有资料显示：单笔实付满 99 元包邮，未满收取 **6 元**基础运费；偏远地区（新疆、西藏、内蒙古部分区域）加收 **12 元**附加运费，该附加运费不参与包邮，需单独支付 [2]。\n\n也就是说，基础运费存在 10 元与 6 元两种说法，我无法核实以哪一个为准，建议您以结算页面实际显示的金额为准。\n\n另外补充两点：\n- 偏远地区运费另计，且配送时效会在正常时效基础上顺延 2 至 4 天 [2][6]。\n- 港澳台及海外暂不支持配送 [2][6]。\n\n如果您是会员，可能还有免运费权益，可以告诉我您的会员等级，我再帮您对照说明 [3]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据直接支持：10元运费[1]、6元基础运费及12元偏远附加费[2]、偏远时效顺延2-4天[2][6]、港澳台及海外不支持配送[2][6]、会员免运费权益[3]，且正确指出基础运费存在不一致，未添加证据外事实。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "policy_price_protection",
+      "query": "价保七天是收货以后才开始吗？",
+      "type": "policy_boundary",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "价格保护怎么申请"
+        }
+      ],
+      "answer_facts": [
+        "价保从下单时间起算",
+        "不是从签收之日起算"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 0.7141720056533813
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.6602929830551147
+        },
+        {
+          "chunk_id": "ca37f213-66b1-4e19-9904-3bc6ef9ea809",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货",
+          "score": 0.658324122428894
+        },
+        {
+          "chunk_id": "a63c5401-1df4-4e40-819d-ab2ca5071f86",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 发货时效多久",
+          "score": 0.6578826308250427
+        },
+        {
+          "chunk_id": "ac59c897-ddb0-4476-ad42-c96b35e7dca9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 商品缺货多久补货",
+          "score": 0.6532655954360962
+        },
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 0.6502642631530762
+        },
+        {
+          "chunk_id": "bdb1f943-66bf-47b8-b06c-b81d311d0181",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 适用条件",
+          "score": 0.6478375196456909
+        },
+        {
+          "chunk_id": "d9477fcb-4722-4c12-b55a-897eb1e2c655",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 保修说明",
+          "score": 0.6419410109519958
+        },
+        {
+          "chunk_id": "dfb25a96-0939-4824-8338-a228fd087279",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.6402749419212341
+        },
+        {
+          "chunk_id": "43155fa1-833d-4bcf-9fab-8a761fb1b0cd",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 换货流程怎么走",
+          "score": 0.6322749257087708
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "不是的。价保七天不是从收货以后才开始，而是**自下单时间起算**。\n\n依据如下：\n\n- [1] 明确说明：自营商品支持下单后 7 天内价保，价保的 7 天**自下单时间起算**，不是从签收之日起算。\n- [1] 同时提示：签收之日起 7 天内的是**无理由退货**，两者起算点不同，不要混用。\n- [3] 也印证了无理由退货是自**签收商品之日起** 7 个自然日内申请。\n\n所以：\n- **价保**：下单后 7 天内 → [1]\n- **七天无理由退货**：签收后 7 天内 → [3]\n\n如果您说的是“价保”，请按**下单时间**来判断是否还在 7 天内。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据[1]和[3]直接支持：价保自下单时间起算、无理由退货自签收之日起算，且未添加证据外事实。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "policy_return_clock",
+      "query": "七天无理由退货是从付款那天算吗？",
+      "type": "policy_boundary",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "七天无理由退货"
+        }
+      ],
+      "answer_facts": [
+        "自签收之日起 7 个自然日内"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 0.7654250860214233
+        },
+        {
+          "chunk_id": "bdb1f943-66bf-47b8-b06c-b81d311d0181",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 适用条件",
+          "score": 0.7652108669281006
+        },
+        {
+          "chunk_id": "ca37f213-66b1-4e19-9904-3bc6ef9ea809",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货",
+          "score": 0.7534604072570801
+        },
+        {
+          "chunk_id": "0d035d97-5c43-41be-be39-15c47ab0dc6d",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 不适用情形",
+          "score": 0.7425785660743713
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.7246080636978149
+        },
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.7052188515663147
+        },
+        {
+          "chunk_id": "dfb25a96-0939-4824-8338-a228fd087279",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.6975349187850952
+        },
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.6964987516403198
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.659133791923523
+        },
+        {
+          "chunk_id": "a890ac64-c98a-46b3-a8c4-b4e79a4e05a1",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.658460795879364
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.5,
+      "answer": "根据现有证据，七天无理由退货的起算时间**不是从付款那天算**，而是**自签收商品之日起 7 个自然日内**。\n\n具体依据如下：\n\n- [3] 明确写明：“消费者自签收商品之日起 7 个自然日内，商品保持完好且不影响二次销售的，可以申请无理由退货。”\n\n另外，申请七天无理由退货还需满足一定条件：\n\n- [2] 要求商品本体、配件、赠品、说明书和原包装完整；商品未经使用、未洗涤、未安装，不存在人为损坏；能够提供订单号或有效的购买凭证。\n- [1] 也提到需商品保持完好、不影响二次销售，具体以平台售后规则为准。\n\n关于您问的“是否从付款那天算”，现有证据中没有支持“从付款日起算”的表述，[3] 的起算点为“签收商品之日”。如果您指的是其他特定场景或特殊商品的起算规则，当前证据不足以核实。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据直接支持：起算时间为签收商品之日起7个自然日（证据[3]），适用条件（证据[2]），商品需保持完好、不影响二次销售（证据[1]），且未添加无证据支持的事实。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "policy_missing_item",
+      "query": "商家少发了东西，退换货运费谁出？",
+      "type": "policy_boundary",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "运费承担规则"
+        }
+      ],
+      "answer_facts": [
+        "漏发由商家承担来回运费"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.7761619091033936
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.7584860324859619
+        },
+        {
+          "chunk_id": "d0c10073-6417-4bc8-9a46-cf9a3dd0437a",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 换货流程",
+          "score": 0.7146139144897461
+        },
+        {
+          "chunk_id": "1a53805a-a3dc-4d83-a984-71c2139d470f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 运费怎么算",
+          "score": 0.7077913880348206
+        },
+        {
+          "chunk_id": "7edb11cc-187a-48f7-adbf-af71e5f6957e",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 鞋子的尺码不准怎么办",
+          "score": 0.6911405324935913
+        },
+        {
+          "chunk_id": "43155fa1-833d-4bcf-9fab-8a761fb1b0cd",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 换货流程怎么走",
+          "score": 0.6818177103996277
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.6815880537033081
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.681256890296936
+        },
+        {
+          "chunk_id": "ac788fa6-1c66-4928-9ac8-4dfab84406c6",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围",
+          "score": 0.6803223490715027
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.6759403944015503
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有证据，商家少发（漏发）属于“发错货或漏发”场景，运费由商家承担来回运费 [1]。\n\n具体说明：\n- 责任归属为商家时，商家承担来回运费 [1]。\n- 该规则适用于“发错货或漏发”场景 [1]。\n\n补充说明：\n- 若您已投保运费险，则按保单约定金额由保险公司赔付 [1]。\n- 退换货运费问题的首次响应时限为 2 小时，处理时限为 3 个工作日 [7]。\n\n关于具体到账时间、送达时间或赔付结果，我无法核实或承诺，建议您以实际处理进度为准。",
+      "faithfulness": 1.0,
+      "judge_reason": "所有可验证事实均被证据直接支持：漏发场景商家承担来回运费[1]、运费险按保单赔付[1]、退换货运费首次响应2小时处理3个工作日[7]；未核实到账时间等表述属拒答性说明，未添加事实。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "policy_refund_eta",
+      "query": "退款审核通过后保证几个工作日到账？",
+      "type": "policy_boundary",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "退款到账时间"
+        }
+      ],
+      "answer_facts": [
+        "不能保证具体到账天数",
+        "按支付渠道查询参考范围"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.8049685955047607
+        },
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.7384616732597351
+        },
+        {
+          "chunk_id": "dfb25a96-0939-4824-8338-a228fd087279",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.7373178005218506
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.6870740652084351
+        },
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 0.6723402142524719
+        },
+        {
+          "chunk_id": "a63c5401-1df4-4e40-819d-ab2ca5071f86",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 发货时效多久",
+          "score": 0.6630786657333374
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.6626262068748474
+        },
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.6618965268135071
+        },
+        {
+          "chunk_id": "7bb19a8f-46d5-4b2f-8d90-375d16928c0b",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 如何申请退款",
+          "score": 0.6529504060745239
+        },
+        {
+          "chunk_id": "ca37f213-66b1-4e19-9904-3bc6ef9ea809",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货",
+          "score": 0.6514308452606201
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "退款到账时间因支付方式不同而有所差异，无法统一承诺具体到账时间。根据现有证据：\n\n- 货到付款：退款到账时间为 3 至 5 个工作日，需提供收款银行账户信息 [1]。\n- 微信支付：退款到账时间为 1 至 3 个工作日，原路退回零钱或银行卡 [2]。\n- 支付宝：退款到账时间为 1 至 3 个工作日，原路退回余额或银行卡 [2]。\n- 银行卡直连：退款到账时间为 3 至 7 个工作日，以发卡行入账时间为准 [2]。\n- 平台余额：实时到账，可在账户余额中查看 [2]。\n- 礼品卡：退款到账时间为 1 个工作日，退回原礼品卡，不折现 [2]。\n\n另外，退款需以退货商品经仓库质检通过为前提，退款将按原支付路径退回 [2][3]。关于“审核通过后保证几个工作日到账”，现有证据未提供统一的保证时限，且不同支付渠道到账时间不同，因此无法核实一个统一的保证到账时间。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据直接支持：各支付方式退款到账时间、质检前提、原路退回均与[1][2][3]一致；关于无统一保证时限的结论也基于证据中不同渠道到账时间不同，未添加无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "multi_water",
+      "query": "W20 和 W40 饮水机换滤芯的间隔分别是多少？",
+      "type": "multi_evidence",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机(型号 MH-W20)"
+        },
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机 Plus"
+        }
+      ],
+      "answer_facts": [
+        "W20 每 2 周",
+        "W40 每 3 周"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.707840085029602
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 0.6996570229530334
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.6747546195983887
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.6028769016265869
+        },
+        {
+          "chunk_id": "4484ed3d-6e2a-4128-ad3a-6f0f64d8aec4",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ",
+          "score": 0.5378090739250183
+        },
+        {
+          "chunk_id": "b10bda49-f12f-4971-b8d1-31b51d0e4a39",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机的电池可以自己更换吗",
+          "score": 0.5352533459663391
+        },
+        {
+          "chunk_id": "294b3080-b848-4fcf-9037-395e055a3ab4",
+          "source_path": "README.md",
+          "section_path": "知识文档目录",
+          "score": 0.5318642258644104
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 0.5289604067802429
+        },
+        {
+          "chunk_id": "43155fa1-833d-4bcf-9fab-8a761fb1b0cd",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 换货流程怎么走",
+          "score": 0.5200151801109314
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.5158349275588989
+        }
+      ],
+      "recall@1": 0.5,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据商品规格手册：\n\n- **W20（型号 MH-W20）**：建议每 **2 周**更换一次滤芯 [2]。\n- **W40（型号 MH-W40）**：建议每 **3 周**更换一次滤芯 [1]。\n\n以上为规格手册中的建议更换间隔，实际更换频率可能因使用环境和水质不同而有所差异。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中关于W20每2周、W40每3周更换滤芯的陈述均被证据[2]和[1]直接支持，且未添加无依据的事实。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "multi_camera",
+      "query": "喂食器的摄像头版和独立的全景摄像头是同一个型号吗？",
+      "type": "multi_evidence",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动喂食器 摄像头版"
+        },
+        {
+          "source_path": "product-specs.md",
+          "section": "全景看护摄像头"
+        }
+      ],
+      "answer_facts": [
+        "MH-FD30 和 MH-CAM1 是不同商品"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.7434917688369751
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.7276889681816101
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.6273961067199707
+        },
+        {
+          "chunk_id": "a012c7e8-ea85-4642-b457-9ceb2bcb26de",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册",
+          "score": 0.5307580828666687
+        },
+        {
+          "chunk_id": "fb5204f0-7e74-48b9-bdeb-a832ea58d4c8",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册",
+          "score": 0.5231766700744629
+        },
+        {
+          "chunk_id": "0e913c48-884c-4d41-ab40-0d4a47718dd9",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 设备安装与激活",
+          "score": 0.5128130912780762
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 0.5063467025756836
+        },
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.5025425553321838
+        },
+        {
+          "chunk_id": "79a584c7-aeea-47a4-8651-e1ed4c42464c",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机充电器是标配吗",
+          "score": 0.5017750859260559
+        },
+        {
+          "chunk_id": "506322a9-0b96-45a6-a9e2-6456197e9bc9",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机支持双卡双待吗",
+          "score": 0.4998856782913208
+        }
+      ],
+      "recall@1": 0.5,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "不是同一个型号，两者是两款不同的商品。\n\n- 喂食器摄像头版的型号是 **MH-FD30**，摄像头是喂食器内置的，支持视频回看，需连接 2.4G Wi-Fi [1]。\n- 独立的全景看护摄像头型号是 **MH-CAM1**，只有这一个型号，画质为 2K，支持 355° 水平旋转、90° 俯仰 [2]。\n\n规格手册也明确说明：自动喂食器摄像头版 MH-FD30 与独立全景看护摄像头 MH-CAM1 是两款商品，型号不要混用 [1][2]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实（MH-FD30、MH-CAM1型号、摄像头内置、视频回看、2.4G Wi-Fi、2K画质、355°水平旋转、90°俯仰、两款商品型号不要混用）均被证据[1][2]直接支持，无证据外事实。",
+      "refused": null
+    },
+    {
+      "strategy": "dense",
+      "id": "unknown_model",
+      "query": "MH-LP999 的猫砂容量是多少？",
+      "type": "unanswerable",
+      "difficulty": "hard",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "ee0126cf-ec37-4c31-9419-65a25bd5ab50",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)",
+          "score": 0.7714747786521912
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.7682878971099854
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.7554800510406494
+        },
+        {
+          "chunk_id": "60d3f5ec-24e3-4a53-9cc5-79a11252f0f3",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 四季保暖猫窝(型号 MH-NEST20)",
+          "score": 0.6084357500076294
+        },
+        {
+          "chunk_id": "21c36139-a3f5-4620-ab66-dc9024521446",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大型猫爬架(型号 MH-CT30)",
+          "score": 0.6076448559761047
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 0.5861088037490845
+        },
+        {
+          "chunk_id": "543bae5d-ea49-4070-8474-a66309a8d18d",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大号三档加热垫(型号 MH-HP20)",
+          "score": 0.5650476813316345
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.5578962564468384
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.5546935200691223
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 0.5421819090843201
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "无法核实。您询问的型号是 MH-LP999，但提供的证据中没有该型号的规格信息，因此无法确认其猫砂容量。\n\n现有证据中涉及猫砂盆的型号及猫砂容量如下，供您参考：\n- MH-LP200：猫砂容量 12L [1]\n- MH-LP100：猫砂容量 9L [2]\n- MH-LP50：猫砂容量 6L [3]\n\n如果您确认的是上述某一型号，可以告诉我，我再为您核对。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案纯拒答，未添加任何事实，仅说明无法核实并列出证据中已有的型号信息，符合要求。",
+      "refused": 1
+    },
+    {
+      "strategy": "dense",
+      "id": "unknown_calendar",
+      "query": "2027 年春节你们门店具体哪天营业？",
+      "type": "unanswerable",
+      "difficulty": "medium",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.5634022355079651
+        },
+        {
+          "chunk_id": "a63c5401-1df4-4e40-819d-ab2ca5071f86",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 发货时效多久",
+          "score": 0.5507895350456238
+        },
+        {
+          "chunk_id": "ac59c897-ddb0-4476-ad42-c96b35e7dca9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 商品缺货多久补货",
+          "score": 0.5482059717178345
+        },
+        {
+          "chunk_id": "ca37f213-66b1-4e19-9904-3bc6ef9ea809",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货",
+          "score": 0.5477492809295654
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.5434969663619995
+        },
+        {
+          "chunk_id": "fb5204f0-7e74-48b9-bdeb-a832ea58d4c8",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册",
+          "score": 0.5429139733314514
+        },
+        {
+          "chunk_id": "16bf54f3-fed5-44cd-bb2c-f34d5b0401e0",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 人工客服入口与时间",
+          "score": 0.5398046970367432
+        },
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 0.5362226963043213
+        },
+        {
+          "chunk_id": "43155fa1-833d-4bcf-9fab-8a761fb1b0cd",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 换货流程怎么走",
+          "score": 0.5331131815910339
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.5317602753639221
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "无法核实。您询问的是 2027 年春节门店的具体营业日期，但提供的证据中没有任何关于门店营业时间或节假日营业安排的信息，因此无法据此回答。\n\n现有证据仅涉及以下内容，均与门店春节营业时间无关：\n- 售后与客服处理时限 [1][10]\n- 发货时效 [2]\n- 缺货补货时间 [3]\n- 退货与退款政策 [4][5][8]\n- 人工客服入口与服务时间（每日 9:00 至 22:00）[7]\n- 换货流程 [9]\n\n建议您通过 App 内「我的」-「联系客服」或订单详情页的「联系客服」入口咨询在线人工客服 [7]，以获取门店营业安排的确切信息。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案纯拒答，未添加任何可验证事实，仅说明证据不涉及门店营业时间并建议咨询客服，符合要求。",
+      "refused": 1
+    },
+    {
+      "strategy": "dense",
+      "id": "unknown_promise",
+      "query": "现在下单你保证明天一定送到吗？",
+      "type": "unanswerable",
+      "difficulty": "medium",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.6449467539787292
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.6269815564155579
+        },
+        {
+          "chunk_id": "ac59c897-ddb0-4476-ad42-c96b35e7dca9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 商品缺货多久补货",
+          "score": 0.6218683123588562
+        },
+        {
+          "chunk_id": "bdb1f943-66bf-47b8-b06c-b81d311d0181",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 适用条件",
+          "score": 0.6184609532356262
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.6184496879577637
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.6169288158416748
+        },
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 0.6153156757354736
+        },
+        {
+          "chunk_id": "bbf0151b-9987-4c7d-9c84-6b26c04cfcc3",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 升级与转人工",
+          "score": 0.6143453121185303
+        },
+        {
+          "chunk_id": "43155fa1-833d-4bcf-9fab-8a761fb1b0cd",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 换货流程怎么走",
+          "score": 0.6110327839851379
+        },
+        {
+          "chunk_id": "fb5204f0-7e74-48b9-bdeb-a832ea58d4c8",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册",
+          "score": 0.610221266746521
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "抱歉，我无法承诺\"明天一定送到\"。\n\n依据现有证据，我无法核实或保证具体送达时间：\n\n- 提供的证据中没有关于配送时效、发货时间或送达承诺的条款，因此无法就\"明天送达\"作出任何确认。[1][2][3][4][5][6][7][8][9][10]\n- 现有条款涉及的是售后处理时限（如缺货补发 5 个工作日、退款 3 个工作日等），这些是售后环节的处理时限，与下单后的配送送达时间不是同一概念。[1][5]\n\n如果您需要确认配送时效，建议您提供订单号，我可以帮您登记并转人工核实；但具体到货时间仍需以实际物流信息为准，我无法提前保证。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案纯为拒答，未添加任何可验证事实，仅说明证据不足并建议转人工，符合纯拒答标准。",
+      "refused": 1
+    },
+    {
+      "strategy": "bm25",
+      "id": "model_lp50",
+      "query": "MH-LP50 能在 App 上收到废砂盒满的提醒吗？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "智能猫砂盆 Lite"
+        }
+      ],
+      "answer_facts": [
+        "不支持 App 联网",
+        "不支持满溢推送"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 16.544937133789062
+        },
+        {
+          "chunk_id": "ee0126cf-ec37-4c31-9419-65a25bd5ab50",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)",
+          "score": 14.627540588378906
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 12.876790046691895
+        },
+        {
+          "chunk_id": "4d83fc17-7261-471d-8d8f-572581c4a1ef",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 运费与包邮",
+          "score": 7.483484268188477
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 7.148001194000244
+        },
+        {
+          "chunk_id": "84eed799-7cee-4583-b1e4-ebb8c3dfa7f9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 优惠券和满减怎么用",
+          "score": 6.4820876121521
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 6.448554992675781
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 5.997884273529053
+        },
+        {
+          "chunk_id": "7edb11cc-187a-48f7-adbf-af71e5f6957e",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 鞋子的尺码不准怎么办",
+          "score": 5.8402228355407715
+        },
+        {
+          "chunk_id": "ac59c897-ddb0-4476-ad42-c96b35e7dca9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 商品缺货多久补货",
+          "score": 5.429559707641602
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有证据，MH-LP50 **不能**在 App 上收到废砂盒满的提醒。\n\n具体依据如下：\n\n- [1] 明确说明 MH-LP50「不含 App 联网功能」，并且「无 App 联网，不支持满溢推送提醒」，建议每 4 至 5 天倾倒一次废砂盒。\n\n补充说明：具备「废砂盒满时 App 推送提醒」功能的是其他型号，例如 [2] 的 MH-LP200 和 [3] 的 MH-LP100，与 MH-LP50 不是同一型号。\n\n如果您需要 App 满溢提醒功能，可以考虑上述支持该功能的型号；具体库存与购买事宜我这边无法核实，建议以商品页面信息为准。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案核心结论及依据均被证据[1]直接支持，补充说明中关于MH-LP200和MH-LP100具备App满溢提醒也分别由[2][3]支持，未添加无证据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "model_w60",
+      "query": "MH-W60 滤芯隔多久换？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机 Pro 不锈钢"
+        }
+      ],
+      "answer_facts": [
+        "建议每 4 周更换"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 9.71583366394043
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 5.205384254455566
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 4.897444248199463
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 3.2208893299102783
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 2.517437696456909
+        },
+        {
+          "chunk_id": "21c36139-a3f5-4620-ab66-dc9024521446",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大型猫爬架(型号 MH-CT30)",
+          "score": 2.0693774223327637
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 2.047226905822754
+        },
+        {
+          "chunk_id": "543bae5d-ea49-4070-8474-a66309a8d18d",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大号三档加热垫(型号 MH-HP20)",
+          "score": 1.9631718397140503
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 1.8243608474731445
+        },
+        {
+          "chunk_id": "60d3f5ec-24e3-4a53-9cc5-79a11252f0f3",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 四季保暖猫窝(型号 MH-NEST20)",
+          "score": 1.7165054082870483
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据商品规格手册，MH-W60 的滤芯建议更换周期如下：\n\n- MH-W60 采用双滤芯并联，建议每 4 周更换一次滤芯 [1]。\n\n补充说明：以上为规格手册中的建议周期，实际更换频率可能因使用环境和水质不同而有差异；如需确认具体到货或服务时间，我这边无法核实，也不做具体时效承诺。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中关于MH-W60滤芯更换周期的陈述与证据[1]完全一致，且未添加任何证据不支持的事实。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "model_fd30",
+      "query": "MH-FD30 断电了还能远程喂吗？",
+      "type": "exact_model",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动喂食器 摄像头版"
+        }
+      ],
+      "answer_facts": [
+        "断电期间不支持 App 远程手动投喂",
+        "可维持定时投喂约 48 小时"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 14.222376823425293
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 11.933281898498535
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 5.6996917724609375
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 5.26474666595459
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 4.648928642272949
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 4.373907566070557
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 4.1684112548828125
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 3.7795042991638184
+        },
+        {
+          "chunk_id": "21c36139-a3f5-4620-ab66-dc9024521446",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大型猫爬架(型号 MH-CT30)",
+          "score": 2.0693774223327637
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 2.047226905822754
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据商品规格手册，MH-FD30 断电后**不支持 App 远程手动投喂**。\n\n具体说明如下：\n\n- **断电期间不支持的功能**：断电期间不支持视频回看与 App 远程手动投喂 [1]。\n- **断电期间仍可维持的功能**：市电断开时会自动切换到内置应急电池，可维持**定时投喂**约 48 小时 [1]。\n\n也就是说，断电后您无法通过 App 手动远程喂食，但设备仍会按原先设定的定时计划继续投喂（约 48 小时内）。\n\n关于断电期间定时投喂的具体执行情况或恢复供电后的状态，现有资料未作进一步说明，无法核实。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据[1]直接支持：MH-FD30断电后不支持App远程手动投喂、断电期间不支持视频回看、自动切换内置应急电池维持定时投喂约48小时。未添加证据外事实，且明确说明资料未进一步说明的部分。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "model_cam1",
+      "query": "MH-CAM1 支持多大 TF 卡？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "全景看护摄像头"
+        }
+      ],
+      "answer_facts": [
+        "最大 128G TF 卡"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 13.845514297485352
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 5.834656715393066
+        },
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 3.2059454917907715
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 2.854055643081665
+        },
+        {
+          "chunk_id": "506322a9-0b96-45a6-a9e2-6456197e9bc9",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机支持双卡双待吗",
+          "score": 2.8439064025878906
+        },
+        {
+          "chunk_id": "c37d298f-d51b-4923-99d0-9aacaddbba46",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 支持哪些支付方式",
+          "score": 2.6705613136291504
+        },
+        {
+          "chunk_id": "5041bbaa-79a8-422c-bcb1-8852aba8d4b3",
+          "source_path": null,
+          "section_path": "客服服务",
+          "score": 2.651303291320801
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 2.651303291320801
+        },
+        {
+          "chunk_id": "be5ee87f-8005-4d94-ba75-1623bee93121",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 衣服可以试穿后退货吗",
+          "score": 2.5951600074768066
+        },
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 2.285789728164673
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "MH-CAM1 支持最大 128G TF 卡，也支持云存储。[1]\n\n补充说明：该存储规格属于独立全景看护摄像头 MH-CAM1；自动喂食器摄像头版 MH-FD30 是另一款商品，型号不要混用。[1][2]",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中关于MH-CAM1支持最大128G TF卡和云存储的陈述，以及MH-FD30为另一款商品、型号不要混用的补充说明，均被证据[1]和[2]直接支持。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "colloquial_nest",
+      "query": "猫窝里面那个垫子直接丢洗衣机行不？",
+      "type": "colloquial",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "猫窝是否可以机洗"
+        }
+      ],
+      "answer_facts": [
+        "内部垫芯不可机洗",
+        "只能局部擦洗后晾干"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "4a1beabf-6ade-4a85-b353-1a81019ab4fa",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 猫窝是否可以机洗",
+          "score": 9.748923301696777
+        },
+        {
+          "chunk_id": "60d3f5ec-24e3-4a53-9cc5-79a11252f0f3",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 四季保暖猫窝(型号 MH-NEST20)",
+          "score": 6.007436275482178
+        },
+        {
+          "chunk_id": "543bae5d-ea49-4070-8474-a66309a8d18d",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大号三档加热垫(型号 MH-HP20)",
+          "score": 5.741595268249512
+        },
+        {
+          "chunk_id": "213cf94c-12fe-4fb7-9f6a-7a6ab04317f8",
+          "source_path": "README.md",
+          "section_path": "知识文档目录",
+          "score": 4.652829170227051
+        },
+        {
+          "chunk_id": "da52fb22-8ce6-441d-9701-b22fa1a55215",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策",
+          "score": 4.2662458419799805
+        },
+        {
+          "chunk_id": "4017302a-e18c-4c99-b6cb-8683abe34cf7",
+          "source_path": "README.md",
+          "section_path": "知识文档目录",
+          "score": 3.7242705821990967
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 3.6156792640686035
+        },
+        {
+          "chunk_id": "e23c2f9f-7cfe-4f92-9dc4-4d22555a00e1",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员运费权益",
+          "score": 3.220602512359619
+        },
+        {
+          "chunk_id": "ac788fa6-1c66-4928-9ac8-4dfab84406c6",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围",
+          "score": 3.0221939086914062
+        },
+        {
+          "chunk_id": "71613b9e-0f10-4c71-8b36-b42eefc3ea09",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 使用与保养 > 皮具如何防潮保存",
+          "score": 2.6610593795776367
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有资料，猫窝内部的垫芯**不可以机洗**。\n\n具体说明如下：\n\n- 猫窝外套可以机洗，但需要先拆掉内部垫芯，装进洗衣袋，选轻柔模式冷水洗，洗后阴干、不要暴晒 [1]。\n- 内部垫芯不可机洗，进水后填充物会结块变形，只能局部擦洗后晾干 [1]。\n- 商品规格手册中同样标注：外套可手洗，内部垫芯不可机洗 [2]。\n\n所以您说的“猫窝里面那个垫子”，如果是可拆卸的内部垫芯，建议不要丢洗衣机，改为局部擦洗后晾干 [1][2]。\n\n另外，您提到的具体是哪一款猫窝，我这边无法仅凭现有信息确认型号是否完全对应，如果您的猫窝不是上述型号，建议再核对一下商品标签或说明书。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据[1][2]直接支持：外套可机洗需拆垫芯、垫芯不可机洗、规格手册标注一致，且未超出证据范围。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "colloquial_postage",
+      "query": "不够包邮的话邮费多少啊？",
+      "type": "colloquial",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "运费怎么算"
+        }
+      ],
+      "answer_facts": [
+        "未满 99 元收取 10 元运费"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "1a53805a-a3dc-4d83-a984-71c2139d470f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 运费怎么算",
+          "score": 11.674700736999512
+        },
+        {
+          "chunk_id": "4d83fc17-7261-471d-8d8f-572581c4a1ef",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 运费与包邮",
+          "score": 5.738835334777832
+        },
+        {
+          "chunk_id": "e23c2f9f-7cfe-4f92-9dc4-4d22555a00e1",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员运费权益",
+          "score": 5.259496688842773
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 5.086197376251221
+        },
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 2.921074390411377
+        },
+        {
+          "chunk_id": "7edb11cc-187a-48f7-adbf-af71e5f6957e",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 鞋子的尺码不准怎么办",
+          "score": 2.462531089782715
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 2.3147177696228027
+        },
+        {
+          "chunk_id": "ac788fa6-1c66-4928-9ac8-4dfab84406c6",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围",
+          "score": 2.0005853176116943
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 1.9349373579025269
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 1.8935143947601318
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "关于未满包邮门槛时的运费，现有证据中存在不同说法，我按证据分别说明：\n\n**基础运费金额**\n- [1] 称：单笔订单满 99 元包邮，未满收取 **10 元**运费。\n- [2] 称：单笔实付满 99 元包邮，未满收取 **6 元**基础运费。\n- [4] 提到\"未满包邮门槛的 **6 元**运费可用 600 积分抵掉\"。\n\n这两处金额（10 元与 6 元）不一致，我无法核实哪个是当前实际执行的标准，建议以结算页显示为准。\n\n**偏远地区**\n- [2] 称：新疆、西藏、内蒙古部分区域加收 **12 元**附加运费，该附加运费不参与包邮，需单独支付；配送时效在正常时效基础上顺延 2 至 4 天。\n- [1]、[9] 也提到偏远地区运费另计、时效顺延，但未给出具体金额。\n\n**会员权益**\n- [3] 称：金卡会员每月 3 次、银卡会员每月 1 次免运费权益，可抵掉未满 99 元时收取的基础运费，但不与偏远地区附加运费冲抵，当月未用完不结转。\n- [10] 称：银卡会员享退换货运费权益 1 次/月，具体以会员中心页面标注为准。\n\n**积分抵扣**\n- [4] 称：100 积分抵 1 元，单笔最多抵 30 元，积分可直接抵扣运费。\n\n**无法核实/需注意的部分**\n- 基础运费究竟是 6 元还是 10 元，证据互相矛盾，无法核实。\n- 您所在地址是否属于偏远地区、是否加收附加运费，需按收货地址确认，我无法仅凭现有信息判断。\n- 港澳台及海外暂不支持配送 [2][9]。\n\n如需确认具体金额，建议以结算页实际显示为准；若涉及运费争议或赔付，需转人工工单处理 [8]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案逐条引用了证据中的运费、偏远地区、会员权益、积分抵扣等信息，并明确标注了证据间的矛盾（6元与10元）及无法核实之处，未添加证据之外的事实，所有可验证陈述均有对应证据支持。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "policy_price_protection",
+      "query": "价保七天是收货以后才开始吗？",
+      "type": "policy_boundary",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "价格保护怎么申请"
+        }
+      ],
+      "answer_facts": [
+        "价保从下单时间起算",
+        "不是从签收之日起算"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 7.998312950134277
+        },
+        {
+          "chunk_id": "be5ee87f-8005-4d94-ba75-1623bee93121",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 衣服可以试穿后退货吗",
+          "score": 3.511629819869995
+        },
+        {
+          "chunk_id": "95b2506f-8f44-413a-916b-b09bf3ffafe8",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 订单可以修改或取消吗",
+          "score": 3.269594192504883
+        },
+        {
+          "chunk_id": "4484ed3d-6e2a-4128-ad3a-6f0f64d8aec4",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ",
+          "score": 2.9541988372802734
+        },
+        {
+          "chunk_id": "0d035d97-5c43-41be-be39-15c47ab0dc6d",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 不适用情形",
+          "score": 2.848052501678467
+        },
+        {
+          "chunk_id": "4c64e569-0f05-4422-a0cc-69afac4236cc",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么攒",
+          "score": 2.7662298679351807
+        },
+        {
+          "chunk_id": "79a584c7-aeea-47a4-8651-e1ed4c42464c",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机充电器是标配吗",
+          "score": 2.7603182792663574
+        },
+        {
+          "chunk_id": "213cf94c-12fe-4fb7-9f6a-7a6ab04317f8",
+          "source_path": "README.md",
+          "section_path": "知识文档目录",
+          "score": 2.4638671875
+        },
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 2.3612866401672363
+        },
+        {
+          "chunk_id": "f3391115-bdb3-47e3-ab76-cd19ab75a06b",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 开票时效",
+          "score": 2.3420374393463135
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有证据，价保七天**不是**从收货以后才开始，而是**自下单时间起算**。\n\n具体依据如下：\n\n- [1] 明确说明：自营商品支持下单后 7 天内价保，价保的 7 天**自下单时间起算**，不是从签收之日起算。\n- [1] 同时提示：签收之日起 7 天内的那条是**无理由退货**，两者起算点不同，别混用。\n\n因此，如果您问的是“价保”，起算点是下单时间；如果您问的是“七天无理由退货”，则与签收相关，具体规则可参考 [2] 和 [5]。\n\n关于价保申请后的差价退回时间，现有证据 [1] 仅说明“差价将退回原支付渠道”，未提及具体到账时间，因此无法核实具体到账时间。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案核心结论（价保7天自下单时间起算、非签收起算）及差价退回原支付渠道均被证据[1]直接支持；关于无理由退货与签收相关的提示也被[1]支持；未提及到账时间并明确说明证据不足，无额外事实添加。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "policy_return_clock",
+      "query": "七天无理由退货是从付款那天算吗？",
+      "type": "policy_boundary",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "七天无理由退货"
+        }
+      ],
+      "answer_facts": [
+        "自签收之日起 7 个自然日内"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "be5ee87f-8005-4d94-ba75-1623bee93121",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 衣服可以试穿后退货吗",
+          "score": 11.409595489501953
+        },
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 10.838335037231445
+        },
+        {
+          "chunk_id": "0d035d97-5c43-41be-be39-15c47ab0dc6d",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 不适用情形",
+          "score": 8.800225257873535
+        },
+        {
+          "chunk_id": "ca37f213-66b1-4e19-9904-3bc6ef9ea809",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货",
+          "score": 8.018342971801758
+        },
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 7.856574535369873
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 5.871645927429199
+        },
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 5.293730735778809
+        },
+        {
+          "chunk_id": "a63c5401-1df4-4e40-819d-ab2ca5071f86",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 发货时效多久",
+          "score": 4.557820796966553
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 2.9913177490234375
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 2.074065685272217
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.3333333333333333,
+      "answer": "不是从付款那天算的。\n\n根据退货政策，七天无理由退货的起算点是**自签收商品之日起 7 个自然日内** [4]。也就是说，是从您**签收**商品那天开始计算，而不是付款当天。\n\n需要特别注意的是，这与**价格保护**的起算点不同：价保的 7 天是**自下单时间起算**，两者起算点不一样，不要混用 [2]。\n\n另外补充几点相关规则：\n- 申请无理由退货需商品保持完好、不影响二次销售 [4][7]。\n- 部分商品不适用七天无理由退货，如定作商品、鲜活易腐商品、已拆封的贴身衣物等 [3]。\n- 七天无理由退货的寄回运费由消费者自行承担 [5]。\n\n关于具体的退款到账时间，因涉及质检等环节，我无法在此承诺具体时效，建议以平台售后页面显示为准 [6]。",
+      "faithfulness": 1.0,
+      "judge_reason": "所有可验证事实均有证据直接支持：七天无理由退货自签收起算[4]、价保自下单起算[2]、商品完好不影响二次销售[4][7]、不适用商品列举[3]、无理由退货运费消费者承担[5]，退款时效未作承诺并建议以页面为准[6]，无证据外事实。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "policy_missing_item",
+      "query": "商家少发了东西，退换货运费谁出？",
+      "type": "policy_boundary",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "运费承担规则"
+        }
+      ],
+      "answer_facts": [
+        "漏发由商家承担来回运费"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 15.272664070129395
+        },
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 10.700592041015625
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 8.638740539550781
+        },
+        {
+          "chunk_id": "7edb11cc-187a-48f7-adbf-af71e5f6957e",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 鞋子的尺码不准怎么办",
+          "score": 8.420435905456543
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 5.035430908203125
+        },
+        {
+          "chunk_id": "16bf54f3-fed5-44cd-bb2c-f34d5b0401e0",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 人工客服入口与时间",
+          "score": 4.634207248687744
+        },
+        {
+          "chunk_id": "ac788fa6-1c66-4928-9ac8-4dfab84406c6",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围",
+          "score": 4.352067947387695
+        },
+        {
+          "chunk_id": "1a53805a-a3dc-4d83-a984-71c2139d470f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 运费怎么算",
+          "score": 2.982762575149536
+        },
+        {
+          "chunk_id": "e23c2f9f-7cfe-4f92-9dc4-4d22555a00e1",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员运费权益",
+          "score": 2.9701192378997803
+        },
+        {
+          "chunk_id": "d0c10073-6417-4bc8-9a46-cf9a3dd0437a",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 换货流程",
+          "score": 2.8363752365112305
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.5,
+      "answer": "根据现有证据，商家少发/漏发属于商家责任，退换货运费由商家承担。\n\n具体依据如下：\n\n- **少发、漏发的运费承担方为商家**：退货政策运费承担规则表中明确列出「发错货或漏发」场景，运费承担方为**商家**，说明为「商家承担来回运费」[2]。\n- **运费承担取决于责任归属**：退货和换货的运费承担方式取决于责任归属，具体规则见对应表格[2][5]。\n\n补充说明（供参考）：\n\n- 若您同时是会员，可能还涉及会员运费权益，但具体权益以会员中心页面标注为准[1]。\n- 退换货运费的首次响应时限为 2 小时，处理时限为 3 个工作日[3]。\n\n关于**具体到账时间、送达时间或赔付结果**，我无法承诺，需以实际处理为准。\n\n如需人工协助处理少发漏发问题，可在「喵喵优选」App 内通过「我的」-「联系客服」或订单详情页的「订单售后 / 联系客服」入口转接在线人工客服，并按页面指引提交订单号、开箱视频或商品照片等凭证；人工客服服务时间为每日 9:00 至 22:00[6]。",
+      "faithfulness": 1.0,
+      "judge_reason": "所有可验证事实均有证据直接支持：少发/漏发运费由商家承担[2]、运费承担取决于责任归属[2][5]、会员权益以会员中心为准[1]、退换货运费首次响应2小时处理3个工作日[3]、人工客服入口及服务时间[6]，且未对到账/送达/赔付结果作承诺。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "policy_refund_eta",
+      "query": "退款审核通过后保证几个工作日到账？",
+      "type": "policy_boundary",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "退款到账时间"
+        }
+      ],
+      "answer_facts": [
+        "不能保证具体到账天数",
+        "按支付渠道查询参考范围"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 16.277254104614258
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 14.360103607177734
+        },
+        {
+          "chunk_id": "dfb25a96-0939-4824-8338-a228fd087279",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 12.733826637268066
+        },
+        {
+          "chunk_id": "518f1db4-9041-4024-b322-a7d550783200",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 11.987634658813477
+        },
+        {
+          "chunk_id": "d0c10073-6417-4bc8-9a46-cf9a3dd0437a",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 换货流程",
+          "score": 11.73233413696289
+        },
+        {
+          "chunk_id": "a890ac64-c98a-46b3-a8c4-b4e79a4e05a1",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 11.665201187133789
+        },
+        {
+          "chunk_id": "7bb19a8f-46d5-4b2f-8d90-375d16928c0b",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 如何申请退款",
+          "score": 11.3934907913208
+        },
+        {
+          "chunk_id": "f3391115-bdb3-47e3-ab76-cd19ab75a06b",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 开票时效",
+          "score": 9.046948432922363
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 8.885656356811523
+        },
+        {
+          "chunk_id": "65accf99-5989-4236-abd8-d48f5b9ea780",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 处理时限",
+          "score": 7.966861248016357
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "退款到账时间因支付方式不同而有所差异，无法统一承诺具体到账时间。根据现有证据，各支付渠道的退款到账时间如下：\n\n- 微信支付：1 至 3 个工作日 [1]\n- 支付宝：1 至 3 个工作日 [1]\n- 银行卡直连：3 至 7 个工作日，以发卡行入账时间为准 [1]\n- 平台余额：实时到账 [1]\n- 礼品卡：1 个工作日 [1]\n- 货到付款：3 至 5 个工作日，需提供收款银行账户信息 [2]\n\n需要说明的是，上述时间均以退货商品经仓库质检通过、退款按原支付路径退回为前提 [1][3]。此外，售后手册中列有退款处理时限为 3 个工作日 [9]，退款查询处理完成时限为 24 小时 [10]，但这些属于客服处理时限，与资金实际到账时间不是同一概念。\n\n因此，无法保证\"几个工作日到账\"的统一答案，具体到账时间取决于您的支付方式和发卡行处理情况，请以实际到账为准。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据直接支持：各支付方式退款到账时间、货到付款到账时间及所需信息、质检通过和原路退回前提、售后手册中退款处理时限3个工作日和退款查询处理完成时限24小时，均与对应引用内容一致，且正确区分了客服处理时限与资金到账时间。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "multi_water",
+      "query": "W20 和 W40 饮水机换滤芯的间隔分别是多少？",
+      "type": "multi_evidence",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机(型号 MH-W20)"
+        },
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机 Plus"
+        }
+      ],
+      "answer_facts": [
+        "W20 每 2 周",
+        "W40 每 3 周"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 11.651328086853027
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 8.12020492553711
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 7.598878383636475
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 7.1493449211120605
+        },
+        {
+          "chunk_id": "79a584c7-aeea-47a4-8651-e1ed4c42464c",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机充电器是标配吗",
+          "score": 5.822543144226074
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 3.9754319190979004
+        },
+        {
+          "chunk_id": "4484ed3d-6e2a-4128-ad3a-6f0f64d8aec4",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ",
+          "score": 3.741696357727051
+        },
+        {
+          "chunk_id": "a91ca184-0724-45e7-85fc-5559f52ce649",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 3.619678020477295
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 3.3828604221343994
+        },
+        {
+          "chunk_id": "213cf94c-12fe-4fb7-9f6a-7a6ab04317f8",
+          "source_path": "README.md",
+          "section_path": "知识文档目录",
+          "score": 3.362774610519409
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.3333333333333333,
+      "answer": "根据现有证据：\n\n- **W20（型号 MH-W20）**：建议每 **2 周**更换一次滤芯 [3]。\n- **W40（型号 MH-W40）**：建议每 **3 周**更换一次滤芯 [4]。\n\n以上为商品规格手册中的建议更换间隔，实际更换频率可能因使用环境和水质不同而有所差异，具体请以商品详情页或说明书为准。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中关于W20每2周、W40每3周更换滤芯的说法分别被证据[3]和[4]直接支持，其余为合理提示，无未支持的事实。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "multi_camera",
+      "query": "喂食器的摄像头版和独立的全景摄像头是同一个型号吗？",
+      "type": "multi_evidence",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动喂食器 摄像头版"
+        },
+        {
+          "source_path": "product-specs.md",
+          "section": "全景看护摄像头"
+        }
+      ],
+      "answer_facts": [
+        "MH-FD30 和 MH-CAM1 是不同商品"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 42.01982879638672
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 41.96500778198242
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 17.732133865356445
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 15.981865882873535
+        },
+        {
+          "chunk_id": "79a584c7-aeea-47a4-8651-e1ed4c42464c",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机充电器是标配吗",
+          "score": 6.792755126953125
+        },
+        {
+          "chunk_id": "84eed799-7cee-4583-b1e4-ebb8c3dfa7f9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 优惠券和满减怎么用",
+          "score": 5.363718509674072
+        },
+        {
+          "chunk_id": "a91ca184-0724-45e7-85fc-5559f52ce649",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 4.5615363121032715
+        },
+        {
+          "chunk_id": "4484ed3d-6e2a-4128-ad3a-6f0f64d8aec4",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ",
+          "score": 4.529193878173828
+        },
+        {
+          "chunk_id": "bbf0151b-9987-4c7d-9c84-6b26c04cfcc3",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 升级与转人工",
+          "score": 4.448797702789307
+        },
+        {
+          "chunk_id": "a012c7e8-ea85-4642-b457-9ceb2bcb26de",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册",
+          "score": 4.426375389099121
+        }
+      ],
+      "recall@1": 0.5,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "不是同一个型号。\n\n- 喂食器摄像头版对应的是 **MH-FD30**，其摄像头是喂食器内置的摄像头 [1]。\n- 独立的全景看护摄像头对应的是 **MH-CAM1**，是另一款商品 [1][2]。\n\n因此，喂食器的摄像头版和独立的全景摄像头不是同一个型号，型号不要混用 [1][2]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实（MH-FD30为喂食器摄像头版、MH-CAM1为独立全景摄像头、两者非同一型号）均被证据[1][2]直接支持，无额外无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "bm25",
+      "id": "unknown_model",
+      "query": "MH-LP999 的猫砂容量是多少？",
+      "type": "unanswerable",
+      "difficulty": "hard",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "ee0126cf-ec37-4c31-9419-65a25bd5ab50",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)",
+          "score": 6.935540199279785
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 5.867685794830322
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 5.493338108062744
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 4.913031578063965
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 4.512584686279297
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 4.485435485839844
+        },
+        {
+          "chunk_id": "543bae5d-ea49-4070-8474-a66309a8d18d",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大号三档加热垫(型号 MH-HP20)",
+          "score": 4.301272392272949
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 4.245629787445068
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 4.134466171264648
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 4.046160697937012
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "您询问的型号 **MH-LP999** 在现有证据中未出现，无法核实该型号的猫砂容量。\n\n现有证据中涉及猫砂盆的型号及猫砂容量如下，供您参考：\n\n- **MH-LP200**（智能猫砂盆 Max）：猫砂容量 12L [1]\n- **MH-LP100**（智能猫砂盆 Pro）：猫砂容量 9L [2]\n- **MH-LP50**（智能猫砂盆 Lite）：猫砂容量 6L [9]\n\n如果您能确认具体型号，我可以再帮您核对。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案仅说明MH-LP999未在证据中出现，并逐条引用证据中实际存在的型号及猫砂容量，所有可验证事实均被证据直接支持，无编造。",
+      "refused": 1
+    },
+    {
+      "strategy": "bm25",
+      "id": "unknown_calendar",
+      "query": "2027 年春节你们门店具体哪天营业？",
+      "type": "unanswerable",
+      "difficulty": "medium",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "c316181a-6151-44d1-a02f-65481e489679",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 家电 > 冰箱的保修期是多久",
+          "score": 5.914700031280518
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 3.1318602561950684
+        },
+        {
+          "chunk_id": "a890ac64-c98a-46b3-a8c4-b4e79a4e05a1",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 3.017421245574951
+        },
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 2.9760913848876953
+        },
+        {
+          "chunk_id": "518f1db4-9041-4024-b322-a7d550783200",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 2.938646078109741
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 2.8866164684295654
+        },
+        {
+          "chunk_id": "a012c7e8-ea85-4642-b457-9ceb2bcb26de",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册",
+          "score": 2.869067668914795
+        },
+        {
+          "chunk_id": "20f7f49c-c1d4-47c1-a438-583e3ed9248f",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 会员等级",
+          "score": 2.6480727195739746
+        },
+        {
+          "chunk_id": "79a584c7-aeea-47a4-8651-e1ed4c42464c",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机充电器是标配吗",
+          "score": 2.618009567260742
+        },
+        {
+          "chunk_id": "5041bbaa-79a8-422c-bcb1-8852aba8d4b3",
+          "source_path": null,
+          "section_path": "客服服务",
+          "score": 2.618009567260742
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "无法核实。提供的证据中没有关于门店营业时间或春节安排的信息，因此无法确认 2027 年春节门店具体哪天营业。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案纯拒答，未添加任何事实，且证据中确实无门店营业时间或春节安排信息。",
+      "refused": 1
+    },
+    {
+      "strategy": "bm25",
+      "id": "unknown_promise",
+      "query": "现在下单你保证明天一定送到吗？",
+      "type": "unanswerable",
+      "difficulty": "medium",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 3.665358304977417
+        },
+        {
+          "chunk_id": "c37d298f-d51b-4923-99d0-9aacaddbba46",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 支持哪些支付方式",
+          "score": 3.37807035446167
+        },
+        {
+          "chunk_id": "95b2506f-8f44-413a-916b-b09bf3ffafe8",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 订单可以修改或取消吗",
+          "score": 3.269594192504883
+        },
+        {
+          "chunk_id": "f3391115-bdb3-47e3-ab76-cd19ab75a06b",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 开票时效",
+          "score": 3.2176291942596436
+        },
+        {
+          "chunk_id": "4d83fc17-7261-471d-8d8f-572581c4a1ef",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 运费与包邮",
+          "score": 2.3066654205322266
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "无法核实\"明天一定送到\"这一承诺。\n\n根据现有证据：\n\n- [5] 仅说明运费与包邮规则，以及偏远地区配送时效在正常时效基础上顺延 2 至 4 天，港澳台及海外暂不支持配送，并未给出任何\"次日达\"或具体送达时间的保证。\n- [4] 涉及的是开票时效，与配送送达时间无关。\n- [1][2][3] 分别涉及价保、支付方式、订单修改取消，均不包含配送时效承诺。\n\n因此，我无法承诺具体到账时间、送达时间或赔付结果。关于您所在地址的实际配送时效，建议您提供收货地区，我可以帮您对照 [5] 中的规则说明；或由人工客服进一步核实。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案仅说明无法核实配送承诺，并准确引用证据说明各条目内容，未添加任何未被证据支持的事实，属于纯拒答。",
+      "refused": 1
+    },
+    {
+      "strategy": "hybrid",
+      "id": "model_lp50",
+      "query": "MH-LP50 能在 App 上收到废砂盒满的提醒吗？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "智能猫砂盆 Lite"
+        }
+      ],
+      "answer_facts": [
+        "不支持 App 联网",
+        "不支持满溢推送"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "ee0126cf-ec37-4c31-9419-65a25bd5ab50",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)",
+          "score": 0.032522473484277725
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.03226646035909653
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.0320020467042923
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.03100961446762085
+        },
+        {
+          "chunk_id": "ac59c897-ddb0-4476-ad42-c96b35e7dca9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 商品缺货多久补货",
+          "score": 0.028370220214128494
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.02808326855301857
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.02752639539539814
+        },
+        {
+          "chunk_id": "7bb19a8f-46d5-4b2f-8d90-375d16928c0b",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 如何申请退款",
+          "score": 0.027106227353215218
+        },
+        {
+          "chunk_id": "43155fa1-833d-4bcf-9fab-8a761fb1b0cd",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 换货流程怎么走",
+          "score": 0.02638888917863369
+        },
+        {
+          "chunk_id": "16bf54f3-fed5-44cd-bb2c-f34d5b0401e0",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 人工客服入口与时间",
+          "score": 0.025418275967240334
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.5,
+      "answer": "根据现有证据，MH-LP50 **不支持**在 App 上收到废砂盒满的提醒。\n\n具体依据如下：\n\n- [2] 明确说明 MH-LP50 的核心功能为“自动感应清理、物理除臭盖板；**不含 App 联网功能**”，清理提示为“**无 App 联网，不支持满溢推送提醒**，建议每 4 至 5 天倾倒一次废砂盒”。\n\n补充说明：具备“废砂盒满时 App 推送提醒”功能的是其他型号，例如 [1] 中的 MH-LP200 和 [3] 中的 MH-LP100，与 MH-LP50 并非同一型号，不能等同适用。\n\n如果您需要，我可以帮您对比这几款型号在 App 功能上的差异。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案仅基于证据[2]明确说明MH-LP50不含App联网功能、不支持满溢推送提醒，并正确区分其他型号，未添加无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "model_w60",
+      "query": "MH-W60 滤芯隔多久换？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机 Pro 不锈钢"
+        }
+      ],
+      "answer_facts": [
+        "建议每 4 周更换"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 0.032258063554763794
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.0317460335791111
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.03154495730996132
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 0.025726009160280228
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 0.02482636272907257
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.024198167026042938
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.02403983101248741
+        },
+        {
+          "chunk_id": "60d3f5ec-24e3-4a53-9cc5-79a11252f0f3",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 四季保暖猫窝(型号 MH-NEST20)",
+          "score": 0.023994453251361847
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.023902710527181625
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.023667065426707268
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.3333333333333333,
+      "answer": "根据商品规格手册，MH-W60（自动饮水机 Pro 不锈钢）的滤芯建议更换周期为：**每 4 周更换一次** [3]。\n\n补充说明：该型号为双滤芯并联设计 [3]。如需了解滤芯购买或更换服务，可参考会员权益中提到的积分兑换方式（如 1500 积分兑滤芯 3 片、2000 积分兑上门更换服务）[4]，但具体库存与安排我这边无法核实，也不承诺具体到账或服务时间。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据直接支持：MH-W60滤芯每4周更换一次、双滤芯并联设计引自[3]；1500积分兑滤芯3片、2000积分兑上门更换服务引自[4]。未添加证据外事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "model_fd30",
+      "query": "MH-FD30 断电了还能远程喂吗？",
+      "type": "exact_model",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动喂食器 摄像头版"
+        }
+      ],
+      "answer_facts": [
+        "断电期间不支持 App 远程手动投喂",
+        "可维持定时投喂约 48 小时"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.032522473484277725
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.032522473484277725
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.03077651560306549
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 0.03076923079788685
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.03055037185549736
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.030365770682692528
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.0297619067132473
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.029631255194544792
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.028790388256311417
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 0.02744361013174057
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据商品规格手册，MH-FD30 断电后**不支持 App 远程手动投喂**。\n\n具体说明如下：\n\n- [1] 该型号供电方式为市电供电 + 内置应急电池；断电应对为：市电断开时自动切换到内置应急电池，可维持**定时投喂约 48 小时**；断电期间**不支持视频回看与 App 远程手动投喂**。\n\n也就是说，断电期间仍可依靠应急电池执行已设定的定时投喂，但无法通过 App 手动远程投喂，也无法进行视频回看。\n\n如果您问的是其他型号（如基础版 MH-FD10），[2] 显示其本身不含 App 远程投喂功能，断电期间靠 4 节 5 号电池维持定时定量投喂约 24 小时。请确认您的具体型号，以便进一步核实。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据[1]和[2]直接支持，无添加或矛盾信息。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "model_cam1",
+      "query": "MH-CAM1 支持多大 TF 卡？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "全景看护摄像头"
+        }
+      ],
+      "answer_facts": [
+        "最大 128G TF 卡"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.03201844170689583
+        },
+        {
+          "chunk_id": "506322a9-0b96-45a6-a9e2-6456197e9bc9",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机支持双卡双待吗",
+          "score": 0.03177805617451668
+        },
+        {
+          "chunk_id": "c37d298f-d51b-4923-99d0-9aacaddbba46",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 支持哪些支付方式",
+          "score": 0.03128054738044739
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.028474710881710052
+        },
+        {
+          "chunk_id": "543bae5d-ea49-4070-8474-a66309a8d18d",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大号三档加热垫(型号 MH-HP20)",
+          "score": 0.02808326855301857
+        },
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.027108971029520035
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 0.026610644534230232
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 0.026013514026999474
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.025829080492258072
+        },
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 0.02577996626496315
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据商品规格手册，MH-CAM1 支持最大 **128G TF 卡**，也支持云存储 [1]。\n\n补充说明：该型号是独立的全景看护摄像头，请勿与自动喂食器摄像头版 MH-FD30 混淆 [1][4]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中关于MH-CAM1支持最大128G TF卡和云存储、以及独立全景看护摄像头与MH-FD30为不同型号的表述，均被证据[1]和[4]直接支持。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "colloquial_nest",
+      "query": "猫窝里面那个垫子直接丢洗衣机行不？",
+      "type": "colloquial",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "猫窝是否可以机洗"
+        }
+      ],
+      "answer_facts": [
+        "内部垫芯不可机洗",
+        "只能局部擦洗后晾干"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "4a1beabf-6ade-4a85-b353-1a81019ab4fa",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 猫窝是否可以机洗",
+          "score": 0.032786883413791656
+        },
+        {
+          "chunk_id": "60d3f5ec-24e3-4a53-9cc5-79a11252f0f3",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 四季保暖猫窝(型号 MH-NEST20)",
+          "score": 0.032258063554763794
+        },
+        {
+          "chunk_id": "543bae5d-ea49-4070-8474-a66309a8d18d",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大号三档加热垫(型号 MH-HP20)",
+          "score": 0.0317460335791111
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 0.03007688745856285
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.0295138880610466
+        },
+        {
+          "chunk_id": "71613b9e-0f10-4c71-8b36-b42eefc3ea09",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 使用与保养 > 皮具如何防潮保存",
+          "score": 0.02921108715236187
+        },
+        {
+          "chunk_id": "be5ee87f-8005-4d94-ba75-1623bee93121",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 衣服可以试穿后退货吗",
+          "score": 0.028205128386616707
+        },
+        {
+          "chunk_id": "ee0126cf-ec37-4c31-9419-65a25bd5ab50",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)",
+          "score": 0.027783136814832687
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 0.02765064872801304
+        },
+        {
+          "chunk_id": "0e913c48-884c-4d41-ab40-0d4a47718dd9",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 设备安装与激活",
+          "score": 0.027598019689321518
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有资料，猫窝内部垫芯**不可以机洗**。\n\n- 猫窝外套可以机洗，但需要拆掉内部垫芯后装进洗衣袋，选轻柔模式冷水洗，洗后阴干不要暴晒 [1]。\n- 内部垫芯不可机洗，进水后填充物会结块变形，只能局部擦洗后晾干 [1]。\n- 四季保暖猫窝（型号 MH-NEST20）的清洗说明也明确：外套可手洗，内部垫芯不可机洗 [2]。\n\n所以您说的“猫窝里面那个垫子”，如果是可拆卸的内部垫芯，请不要直接丢洗衣机；如果是外层布套，则可以按上述方式机洗 [1][2]。\n\n如果您指的是其他型号的加热垫类产品，请提供具体型号，我再帮您核实。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据[1]和[2]直接支持，无超出证据的额外事实主张。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "colloquial_postage",
+      "query": "不够包邮的话邮费多少啊？",
+      "type": "colloquial",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "运费怎么算"
+        }
+      ],
+      "answer_facts": [
+        "未满 99 元收取 10 元运费"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "1a53805a-a3dc-4d83-a984-71c2139d470f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 运费怎么算",
+          "score": 0.032786883413791656
+        },
+        {
+          "chunk_id": "4d83fc17-7261-471d-8d8f-572581c4a1ef",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 运费与包邮",
+          "score": 0.032258063554763794
+        },
+        {
+          "chunk_id": "e23c2f9f-7cfe-4f92-9dc4-4d22555a00e1",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员运费权益",
+          "score": 0.0317460335791111
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.02985074557363987
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 0.02964426949620247
+        },
+        {
+          "chunk_id": "7edb11cc-187a-48f7-adbf-af71e5f6957e",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 鞋子的尺码不准怎么办",
+          "score": 0.02964426949620247
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 0.029138512909412384
+        },
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.029083244502544403
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.027619048953056335
+        },
+        {
+          "chunk_id": "ac788fa6-1c66-4928-9ac8-4dfab84406c6",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围",
+          "score": 0.027205882593989372
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "关于未满包邮门槛时的运费，现有证据中存在不同说法，我按证据分别列出，具体以您订单结算页显示为准：\n\n- 有证据显示：单笔订单满 99 元包邮，未满收取 **10 元**运费，偏远地区运费另计 [1]。\n- 另有证据显示：单笔实付满 99 元包邮，未满收取 **6 元**基础运费；偏远地区（新疆、西藏、内蒙古部分区域）加收 12 元附加运费，该附加运费不参与包邮，需单独支付 [2]。\n\n也就是说，基础运费金额在不同条款中分别写为 10 元和 6 元，我无法据此确定哪一个适用于您的订单，建议以结算页实际显示为准。\n\n补充几点相关规则：\n- 偏远地区附加运费不参与包邮，需单独支付；偏远地区配送时效在正常时效基础上顺延 2 至 4 天 [2]。\n- 港澳台及海外暂不支持配送 [2][5]。\n- 金卡会员每月享 3 次免运费权益，银卡会员享 1 次；权益不与偏远地区附加运费冲抵，当月未用完不结转 [3]。\n- 积分可在结算页勾选使用，100 积分抵 1 元，单笔最多抵 30 元，积分可直接抵扣运费 [7]。\n\n您的收货地址是否属于偏远地区、以及您是否为会员，会影响最终运费，这些信息我目前无法核实。如需确认具体金额，请提供收货地区或直接在结算页查看。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案仅复述证据中明确记载的运费、会员、积分、配送范围等事实，并如实指出证据间存在10元与6元的不同说法，未添加任何证据外信息，所有可验证陈述均有对应引用支持。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "policy_price_protection",
+      "query": "价保七天是收货以后才开始吗？",
+      "type": "policy_boundary",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "价格保护怎么申请"
+        }
+      ],
+      "answer_facts": [
+        "价保从下单时间起算",
+        "不是从签收之日起算"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 0.032786883413791656
+        },
+        {
+          "chunk_id": "0d035d97-5c43-41be-be39-15c47ab0dc6d",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 不适用情形",
+          "score": 0.028898129239678383
+        },
+        {
+          "chunk_id": "be5ee87f-8005-4d94-ba75-1623bee93121",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 衣服可以试穿后退货吗",
+          "score": 0.027893736958503723
+        },
+        {
+          "chunk_id": "f3391115-bdb3-47e3-ab76-cd19ab75a06b",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 开票时效",
+          "score": 0.027619048953056335
+        },
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.026838432997465134
+        },
+        {
+          "chunk_id": "95b2506f-8f44-413a-916b-b09bf3ffafe8",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 订单可以修改或取消吗",
+          "score": 0.026399333029985428
+        },
+        {
+          "chunk_id": "4c64e569-0f05-4422-a0cc-69afac4236cc",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么攒",
+          "score": 0.02525252476334572
+        },
+        {
+          "chunk_id": "4484ed3d-6e2a-4128-ad3a-6f0f64d8aec4",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ",
+          "score": 0.024884259328246117
+        },
+        {
+          "chunk_id": "4d83fc17-7261-471d-8d8f-572581c4a1ef",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 运费与包邮",
+          "score": 0.024084506556391716
+        },
+        {
+          "chunk_id": "e23c2f9f-7cfe-4f92-9dc4-4d22555a00e1",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员运费权益",
+          "score": 0.023322850465774536
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有证据，价保七天**不是**从收货以后才开始计算的。\n\n具体说明如下：\n\n- 自营商品支持下单后 7 天内价保，价保的 7 天**自下单时间起算**，不是从签收之日起算 [1]。\n- 签收之日起 7 天内对应的是**无理由退货**，两者起算点不同，不能混用 [1]。\n\n所以，价保的起算点是**下单时间**，而非收货/签收时间。\n\n如果您想确认具体订单是否还在价保期内，可以提供订单号，我帮您进一步核实。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案的核心事实（价保7天自下单时间起算、非签收起算，签收7天对应无理由退货）完全由证据[1]直接支持，未添加证据外事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "policy_return_clock",
+      "query": "七天无理由退货是从付款那天算吗？",
+      "type": "policy_boundary",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "七天无理由退货"
+        }
+      ],
+      "answer_facts": [
+        "自签收之日起 7 个自然日内"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "0d035d97-5c43-41be-be39-15c47ab0dc6d",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 不适用情形",
+          "score": 0.0314980149269104
+        },
+        {
+          "chunk_id": "ca37f213-66b1-4e19-9904-3bc6ef9ea809",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货",
+          "score": 0.0314980149269104
+        },
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 0.03131881356239319
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.03053613007068634
+        },
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.03009049780666828
+        },
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 0.02964254468679428
+        },
+        {
+          "chunk_id": "dfb25a96-0939-4824-8338-a228fd087279",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.029009878635406494
+        },
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.0279720276594162
+        },
+        {
+          "chunk_id": "be5ee87f-8005-4d94-ba75-1623bee93121",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 衣服可以试穿后退货吗",
+          "score": 0.027757078409194946
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.027619048953056335
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有证据，七天无理由退货**不是从付款那天算**，而是从**签收商品之日起**算。\n\n具体依据如下：\n\n- [2] 明确写明：“消费者自**签收商品之日起 7 个自然日内**，商品保持完好且不影响二次销售的，可以申请无理由退货。”\n- [6] 也特别提示了两者起算点不同：“价保的 7 天自**下单时间**起算，不是从签收之日起算；签收之日起 7 天内的那条是**无理由退货**，两者起算点不同、别混用。”\n\n所以，七天无理由退货的起算点是**签收日**，不是付款日。\n\n另外补充一点：[1] 列出的部分商品不适用七天无理由退货，例如消费者定作的商品、鲜活易腐商品、已拆封的贴身衣物等，具体是否适用还需结合商品类型判断。\n\n关于退款到账时间，证据中有相关说明，但具体到账时间会因支付方式和质检情况而不同，我无法承诺具体到账时间。",
+      "faithfulness": 1.0,
+      "judge_reason": "所有可验证事实均被证据直接支持：签收日起算7天无理由退货有[2]支持，与价保起算点区分有[6]支持，不适用商品列举有[1]支持，退款到账时间因支付方式和质检不同有[4][8]支持，未添加无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "policy_missing_item",
+      "query": "商家少发了东西，退换货运费谁出？",
+      "type": "policy_boundary",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "运费承担规则"
+        }
+      ],
+      "answer_facts": [
+        "漏发由商家承担来回运费"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.032522473484277725
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.03151364624500275
+        },
+        {
+          "chunk_id": "7edb11cc-187a-48f7-adbf-af71e5f6957e",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 鞋子的尺码不准怎么办",
+          "score": 0.03100961446762085
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.03079839050769806
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.03067915514111519
+        },
+        {
+          "chunk_id": "1a53805a-a3dc-4d83-a984-71c2139d470f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 运费怎么算",
+          "score": 0.030330881476402283
+        },
+        {
+          "chunk_id": "d0c10073-6417-4bc8-9a46-cf9a3dd0437a",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 换货流程",
+          "score": 0.03015873208642006
+        },
+        {
+          "chunk_id": "ac788fa6-1c66-4928-9ac8-4dfab84406c6",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围",
+          "score": 0.02941812574863434
+        },
+        {
+          "chunk_id": "43155fa1-833d-4bcf-9fab-8a761fb1b0cd",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 换货流程怎么走",
+          "score": 0.02904040366411209
+        },
+        {
+          "chunk_id": "e23c2f9f-7cfe-4f92-9dc4-4d22555a00e1",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员运费权益",
+          "score": 0.02715098112821579
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据您描述的情况（商家少发/漏发商品），运费承担规则如下：\n\n**1. 漏发属于商家责任，来回运费由商家承担**\n[1] 中明确列出：场景为\"发错货或漏发\"时，运费承担方为**商家**，说明为\"商家承担来回运费\"。\n\n**2. 运费承担取决于责任归属**\n[1][2] 均指出，退货和换货的运费承担方式取决于责任归属，并按对应场景的表格规则执行。漏发对应的是商家责任场景。\n\n**需要说明的是：**\n- 您提到的\"少发了东西\"如果确属漏发，按 [1] 应由商家承担来回运费；但具体是否认定为漏发，需以实际核实结果为准，我无法在此直接判定。\n- 关于处理时限，[4] 显示\"退换货运费\"类问题的首次响应为 2 小时、处理时限为 3 个工作日，但这是处理时限规定，**不代表具体到账或完成时间**，我无法承诺具体时间。\n- 若您为会员，可能还涉及会员运费权益 [5][10]，具体以会员中心页面标注为准。\n\n**建议：** 请在订单详情页提交售后申请，并保留好收货时的开箱照片或视频等凭证，以便核实是否属于漏发。如需进一步确认责任归属，可转人工工单处理 [8]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据直接支持：漏发由商家承担来回运费、运费承担取决于责任归属、退换货运费处理时限、会员运费权益及转人工工单等，均与对应引用内容一致，未添加无证据支持的事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "policy_refund_eta",
+      "query": "退款审核通过后保证几个工作日到账？",
+      "type": "policy_boundary",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "退款到账时间"
+        }
+      ],
+      "answer_facts": [
+        "不能保证具体到账天数",
+        "按支付渠道查询参考范围"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.032522473484277725
+        },
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.032522473484277725
+        },
+        {
+          "chunk_id": "dfb25a96-0939-4824-8338-a228fd087279",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.0317460335791111
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.030117753893136978
+        },
+        {
+          "chunk_id": "d0c10073-6417-4bc8-9a46-cf9a3dd0437a",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 换货流程",
+          "score": 0.029469121247529984
+        },
+        {
+          "chunk_id": "7bb19a8f-46d5-4b2f-8d90-375d16928c0b",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 如何申请退款",
+          "score": 0.02941812574863434
+        },
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.028790388256311417
+        },
+        {
+          "chunk_id": "518f1db4-9041-4024-b322-a7d550783200",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.02878289483487606
+        },
+        {
+          "chunk_id": "f3391115-bdb3-47e3-ab76-cd19ab75a06b",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 开票时效",
+          "score": 0.027364110574126244
+        },
+        {
+          "chunk_id": "a890ac64-c98a-46b3-a8c4-b4e79a4e05a1",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.02705627679824829
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "退款到账时间取决于您的原支付方式，不同渠道的时限不同，我无法给出统一的“保证几个工作日到账”的承诺。以下依据现有证据逐项说明：\n\n**一、退款到账时间（按支付方式）**\n\n- 货到付款：退款到账时间为 3 至 5 个工作日，需提供收款银行账户信息 [1]。\n- 微信支付：退款到账时间为 1 至 3 个工作日，原路退回零钱或银行卡 [2]。\n- 支付宝：退款到账时间为 1 至 3 个工作日，原路退回余额或银行卡 [2]。\n- 银行卡直连：退款到账时间为 3 至 7 个工作日，以发卡行入账时间为准 [2]。\n- 平台余额：实时到账，可在账户余额中查看 [2]。\n- 礼品卡：退款到账时间为 1 个工作日，退回原礼品卡，不折现 [2]。\n\n**二、退款的前提条件**\n\n退款需在退货商品经仓库质检通过后，按原支付路径退回 [2][3]。各支付方式对应的退货质检时限为：货到付款 2 个工作日 [1]；微信支付、支付宝、平台余额各 1 个工作日 [2]；银行卡直连、礼品卡各 2 个工作日 [2]。\n\n**三、关于“审核通过后”的说明**\n\n您提到的“退款审核通过”与证据中的“仓库质检通过”是否为同一环节，现有证据无法核实 [6] 仅说明审核通过后原路退回，未明确该审核与质检的关系及对应时限。因此，我无法就“审核通过后”这一具体节点承诺到账时间。\n\n**四、无法核实的内容**\n\n- 证据中未出现“保证到账”的表述，我无法作出此类承诺。\n- 售后手册中“退款”处理时限为 3 个工作日 [4]，但该表未说明其与到账时间的关系，无法据此确认到账时限。\n\n综上，具体到账时间请以您的原支付方式对应上述区间为准，实际到账还可能受发卡行等因素影响 [2]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均直接来自证据：各支付方式退款到账时间、质检时限、原路退回、审核与质检关系无法核实、售后手册退款处理时限等均与引用证据一致，未添加证据外事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "multi_water",
+      "query": "W20 和 W40 饮水机换滤芯的间隔分别是多少？",
+      "type": "multi_evidence",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机(型号 MH-W20)"
+        },
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机 Plus"
+        }
+      ],
+      "answer_facts": [
+        "W20 每 2 周",
+        "W40 每 3 周"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.03201844170689583
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 0.0320020467042923
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.0317540317773819
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 0.03109932318329811
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.03102453239262104
+        },
+        {
+          "chunk_id": "4484ed3d-6e2a-4128-ad3a-6f0f64d8aec4",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ",
+          "score": 0.03030998818576336
+        },
+        {
+          "chunk_id": "79a584c7-aeea-47a4-8651-e1ed4c42464c",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机充电器是标配吗",
+          "score": 0.028717949986457825
+        },
+        {
+          "chunk_id": "fb5204f0-7e74-48b9-bdeb-a832ea58d4c8",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册",
+          "score": 0.027973394840955734
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.02747976779937744
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.02604430913925171
+        }
+      ],
+      "recall@1": 0.5,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有证据：\n\n- **W20（型号 MH-W20）**：建议每 **2 周**更换一次滤芯 [2]。\n- **W40（型号 MH-W40）**：建议每 **3 周**更换一次滤芯 [1]。\n\n以上均为规格手册中的建议更换间隔，实际更换频率可能因使用环境和水质不同而有差异。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中W20每2周、W40每3周更换滤芯的说法分别被证据[2]和[1]直接支持，且未添加无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "multi_camera",
+      "query": "喂食器的摄像头版和独立的全景摄像头是同一个型号吗？",
+      "type": "multi_evidence",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动喂食器 摄像头版"
+        },
+        {
+          "source_path": "product-specs.md",
+          "section": "全景看护摄像头"
+        }
+      ],
+      "answer_facts": [
+        "MH-FD30 和 MH-CAM1 是不同商品"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.032786883413791656
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.032258063554763794
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.0317460335791111
+        },
+        {
+          "chunk_id": "a012c7e8-ea85-4642-b457-9ceb2bcb26de",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册",
+          "score": 0.02991071343421936
+        },
+        {
+          "chunk_id": "79a584c7-aeea-47a4-8651-e1ed4c42464c",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机充电器是标配吗",
+          "score": 0.029877368360757828
+        },
+        {
+          "chunk_id": "fb5204f0-7e74-48b9-bdeb-a832ea58d4c8",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册",
+          "score": 0.029083244502544403
+        },
+        {
+          "chunk_id": "4484ed3d-6e2a-4128-ad3a-6f0f64d8aec4",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ",
+          "score": 0.028790388256311417
+        },
+        {
+          "chunk_id": "a91ca184-0724-45e7-85fc-5559f52ce649",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.027745885774493217
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.027252906933426857
+        },
+        {
+          "chunk_id": "213cf94c-12fe-4fb7-9f6a-7a6ab04317f8",
+          "source_path": "README.md",
+          "section_path": "知识文档目录",
+          "score": 0.02579365111887455
+        }
+      ],
+      "recall@1": 0.5,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "不是同一个型号，两者是两款不同的商品。\n\n- 喂食器摄像头版：型号为 **MH-FD30**，摄像头是喂食器内置的，支持视频回看，需连接 2.4G Wi-Fi [1]。\n- 独立的全景看护摄像头：型号为 **MH-CAM1**，是另一款商品，只有这一个型号 [2]。\n\n规格手册也特别说明：自动喂食器摄像头版 MH-FD30 与独立全景看护摄像头 MH-CAM1 是两款商品，型号不要混用 [1][2]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实（MH-FD30、MH-CAM1型号、摄像头内置、视频回看、2.4G Wi-Fi、两款商品型号不要混用）均被证据[1][2]直接支持，无额外无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid",
+      "id": "unknown_model",
+      "query": "MH-LP999 的猫砂容量是多少？",
+      "type": "unanswerable",
+      "difficulty": "hard",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "ee0126cf-ec37-4c31-9419-65a25bd5ab50",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)",
+          "score": 0.032786883413791656
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.032258063554763794
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.030365770682692528
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 0.03030303120613098
+        },
+        {
+          "chunk_id": "543bae5d-ea49-4070-8474-a66309a8d18d",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大号三档加热垫(型号 MH-HP20)",
+          "score": 0.02985074557363987
+        },
+        {
+          "chunk_id": "60d3f5ec-24e3-4a53-9cc5-79a11252f0f3",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 四季保暖猫窝(型号 MH-NEST20)",
+          "score": 0.029709506779909134
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 0.02967032976448536
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.029206350445747375
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.02919863536953926
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.029138512909412384
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "无法核实。您询问的型号是 MH-LP999，但提供的证据中没有该型号的任何信息，因此无法确认其猫砂容量。\n\n现有证据中涉及猫砂盆的型号及猫砂容量如下，供您参考：\n- MH-LP200：猫砂容量 12L [1]\n- MH-LP100：猫砂容量 9L [2]\n- MH-LP50：猫砂容量 6L [3]\n\n如果您确认的是上述某一型号，可以告诉我，我再为您核对。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案纯拒答，未添加任何事实，仅说明无法核实并列出证据中已有型号信息，符合要求。",
+      "refused": 1
+    },
+    {
+      "strategy": "hybrid",
+      "id": "unknown_calendar",
+      "query": "2027 年春节你们门店具体哪天营业？",
+      "type": "unanswerable",
+      "difficulty": "medium",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 0.030330881476402283
+        },
+        {
+          "chunk_id": "ac59c897-ddb0-4476-ad42-c96b35e7dca9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 商品缺货多久补货",
+          "score": 0.0297619067132473
+        },
+        {
+          "chunk_id": "c316181a-6151-44d1-a02f-65481e489679",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 家电 > 冰箱的保修期是多久",
+          "score": 0.02955133654177189
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.026742734014987946
+        },
+        {
+          "chunk_id": "a890ac64-c98a-46b3-a8c4-b4e79a4e05a1",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.02618229389190674
+        },
+        {
+          "chunk_id": "518f1db4-9041-4024-b322-a7d550783200",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.026022912934422493
+        },
+        {
+          "chunk_id": "bbf0151b-9987-4c7d-9c84-6b26c04cfcc3",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 升级与转人工",
+          "score": 0.025641025975346565
+        },
+        {
+          "chunk_id": "a012c7e8-ea85-4642-b457-9ceb2bcb26de",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册",
+          "score": 0.02492537349462509
+        },
+        {
+          "chunk_id": "20f7f49c-c1d4-47c1-a438-583e3ed9248f",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 会员等级",
+          "score": 0.02441462129354477
+        },
+        {
+          "chunk_id": "5041bbaa-79a8-422c-bcb1-8852aba8d4b3",
+          "source_path": null,
+          "section_path": "客服服务",
+          "score": 0.024386724457144737
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "根据现有证据，无法核实 2027 年春节门店的具体营业安排。\n\n原因如下：\n- 提供的证据中没有任何一条涉及门店营业时间或节假日营业安排。[1][2][3][4][5][6][7][8][9][10]\n- 现有证据主要覆盖退货政策、补货时效、保修期、会员权益、退货运费赔付标准、客服升级规则、商品规格及客服服务范围等，均与“春节门店营业日期”无关。[1][2][3][4][5][6][7][8][9][10]\n- 其中 [10] 明确说明当前智能客服仅支持一般商品咨询，无法核实具体订单状态、物流轨迹、退款进度和商城政策条款，也不支持转接人工客服。[10]\n\n因此，关于“2027 年春节你们门店具体哪天营业”，我无法依据现有证据给出答案，建议您通过商城官方渠道另行确认。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案纯拒答，未添加任何可验证事实，仅说明证据不涉及门店营业安排。",
+      "refused": 1
+    },
+    {
+      "strategy": "hybrid",
+      "id": "unknown_promise",
+      "query": "现在下单你保证明天一定送到吗？",
+      "type": "unanswerable",
+      "difficulty": "medium",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 0.03131881356239319
+        },
+        {
+          "chunk_id": "f3391115-bdb3-47e3-ab76-cd19ab75a06b",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 开票时效",
+          "score": 0.029323630034923553
+        },
+        {
+          "chunk_id": "95b2506f-8f44-413a-916b-b09bf3ffafe8",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 订单可以修改或取消吗",
+          "score": 0.02792120911180973
+        },
+        {
+          "chunk_id": "c37d298f-d51b-4923-99d0-9aacaddbba46",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 支持哪些支付方式",
+          "score": 0.02612903155386448
+        },
+        {
+          "chunk_id": "4d83fc17-7261-471d-8d8f-572581c4a1ef",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 运费与包邮",
+          "score": 0.024730410426855087
+        },
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.016393441706895828
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.016129031777381897
+        },
+        {
+          "chunk_id": "ac59c897-ddb0-4476-ad42-c96b35e7dca9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 商品缺货多久补货",
+          "score": 0.01587301678955555
+        },
+        {
+          "chunk_id": "bdb1f943-66bf-47b8-b06c-b81d311d0181",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 适用条件",
+          "score": 0.015625
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.015384615398943424
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "无法核实，也无法承诺\"明天一定送到\"。\n\n现有证据中没有关于具体送达时效的承诺条款，仅涉及以下相关内容：\n\n- [5] 提到偏远地区（新疆、西藏、内蒙古部分区域）配送时效在正常时效基础上顺延 2 至 4 天，港澳台及海外暂不支持配送。但该条并未给出正常时效的具体天数，因此无法据此推算送达时间。\n- [2] 提到纸质发票寄出后物流以实际快递为准，这属于开票环节，与商品送达时效无关。\n\n关于您订单的实际配送时效，建议您提供订单号，由人工客服为您查询。我无法对具体到账时间、送达时间或赔付结果作出承诺。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案纯拒答，未添加任何可验证事实，仅说明无法核实并建议咨询客服。",
+      "refused": 1
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "model_lp50",
+      "query": "MH-LP50 能在 App 上收到废砂盒满的提醒吗？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "智能猫砂盆 Lite"
+        }
+      ],
+      "answer_facts": [
+        "不支持 App 联网",
+        "不支持满溢推送"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.9969372515092286
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.8396589190135396
+        },
+        {
+          "chunk_id": "ee0126cf-ec37-4c31-9419-65a25bd5ab50",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)",
+          "score": 0.792156894851116
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.05221605889060965
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.036695313716682984
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.0015086670516148274
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.0011744625344901143
+        },
+        {
+          "chunk_id": "d9477fcb-4722-4c12-b55a-897eb1e2c655",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 保修说明",
+          "score": 0.0007284057221914083
+        },
+        {
+          "chunk_id": "0e913c48-884c-4d41-ab40-0d4a47718dd9",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 设备安装与激活",
+          "score": 0.0007205406382057966
+        },
+        {
+          "chunk_id": "855f16fa-666e-4230-bfa7-d23db819e1b7",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 维修寄修流程",
+          "score": 0.0003909982209186942
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有证据，**MH-LP50 无法在 App 上收到废砂盒满的提醒**。\n\n具体依据如下：\n\n- [1] 明确说明 MH-LP50「不含 App 联网功能」，并且「无 App 联网，不支持满溢推送提醒」，建议每 4 至 5 天倾倒一次废砂盒。\n- [2] 显示支持「废砂盒满时 App 推送提醒」的是 MH-LP100（Pro 型号），并非 MH-LP50。\n- [3] 显示 MH-LP200（Max 型号）同样支持废砂盒满时 App 推送提醒。\n\n因此，如果您需要 App 推送废砂盒满提醒的功能，MH-LP50 不满足该需求，可考虑 Pro 或 Max 型号。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据直接支持：证据[1]明确MH-LP50不含App联网功能且不支持满溢推送提醒；证据[2][3]分别说明MH-LP100和MH-LP200支持废砂盒满时App推送提醒。结论与依据一致，无超出证据的断言。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "model_w60",
+      "query": "MH-W60 滤芯隔多久换？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机 Pro 不锈钢"
+        }
+      ],
+      "answer_facts": [
+        "建议每 4 周更换"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.9951201917838686
+        },
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 0.3332589769519291
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.31248740499927696
+        },
+        {
+          "chunk_id": "d9477fcb-4722-4c12-b55a-897eb1e2c655",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 保修说明",
+          "score": 0.02306579599171968
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 0.014608275717923603
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.009949970689473776
+        },
+        {
+          "chunk_id": "855f16fa-666e-4230-bfa7-d23db819e1b7",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 维修寄修流程",
+          "score": 0.009511338494685731
+        },
+        {
+          "chunk_id": "65accf99-5989-4236-abd8-d48f5b9ea780",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 处理时限",
+          "score": 0.004719811569386042
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.004238404262367955
+        },
+        {
+          "chunk_id": "fb5204f0-7e74-48b9-bdeb-a832ea58d4c8",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册",
+          "score": 0.0028680080222561613
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据商品规格手册，MH-W60 的滤芯建议更换周期如下：\n\n- **建议每 4 周更换一次滤芯** [1]。\n\n补充说明：该型号为双滤芯并联设计 [1]。以上为规格手册中的建议周期，实际更换频率可能因使用环境和水质不同而有差异，具体以实际情况为准。\n\n如需了解滤芯购买或更换服务，可参考会员权益中的相关兑换方式 [5]，或联系客服进一步咨询。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实（MH-W60滤芯每4周更换、双滤芯并联设计）均被证据[1]直接支持，其余为建议性表述，未添加无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "model_fd30",
+      "query": "MH-FD30 断电了还能远程喂吗？",
+      "type": "exact_model",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动喂食器 摄像头版"
+        }
+      ],
+      "answer_facts": [
+        "断电期间不支持 App 远程手动投喂",
+        "可维持定时投喂约 48 小时"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.9900429479740724
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.549869951185632
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.5475452722972477
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.04244883981530516
+        },
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.024725155712580084
+        },
+        {
+          "chunk_id": "855f16fa-666e-4230-bfa7-d23db819e1b7",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 维修寄修流程",
+          "score": 0.005233896301532353
+        },
+        {
+          "chunk_id": "d9477fcb-4722-4c12-b55a-897eb1e2c655",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 保修说明",
+          "score": 0.002473255991728402
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.0023860263420833394
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.001601793035050072
+        },
+        {
+          "chunk_id": "0bd130b7-e7c7-4b67-b8da-fcaa153e5b4d",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 维修受理条件",
+          "score": 0.0015313275220421151
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有资料，关于 MH-FD30 断电后能否远程喂食，可以确认以下事实：\n\n- MH-FD30 的供电方式为市电供电 + 内置应急电池 [1]。\n- 市电断开时，设备会自动切换到内置应急电池，可维持定时投喂约 48 小时 [1]。\n- 断电期间不支持视频回看与 App 远程手动投喂 [1]。\n\n因此，**MH-FD30 断电后无法通过 App 远程手动喂食**，但定时投喂在应急电池支持下仍可维持约 48 小时 [1]。\n\n需要说明的是，以上仅为规格手册中标注的断电应对说明，实际续航时长可能受电池状态、使用环境等因素影响，无法核实具体到账时间、送达时间或赔付结果。如需进一步确认，建议联系售后。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均直接来自证据[1]：供电方式、断电切换应急电池维持定时投喂约48小时、断电期间不支持视频回看与App远程手动投喂，结论也由证据直接支持；其余为合理说明，未添加无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "model_cam1",
+      "query": "MH-CAM1 支持多大 TF 卡？",
+      "type": "exact_model",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "全景看护摄像头"
+        }
+      ],
+      "answer_facts": [
+        "最大 128G TF 卡"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.996164158045025
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.17803373974136902
+        },
+        {
+          "chunk_id": "506322a9-0b96-45a6-a9e2-6456197e9bc9",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 手机数码 > 手机支持双卡双待吗",
+          "score": 0.005018332533952423
+        },
+        {
+          "chunk_id": "c37d298f-d51b-4923-99d0-9aacaddbba46",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 支持哪些支付方式",
+          "score": 0.0027289079238614314
+        },
+        {
+          "chunk_id": "20f7f49c-c1d4-47c1-a438-583e3ed9248f",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 会员等级",
+          "score": 0.002284317590190564
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.0016528173686810661
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.0015191104724074482
+        },
+        {
+          "chunk_id": "a012c7e8-ea85-4642-b457-9ceb2bcb26de",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册",
+          "score": 0.0012292911277594538
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.0010015224597633209
+        },
+        {
+          "chunk_id": "0e913c48-884c-4d41-ab40-0d4a47718dd9",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 设备安装与激活",
+          "score": 0.0009567103910039844
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "MH-CAM1 支持最大 128G TF 卡 [1]。\n\n补充说明：该型号也可使用云存储 [1]。另外，自动喂食器摄像头版 MH-FD30 是另一款商品，型号不要混用 [1][2]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实（MH-CAM1支持最大128G TF卡、可使用云存储、MH-FD30为另一款商品且型号不要混用）均被证据[1]和[2]直接支持。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "colloquial_nest",
+      "query": "猫窝里面那个垫子直接丢洗衣机行不？",
+      "type": "colloquial",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "猫窝是否可以机洗"
+        }
+      ],
+      "answer_facts": [
+        "内部垫芯不可机洗",
+        "只能局部擦洗后晾干"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "4a1beabf-6ade-4a85-b353-1a81019ab4fa",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 猫窝是否可以机洗",
+          "score": 0.955154179979502
+        },
+        {
+          "chunk_id": "60d3f5ec-24e3-4a53-9cc5-79a11252f0f3",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 四季保暖猫窝(型号 MH-NEST20)",
+          "score": 0.16325477634016522
+        },
+        {
+          "chunk_id": "543bae5d-ea49-4070-8474-a66309a8d18d",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大号三档加热垫(型号 MH-HP20)",
+          "score": 0.0033347794140435533
+        },
+        {
+          "chunk_id": "855f16fa-666e-4230-bfa7-d23db819e1b7",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 维修寄修流程",
+          "score": 0.00048313264702736517
+        },
+        {
+          "chunk_id": "99a3cc83-fb99-4f8d-b4f8-fad928ab47f8",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 恒温加热垫(型号 MH-HP12)",
+          "score": 0.0004803572109840268
+        },
+        {
+          "chunk_id": "a012c7e8-ea85-4642-b457-9ceb2bcb26de",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册",
+          "score": 0.0004308356511307053
+        },
+        {
+          "chunk_id": "d9477fcb-4722-4c12-b55a-897eb1e2c655",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 保修说明",
+          "score": 0.0003356015147482408
+        },
+        {
+          "chunk_id": "0bd130b7-e7c7-4b67-b8da-fcaa153e5b4d",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 维修受理条件",
+          "score": 0.0002470773463536633
+        },
+        {
+          "chunk_id": "bdb1f943-66bf-47b8-b06c-b81d311d0181",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 适用条件",
+          "score": 0.0002177201751144842
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.00021149821926076085
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据现有资料，猫窝内部的垫芯**不可以机洗**。\n\n具体依据如下：\n\n- [1] 明确说明：内部垫芯不可机洗，进水后填充物会结块变形，只能局部擦洗后晾干。\n- [2] 也提到：内部垫芯不可机洗，详见 FAQ「猫窝是否可以机洗」。\n\n另外补充一点，猫窝的**外套**是可以机洗的（[1]）：拆掉内部垫芯后装进洗衣袋，选轻柔模式冷水洗，洗后阴干、不要暴晒。\n\n所以您说的“垫子”如果指的是可拆卸的内部垫芯，建议不要丢洗衣机，局部擦洗后晾干即可。如果您指的是外层套子，则可以按上述方式机洗。\n\n如果您能提供具体型号，我可以帮您进一步核对是否适用同一清洗方式。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据直接支持：内部垫芯不可机洗、外套可机洗及清洗方式均来自[1]和[2]，无超出证据的断言。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "colloquial_postage",
+      "query": "不够包邮的话邮费多少啊？",
+      "type": "colloquial",
+      "difficulty": "easy",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "运费怎么算"
+        }
+      ],
+      "answer_facts": [
+        "未满 99 元收取 10 元运费"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "1a53805a-a3dc-4d83-a984-71c2139d470f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 运费怎么算",
+          "score": 0.5123381987195611
+        },
+        {
+          "chunk_id": "4d83fc17-7261-471d-8d8f-572581c4a1ef",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 运费与包邮",
+          "score": 0.42802612966418563
+        },
+        {
+          "chunk_id": "e23c2f9f-7cfe-4f92-9dc4-4d22555a00e1",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员运费权益",
+          "score": 0.14804700256671685
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 0.14497200061023846
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 0.010223567777262216
+        },
+        {
+          "chunk_id": "518f1db4-9041-4024-b322-a7d550783200",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.008387172665409384
+        },
+        {
+          "chunk_id": "20f7f49c-c1d4-47c1-a438-583e3ed9248f",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 会员等级",
+          "score": 0.007239772483633463
+        },
+        {
+          "chunk_id": "a890ac64-c98a-46b3-a8c4-b4e79a4e05a1",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.006772560169982978
+        },
+        {
+          "chunk_id": "ba53738b-9d84-44b4-aa9e-3146700e44c6",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 可开票类型",
+          "score": 0.005826844629608296
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.00374867269698973
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "关于未满包邮门槛时的运费，现有证据中存在不同说法，我按编号分别列出：\n\n- 有资料显示：单笔订单满 99 元包邮，未满收取 **10 元**运费，偏远地区运费另计 [1]。\n- 另有资料显示：单笔实付满 99 元包邮，未满收取 **6 元**基础运费；偏远地区（新疆、西藏、内蒙古部分区域）加收 12 元附加运费，该附加运费不参与包邮，需单独支付 [2]。\n\n也就是说，基础运费在证据中出现了 10 元 [1] 和 6 元 [2] 两种表述，我无法据此确认哪一个适用于您的订单，建议以您结算页面实际显示的金额为准。\n\n补充几点可能相关的信息：\n- 金卡会员每月享 3 次免运费权益，银卡会员享 1 次；该权益不与偏远地区附加运费冲抵 [3]。\n- 积分可在结算页抵扣运费，100 积分抵 1 元，单笔最多抵 30 元 [4]。\n- 港澳台及海外暂不支持配送 [2][5]。\n\n如果您方便提供收货地区或会员等级，我可以帮您对照上述规则进一步说明；但具体运费金额仍请以结算页为准。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案仅复述证据中存在的运费、会员、积分、配送范围等信息，并明确说明证据间存在冲突、无法确认，未添加任何证据未支持的可验证事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "policy_price_protection",
+      "query": "价保七天是收货以后才开始吗？",
+      "type": "policy_boundary",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-faq.md",
+          "section": "价格保护怎么申请"
+        }
+      ],
+      "answer_facts": [
+        "价保从下单时间起算",
+        "不是从签收之日起算"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 0.9700930740687824
+        },
+        {
+          "chunk_id": "ca37f213-66b1-4e19-9904-3bc6ef9ea809",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货",
+          "score": 0.08318272546733427
+        },
+        {
+          "chunk_id": "43155fa1-833d-4bcf-9fab-8a761fb1b0cd",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 换货流程怎么走",
+          "score": 0.05498017323044517
+        },
+        {
+          "chunk_id": "4c64e569-0f05-4422-a0cc-69afac4236cc",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么攒",
+          "score": 0.04245918129962895
+        },
+        {
+          "chunk_id": "d9477fcb-4722-4c12-b55a-897eb1e2c655",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 保修说明",
+          "score": 0.016443000739253054
+        },
+        {
+          "chunk_id": "518f1db4-9041-4024-b322-a7d550783200",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.014940347225190545
+        },
+        {
+          "chunk_id": "a890ac64-c98a-46b3-a8c4-b4e79a4e05a1",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.014907245925451385
+        },
+        {
+          "chunk_id": "bdb1f943-66bf-47b8-b06c-b81d311d0181",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 适用条件",
+          "score": 0.01047620167886156
+        },
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 0.007888203283449217
+        },
+        {
+          "chunk_id": "0d035d97-5c43-41be-be39-15c47ab0dc6d",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 不适用情形",
+          "score": 0.0069017297060010325
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "不是的，价保七天不是从收货以后才开始。\n\n根据 [1]：自营商品支持下单后 7 天内价保，价保的 7 天**自下单时间起算**，不是从签收之日起算。\n\n另外，[1] 也特别说明：签收之日起 7 天内的是无理由退货，两者起算点不同，不要混用。关于无理由退货，[2] 显示是自签收商品之日起 7 个自然日内可申请。\n\n所以：\n- 价保 7 天：自**下单时间**起算 [1]\n- 无理由退货 7 天：自**签收之日**起算 [2]\n\n如果您问的是价保，答案就是：不是收货后才开始，而是下单后就开始算。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据[1]和[2]直接支持：价保7天自下单时间起算、无理由退货自签收之日起7个自然日内，且明确区分两者起算点。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "policy_return_clock",
+      "query": "七天无理由退货是从付款那天算吗？",
+      "type": "policy_boundary",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "七天无理由退货"
+        }
+      ],
+      "answer_facts": [
+        "自签收之日起 7 个自然日内"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 0.9469507538078562
+        },
+        {
+          "chunk_id": "ca37f213-66b1-4e19-9904-3bc6ef9ea809",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货",
+          "score": 0.9293740795965691
+        },
+        {
+          "chunk_id": "e00dc7a4-bcaf-4897-98f3-c6b116428d2f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 退货政策是什么",
+          "score": 0.47592724075299697
+        },
+        {
+          "chunk_id": "bdb1f943-66bf-47b8-b06c-b81d311d0181",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 适用条件",
+          "score": 0.46127934096654694
+        },
+        {
+          "chunk_id": "0d035d97-5c43-41be-be39-15c47ab0dc6d",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 不适用情形",
+          "score": 0.41777864216315924
+        },
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.02762959866366079
+        },
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.026852915245029446
+        },
+        {
+          "chunk_id": "4c64e569-0f05-4422-a0cc-69afac4236cc",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么攒",
+          "score": 0.022076080451092172
+        },
+        {
+          "chunk_id": "be5ee87f-8005-4d94-ba75-1623bee93121",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 衣服可以试穿后退货吗",
+          "score": 0.020827257099788013
+        },
+        {
+          "chunk_id": "43155fa1-833d-4bcf-9fab-8a761fb1b0cd",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 换货流程怎么走",
+          "score": 0.01700780816233579
+        }
+      ],
+      "recall@1": 0.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 0.5,
+      "answer": "七天无理由退货**不是**从付款那天算起。\n\n根据退货政策，七天无理由退货的起算点是**自签收商品之日起 7 个自然日内** [2]。也就是说，是从您**签收商品**那天开始计算，而不是付款或下单当天。\n\n需要特别提醒的是，容易和它混淆的**价格保护**才是自下单时间起算的 [1]，两者起算点不同，请不要混用。\n\n另外补充几点相关条件：\n- 申请时商品需保持完好、不影响二次销售 [2][3]，且商品本体、配件、赠品、说明书和原包装完整，未经使用、洗涤、安装 [4]。\n- 部分商品不适用七天无理由退货，如定作商品、鲜活易腐商品、已拆封的数字化商品、已拆封的贴身衣物和化妆品等 [5]。\n\n如果您方便提供具体订单号，我可以帮您进一步核对是否在可申请的时间范围内。",
+      "faithfulness": 1.0,
+      "judge_reason": "所有可验证事实均有证据直接支持：七天无理由退货自签收起算[2]，价保自下单起算[1]，适用条件[2][3][4]，不适用情形[5]，未添加无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "policy_missing_item",
+      "query": "商家少发了东西，退换货运费谁出？",
+      "type": "policy_boundary",
+      "difficulty": "medium",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "运费承担规则"
+        }
+      ],
+      "answer_facts": [
+        "漏发由商家承担来回运费"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "2ee38848-6777-4667-b225-d80a2e4c91a5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.813245938232055
+        },
+        {
+          "chunk_id": "0e0dd846-f23f-4420-9dd1-fbb498aacb56",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 运费承担规则",
+          "score": 0.6650182130994837
+        },
+        {
+          "chunk_id": "7edb11cc-187a-48f7-adbf-af71e5f6957e",
+          "source_path": "商品FAQ.md",
+          "section_path": "商品 FAQ > 服饰鞋包 > 鞋子的尺码不准怎么办",
+          "score": 0.1398925598664843
+        },
+        {
+          "chunk_id": "a890ac64-c98a-46b3-a8c4-b4e79a4e05a1",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.12107765850525598
+        },
+        {
+          "chunk_id": "518f1db4-9041-4024-b322-a7d550783200",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.10291559534525495
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.09468689828803192
+        },
+        {
+          "chunk_id": "a91ca184-0724-45e7-85fc-5559f52ce649",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.07807365170099834
+        },
+        {
+          "chunk_id": "1a53805a-a3dc-4d83-a984-71c2139d470f",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 运费怎么算",
+          "score": 0.04684640527620648
+        },
+        {
+          "chunk_id": "ac788fa6-1c66-4928-9ac8-4dfab84406c6",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围",
+          "score": 0.022376492332508522
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 0.012857694145315212
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据您描述的情况，我按事实逐项说明如下：\n\n**1. 商家少发东西（漏发）的运费承担方**\n依据 [1] 的运费承担规则表，\"发错货或漏发\"场景下，**商家承担来回运费**。因此，若确属商家漏发，退换货产生的来回运费应由商家承担。\n\n**2. 责任归属是判断运费承担的前提**\n依据 [1] 和 [2]，运费承担方式取决于责任归属。也就是说，需要先确认是否属于商家漏发，才能适用上述规则。\n\n**3. 关于赔付到账时间**\n您的问题未涉及具体赔付金额或到账时间，我无法核实，也不对到账时间作出承诺。相关承运商赔付标准见 [4]、[5]，但需以实际责任认定和材料审核为准。\n\n**4. 需要补充的信息**\n目前证据中未包含您的具体订单信息、漏发商品情况、承运商等，因此无法核实您这笔订单的具体运费承担结果。建议您提供订单号及漏发凭证，以便进一步核实。\n\n**5. 会员权益可能影响运费**\n依据 [6]，金卡会员享上门取件退换货，银卡会员享退换货运费权益 1 次/月，具体以会员中心页面标注为准。若您是会员，可能另有权益适用。\n\n**6. 超出受理范围的处理**\n依据 [9]，若您的诉求超出退货、退款、换货、维修和运费赔付五类范围，应转人工工单处理，客服不得直接承诺。\n\n综上，**若确属商家漏发，依据 [1] 应由商家承担来回运费**；但具体到您这笔订单，因缺少订单信息，暂无法核实，也不承诺具体到账或赔付结果。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实均被证据直接支持：漏发场景商家承担来回运费、责任归属前提、赔付到账时间未承诺、缺少订单信息无法核实、会员权益、超范围转人工工单，均与对应引用一致，无证据外事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "policy_refund_eta",
+      "query": "退款审核通过后保证几个工作日到账？",
+      "type": "policy_boundary",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "退货政策.md",
+          "section": "退款到账时间"
+        }
+      ],
+      "answer_facts": [
+        "不能保证具体到账天数",
+        "按支付渠道查询参考范围"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.8948205231721919
+        },
+        {
+          "chunk_id": "8d933311-7360-47c2-a391-c0e6a33abf5c",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.6950294095575535
+        },
+        {
+          "chunk_id": "dfb25a96-0939-4824-8338-a228fd087279",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.4609365403004848
+        },
+        {
+          "chunk_id": "a890ac64-c98a-46b3-a8c4-b4e79a4e05a1",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.2795345741750033
+        },
+        {
+          "chunk_id": "518f1db4-9041-4024-b322-a7d550783200",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围 > 退货运费赔付标准",
+          "score": 0.21377788863553449
+        },
+        {
+          "chunk_id": "d0c10073-6417-4bc8-9a46-cf9a3dd0437a",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 换货流程",
+          "score": 0.19989782323316183
+        },
+        {
+          "chunk_id": "a63c5401-1df4-4e40-819d-ab2ca5071f86",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 发货时效多久",
+          "score": 0.13704893416661618
+        },
+        {
+          "chunk_id": "65accf99-5989-4236-abd8-d48f5b9ea780",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 处理时限",
+          "score": 0.09864337232584844
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.095395623865342
+        },
+        {
+          "chunk_id": "460df687-dca7-4a36-b63f-521cefaea906",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.059057293408252304
+        }
+      ],
+      "recall@1": 1.0,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "退款到账时间取决于您的原支付方式，不同渠道的到账时间不同，无法统一承诺具体到账时间。以下依据现有证据逐项说明：\n\n**一、退款到账时间（按支付方式）**\n\n- 微信支付：退款到账时间为 1 至 3 个工作日，原路退回零钱或银行卡 [1]\n- 支付宝：退款到账时间为 1 至 3 个工作日，原路退回余额或银行卡 [1]\n- 银行卡直连：退款到账时间为 3 至 7 个工作日，以发卡行入账时间为准 [1]\n- 平台余额：实时到账，可在账户余额中查看 [1]\n- 礼品卡：1 个工作日，退回原礼品卡，不折现 [1]\n- 货到付款：3 至 5 个工作日，需提供收款银行账户信息 [2]\n\n**二、前置条件**\n\n退款需在退货商品经仓库质检通过后，按原支付路径退回 [1][3]。各支付方式的退货质检时限为：微信支付、支付宝、平台余额均为 1 个工作日；银行卡直连、礼品卡、货到付款均为 2 个工作日 [1][2]。\n\n**三、关于\"保证\"的说明**\n\n上述时间为各支付渠道的参考到账时间，其中银行卡直连明确\"以发卡行入账时间为准\" [1]，因此无法承诺具体到账时间。\n\n**四、无法核实的内容**\n\n您提到的\"退款审核通过后\"这一节点，现有证据中未对\"审核通过\"与\"仓库质检通过\"的关系作出说明，因此无法核实审核通过后是否立即进入质检及退款流程。\n\n**五、其他相关时限（供参考，非退款到账时间）**\n\n- 退款查询的处理完成时限为 24 小时 [8]\n- 退款类问题的处理时限为 3 个工作日 [9]\n\n如需查询具体订单的退款进度，建议您提供订单号，我可以帮您进一步核实。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实（各支付方式退款到账时间、质检时限、前置条件、银行卡以发卡行入账时间为准、退款查询24小时、退款类问题3个工作日等）均被证据[1][2][3][8][9]直接支持，且对无法核实的内容明确说明，无证据外事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "multi_water",
+      "query": "W20 和 W40 饮水机换滤芯的间隔分别是多少？",
+      "type": "multi_evidence",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机(型号 MH-W20)"
+        },
+        {
+          "source_path": "product-specs.md",
+          "section": "自动饮水机 Plus"
+        }
+      ],
+      "answer_facts": [
+        "W20 每 2 周",
+        "W40 每 3 周"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "060168bd-b2df-4410-b875-358e96a59470",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机(型号 MH-W20)",
+          "score": 0.9478902794763152
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.8599431254552511
+        },
+        {
+          "chunk_id": "943c9326-b2d8-42a3-8c1c-ecb221c73dee",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Pro 不锈钢(型号 MH-W60)",
+          "score": 0.013177169738819446
+        },
+        {
+          "chunk_id": "a4d4ca7e-916b-4745-8022-0c732cc17755",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 积分怎么用",
+          "score": 0.01152913310889186
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.005500549715564526
+        },
+        {
+          "chunk_id": "d9477fcb-4722-4c12-b55a-897eb1e2c655",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 保修说明",
+          "score": 0.004894324810013507
+        },
+        {
+          "chunk_id": "855f16fa-666e-4230-bfa7-d23db819e1b7",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 维修寄修流程",
+          "score": 0.0022664043410580074
+        },
+        {
+          "chunk_id": "bbf0151b-9987-4c7d-9c84-6b26c04cfcc3",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 升级与转人工",
+          "score": 0.00119237378924462
+        },
+        {
+          "chunk_id": "fb5204f0-7e74-48b9-bdeb-a832ea58d4c8",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册",
+          "score": 0.0010618353645693145
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.0009666819913577939
+        }
+      ],
+      "recall@1": 0.5,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "根据商品规格手册：\n\n- **MH-W20**：建议每 **2 周**更换一次滤芯 [1]。\n- **MH-W40**：建议每 **3 周**更换一次滤芯 [2]。\n\n以上均为规格手册中的建议更换间隔，实际更换频率可能因使用情况而有所不同。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中关于MH-W20每2周、MH-W40每3周更换滤芯的说法均被对应证据[1][2]直接支持，且未添加无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "multi_camera",
+      "query": "喂食器的摄像头版和独立的全景摄像头是同一个型号吗？",
+      "type": "multi_evidence",
+      "difficulty": "hard",
+      "ground_truth": [
+        {
+          "source_path": "product-specs.md",
+          "section": "自动喂食器 摄像头版"
+        },
+        {
+          "source_path": "product-specs.md",
+          "section": "全景看护摄像头"
+        }
+      ],
+      "answer_facts": [
+        "MH-FD30 和 MH-CAM1 是不同商品"
+      ],
+      "retrieved": [
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.993771881918397
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.9890166475147463
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.08590071440773529
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.009538388249859267
+        },
+        {
+          "chunk_id": "a012c7e8-ea85-4642-b457-9ceb2bcb26de",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册",
+          "score": 0.00042230069690357225
+        },
+        {
+          "chunk_id": "0e913c48-884c-4d41-ab40-0d4a47718dd9",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 设备安装与激活",
+          "score": 0.00010393743246582294
+        },
+        {
+          "chunk_id": "d0c10073-6417-4bc8-9a46-cf9a3dd0437a",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 换货流程",
+          "score": 7.742528164095852e-05
+        },
+        {
+          "chunk_id": "bdb1f943-66bf-47b8-b06c-b81d311d0181",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 七天无理由退货 > 适用条件",
+          "score": 4.377158786940555e-05
+        },
+        {
+          "chunk_id": "21c36139-a3f5-4620-ab66-dc9024521446",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大型猫爬架(型号 MH-CT30)",
+          "score": 3.783509096443978e-05
+        },
+        {
+          "chunk_id": "294b3080-b848-4fcf-9037-395e055a3ab4",
+          "source_path": "README.md",
+          "section_path": "知识文档目录",
+          "score": 3.7049860408295586e-05
+        }
+      ],
+      "recall@1": 0.5,
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "mrr": 1.0,
+      "answer": "不是同一个型号，两者是两款不同商品，型号不能混用。\n\n- 独立的全景看护摄像头：型号为 **MH-CAM1**，且该商品只有这一个型号 [1]。\n- 自动喂食器摄像头版：型号为 **MH-FD30**，其“摄像头版”指的是喂食器内置的摄像头 [2]。\n\n因此，喂食器的摄像头版（MH-FD30）和独立的全景摄像头（MH-CAM1）不是同一个型号 [1][2]。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案中所有可验证事实（MH-CAM1、MH-FD30型号及两者不同、摄像头版指内置摄像头）均被证据[1][2]直接支持，无额外无依据事实。",
+      "refused": null
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "unknown_model",
+      "query": "MH-LP999 的猫砂容量是多少？",
+      "type": "unanswerable",
+      "difficulty": "hard",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "5fb0820d-c6de-46b3-b38e-86a922faf769",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Pro(型号 MH-LP100)",
+          "score": 0.785373291191114
+        },
+        {
+          "chunk_id": "ee0126cf-ec37-4c31-9419-65a25bd5ab50",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Max(型号 MH-LP200)",
+          "score": 0.7658089300517308
+        },
+        {
+          "chunk_id": "d347cda8-295d-4bdc-bcdc-15b4f36f581a",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 智能猫砂盆 Lite(型号 MH-LP50)",
+          "score": 0.6450513912526996
+        },
+        {
+          "chunk_id": "f428013b-205d-41c0-9023-a70e995a1fb0",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 基础版(型号 MH-FD10)",
+          "score": 0.016701382862359063
+        },
+        {
+          "chunk_id": "3092aeaf-4a87-41c8-8186-1c387fb476c6",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见故障自查",
+          "score": 0.011448353090136493
+        },
+        {
+          "chunk_id": "51ca3b9e-0299-45f2-bc52-56eee4d281d9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 全景看护摄像头(型号 MH-CAM1)",
+          "score": 0.007159767920659919
+        },
+        {
+          "chunk_id": "a2c60ca9-7338-4732-a132-3160561c88b9",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动喂食器 摄像头版(型号 MH-FD30)",
+          "score": 0.007002896643807757
+        },
+        {
+          "chunk_id": "21c36139-a3f5-4620-ab66-dc9024521446",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 大型猫爬架(型号 MH-CT30)",
+          "score": 0.002631779109489419
+        },
+        {
+          "chunk_id": "60d3f5ec-24e3-4a53-9cc5-79a11252f0f3",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 四季保暖猫窝(型号 MH-NEST20)",
+          "score": 0.0019966690161936996
+        },
+        {
+          "chunk_id": "847a581c-dee1-4d5b-83fb-26cfbaf594b5",
+          "source_path": "product-specs.md",
+          "section_path": "商品规格手册 > 自动饮水机 Plus(型号 MH-W40)",
+          "score": 0.0013941759235655158
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "无法核实。提供的证据中没有型号为 MH-LP999 的商品信息，现有猫砂盆型号为 MH-LP100[1]、MH-LP200[2]、MH-LP50[3]，均与 MH-LP999 不符。建议您核对型号后再次咨询。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案仅说明证据中无该型号并列出已有型号，未添加任何未被证据支持的事实，属于纯拒答。",
+      "refused": 1
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "unknown_calendar",
+      "query": "2027 年春节你们门店具体哪天营业？",
+      "type": "unanswerable",
+      "difficulty": "medium",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "20f7f49c-c1d4-47c1-a438-583e3ed9248f",
+          "source_path": "member-benefits.md",
+          "section_path": "会员权益 > 会员等级",
+          "score": 9.314459809616948e-05
+        },
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 4.5226493662945195e-05
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 4.049648212323265e-05
+        },
+        {
+          "chunk_id": "84eed799-7cee-4583-b1e4-ebb8c3dfa7f9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 优惠券和满减怎么用",
+          "score": 3.84918065084733e-05
+        },
+        {
+          "chunk_id": "65accf99-5989-4236-abd8-d48f5b9ea780",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 处理时限",
+          "score": 3.759171700351246e-05
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 3.6300583474793134e-05
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 3.3228007889306715e-05
+        },
+        {
+          "chunk_id": "16bf54f3-fed5-44cd-bb2c-f34d5b0401e0",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 人工客服入口与时间",
+          "score": 3.12805649665781e-05
+        },
+        {
+          "chunk_id": "da52fb22-8ce6-441d-9701-b22fa1a55215",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策",
+          "score": 2.7790767015196372e-05
+        },
+        {
+          "chunk_id": "deef9b8f-7d21-4011-a577-32269a9dd745",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 会员等级与积分规则",
+          "score": 2.6485313522215196e-05
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "无法核实。现有证据中没有关于门店春节营业安排的信息，因此无法确认 2027 年春节具体哪天营业。\n\n可参考的相关信息仅有：[8] 提到人工客服服务时间为每日 9:00 至 22:00，但这属于客服在线时间，并非门店营业时间。建议您通过 App 内「我的」-「联系客服」或订单详情页入口咨询人工客服，以获取门店营业安排。",
+      "faithfulness": 1.0,
+      "judge_reason": "答案纯拒答，未添加任何可验证事实，仅说明证据不足并建议咨询客服，符合要求。",
+      "refused": 1
+    },
+    {
+      "strategy": "hybrid_rerank",
+      "id": "unknown_promise",
+      "query": "现在下单你保证明天一定送到吗？",
+      "type": "unanswerable",
+      "difficulty": "medium",
+      "ground_truth": [],
+      "answer_facts": [],
+      "retrieved": [
+        {
+          "chunk_id": "a63c5401-1df4-4e40-819d-ab2ca5071f86",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 发货时效多久",
+          "score": 0.044381089160466444
+        },
+        {
+          "chunk_id": "ac788fa6-1c66-4928-9ac8-4dfab84406c6",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 受理范围",
+          "score": 0.01588388070667409
+        },
+        {
+          "chunk_id": "fb46bc40-19a9-43e1-832f-d4b5ebc2c7c5",
+          "source_path": "退货政策.md",
+          "section_path": "退货政策 > 退款到账时间",
+          "score": 0.00564451999191362
+        },
+        {
+          "chunk_id": "3e8fe5f7-2439-4f5d-a4f0-0235704d7684",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 价格保护怎么申请",
+          "score": 0.004776137938458304
+        },
+        {
+          "chunk_id": "0b780576-a480-4250-93c2-a5f307616aa7",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 配送范围与偏远地区",
+          "score": 0.004706444447713908
+        },
+        {
+          "chunk_id": "c7594685-d528-4b7f-bf53-612a31095c92",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 会员专属售后权益",
+          "score": 0.0030330386360303404
+        },
+        {
+          "chunk_id": "4ce12591-c3d6-47df-b800-d15c89f7a46e",
+          "source_path": "after-sales-manual.md",
+          "section_path": "售后手册 > 常见问题处理时限",
+          "score": 0.0024180883146578324
+        },
+        {
+          "chunk_id": "4cc00e22-8c79-4034-bea5-0900d939116b",
+          "source_path": "售后手册.md",
+          "section_path": "售后手册 > 记录要求",
+          "score": 0.0023136948139469995
+        },
+        {
+          "chunk_id": "ac59c897-ddb0-4476-ad42-c96b35e7dca9",
+          "source_path": "product-faq.md",
+          "section_path": "商品与购物 FAQ > 商品缺货多久补货",
+          "score": 0.002289570480770504
+        },
+        {
+          "chunk_id": "f3391115-bdb3-47e3-ab76-cd19ab75a06b",
+          "source_path": "billing-shipping.md",
+          "section_path": "开票与配送 > 开票时效",
+          "score": 0.0021559114466358194
+        }
+      ],
+      "recall@1": null,
+      "recall@5": null,
+      "recall@10": null,
+      "mrr": null,
+      "answer": "无法承诺“明天一定送到”。\n\n依据现有证据，只能说明发货时效，无法核实或承诺具体送达时间：\n\n- 现货商品是付款后 48 小时内发货，预售商品以商品详情页标注的发货时间为准 [1]。这只是发货时限，不等于送达时限。\n- 偏远地区（如新疆、西藏、内蒙古等）运费另计且时效顺延；港澳台及海外暂不支持自营配送 [5]。\n- 现有证据中没有关于具体送达时间承诺的条款，因此“明天一定送到”无法核实，也不能作出保证。\n\n如果您需要，我可以帮您查看该商品是现货还是预售，以及是否属于偏远地区配送范围。",
+      "faithfulness": 1.0,
+      "judge_reason": "纯拒答且未添加事实，所有陈述均严格基于证据，无编造或超出证据的承诺。",
+      "refused": 1
+    }
+  ]
+}

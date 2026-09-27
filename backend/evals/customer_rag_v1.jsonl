@@ -1,0 +1,15 @@
+{"id":"model_lp50","query":"MH-LP50 能在 App 上收到废砂盒满的提醒吗？","type":"exact_model","difficulty":"easy","ground_truth":[{"source_path":"product-specs.md","section":"智能猫砂盆 Lite"}],"answer_facts":["不支持 App 联网","不支持满溢推送"]}
+{"id":"model_w60","query":"MH-W60 滤芯隔多久换？","type":"exact_model","difficulty":"easy","ground_truth":[{"source_path":"product-specs.md","section":"自动饮水机 Pro 不锈钢"}],"answer_facts":["建议每 4 周更换"]}
+{"id":"model_fd30","query":"MH-FD30 断电了还能远程喂吗？","type":"exact_model","difficulty":"medium","ground_truth":[{"source_path":"product-specs.md","section":"自动喂食器 摄像头版"}],"answer_facts":["断电期间不支持 App 远程手动投喂","可维持定时投喂约 48 小时"]}
+{"id":"model_cam1","query":"MH-CAM1 支持多大 TF 卡？","type":"exact_model","difficulty":"easy","ground_truth":[{"source_path":"product-specs.md","section":"全景看护摄像头"}],"answer_facts":["最大 128G TF 卡"]}
+{"id":"colloquial_nest","query":"猫窝里面那个垫子直接丢洗衣机行不？","type":"colloquial","difficulty":"medium","ground_truth":[{"source_path":"product-faq.md","section":"猫窝是否可以机洗"}],"answer_facts":["内部垫芯不可机洗","只能局部擦洗后晾干"]}
+{"id":"colloquial_postage","query":"不够包邮的话邮费多少啊？","type":"colloquial","difficulty":"easy","ground_truth":[{"source_path":"product-faq.md","section":"运费怎么算"}],"answer_facts":["未满 99 元收取 10 元运费"]}
+{"id":"policy_price_protection","query":"价保七天是收货以后才开始吗？","type":"policy_boundary","difficulty":"hard","ground_truth":[{"source_path":"product-faq.md","section":"价格保护怎么申请"}],"answer_facts":["价保从下单时间起算","不是从签收之日起算"]}
+{"id":"policy_return_clock","query":"七天无理由退货是从付款那天算吗？","type":"policy_boundary","difficulty":"medium","ground_truth":[{"source_path":"退货政策.md","section":"七天无理由退货"}],"answer_facts":["自签收之日起 7 个自然日内"]}
+{"id":"policy_missing_item","query":"商家少发了东西，退换货运费谁出？","type":"policy_boundary","difficulty":"medium","ground_truth":[{"source_path":"退货政策.md","section":"运费承担规则"}],"answer_facts":["漏发由商家承担来回运费"]}
+{"id":"policy_refund_eta","query":"退款审核通过后保证几个工作日到账？","type":"policy_boundary","difficulty":"hard","ground_truth":[{"source_path":"退货政策.md","section":"退款到账时间"}],"answer_facts":["不能保证具体到账天数","按支付渠道查询参考范围"]}
+{"id":"multi_water","query":"W20 和 W40 饮水机换滤芯的间隔分别是多少？","type":"multi_evidence","difficulty":"hard","ground_truth":[{"source_path":"product-specs.md","section":"自动饮水机(型号 MH-W20)"},{"source_path":"product-specs.md","section":"自动饮水机 Plus"}],"answer_facts":["W20 每 2 周","W40 每 3 周"]}
+{"id":"multi_camera","query":"喂食器的摄像头版和独立的全景摄像头是同一个型号吗？","type":"multi_evidence","difficulty":"hard","ground_truth":[{"source_path":"product-specs.md","section":"自动喂食器 摄像头版"},{"source_path":"product-specs.md","section":"全景看护摄像头"}],"answer_facts":["MH-FD30 和 MH-CAM1 是不同商品"]}
+{"id":"unknown_model","query":"MH-LP999 的猫砂容量是多少？","type":"unanswerable","difficulty":"hard","ground_truth":[],"answer_facts":[]}
+{"id":"unknown_calendar","query":"2027 年春节你们门店具体哪天营业？","type":"unanswerable","difficulty":"medium","ground_truth":[],"answer_facts":[]}
+{"id":"unknown_promise","query":"现在下单你保证明天一定送到吗？","type":"unanswerable","difficulty":"medium","ground_truth":[],"answer_facts":[]}
