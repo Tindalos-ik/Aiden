@@ -6,6 +6,14 @@ param([switch]$EnableConversationMining)
 
 $ErrorActionPreference = 'Stop'
 
+$apiPort = 8000
+if ($env:FASTAPI_PORT) {
+    if (-not [int]::TryParse($env:FASTAPI_PORT, [ref]$apiPort) -or $apiPort -lt 1 -or $apiPort -gt 65535) {
+        throw 'FASTAPI_PORT must be an integer between 1 and 65535.'
+    }
+}
+$apiBaseUrl = "http://127.0.0.1:$apiPort"
+
 $root = $PSScriptRoot
 $backend = Join-Path $root 'backend'
 $frontend = Join-Path $root 'frontend'
@@ -128,8 +136,8 @@ try {
     Pop-Location
 }
 
-if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) {
-    throw 'Port 8000 is already in use. Stop the existing service before running start.ps1.'
+if (Get-NetTCPConnection -LocalPort $apiPort -State Listen -ErrorAction SilentlyContinue) {
+    throw "Port $apiPort is already in use. Stop the existing service before running start.ps1."
 }
 
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -141,7 +149,7 @@ $miningProcess = $null
 try {
     Write-Host 'Starting FastAPI...'
     $apiProcess = Start-Process -FilePath $python `
-        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000', '--reload') `
+        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$apiPort", '--reload') `
         -WorkingDirectory $backend -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $apiStdout -RedirectStandardError $apiStderr
 
@@ -151,7 +159,7 @@ try {
         $apiProcess.Refresh()
         if ($apiProcess.HasExited) { break }
         try {
-            $response = Invoke-WebRequest -Uri 'http://127.0.0.1:8000/api/health' -UseBasicParsing -TimeoutSec 2
+            $response = Invoke-WebRequest -Uri "$apiBaseUrl/api/health" -UseBasicParsing -TimeoutSec 2
             if ($response.StatusCode -eq 200) { $apiReady = $true; break }
         } catch {
             # The API may still be starting.
@@ -178,7 +186,8 @@ try {
 
     $env:VITE_API_MODE = 'remote'
     $env:VITE_API_BASE_URL = '/api'
-    Write-Host 'FastAPI: http://127.0.0.1:8000/api/health'
+    $env:VITE_API_PROXY_TARGET = $apiBaseUrl
+    Write-Host "FastAPI: $apiBaseUrl/api/health"
     Write-Host 'Frontend: http://127.0.0.1:5173'
     Write-Host "FastAPI logs: $apiStdout and $apiStderr"
     Write-Host 'Press Ctrl+C to stop the frontend and backend. MySQL will keep running.'

@@ -57,7 +57,14 @@ VITE_API_MODE=remote
 VITE_API_BASE_URL=/api
 ```
 
-开发服务器已将 `/api` 代理到 `http://localhost:8000`。启动 FastAPI 后运行 `npm run dev` 即可通过代理访问。remote 请求全部使用 `credentials: 'include'`，登录态只从服务端 HttpOnly Cookie 恢复。若改为跨域直连，服务端还需要允许对应前端来源并启用凭证 CORS。remote 接口报错会直接呈现给用户，不会切回 mock。
+开发服务器默认将 `/api` 代理到 `http://127.0.0.1:8000`。使用根目录 `start.ps1` 时，可在启动前设置 `FASTAPI_PORT`，脚本会用该端口启动后端，并让 Vite 代理自动指向同一端口：
+
+```powershell
+$env:FASTAPI_PORT = '8001'
+.\start.ps1
+```
+
+单独运行前后端时，后端的 Uvicorn 端口和前端启动环境中的 `VITE_API_PROXY_TARGET` 要保持一致，例如将后者设为 `http://127.0.0.1:8001`。remote 请求全部使用 `credentials: 'include'`，登录态只从服务端 HttpOnly Cookie 恢复。若改为跨域直连，服务端还需要允许对应前端来源并启用凭证 CORS。remote 接口报错会直接呈现给用户，不会切回 mock。
 
 ### 本地启动
 
