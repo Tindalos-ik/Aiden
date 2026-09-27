@@ -230,6 +230,7 @@ class KnowledgeVectorStore:
         results = self._client.search(
             collection_name=self._collection,
             data=[embedding],
+            anns_field=VECTOR_FIELD,
             limit=limit,
             # ef 至少覆盖当前候选数，避免请求 Top-50 时 HNSW 搜索宽度不足。
             search_params={"metric_type": METRIC_TYPE, "params": {"ef": max(64, limit)}},
