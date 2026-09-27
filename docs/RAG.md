@@ -1,6 +1,6 @@
 # Aiden RAG
 
-本文说明 Aiden 当前 RAG 实现：文档与 FAQ 建库、历史客服对话挖掘、`search_faq` 在线语义检索，以及员工建库控制台。
+本文说明 Aiden 当前 RAG 实现：文档与 FAQ 建库、历史客服对话挖掘、`search_faq` 在线混合检索，以及员工建库控制台。
 
 ## 全景
 
@@ -146,7 +146,7 @@ FAQ 块天然带真实问题，直接用它作为 questions，用自己的分类
 
 #### 关键条款
 
-`is_key_clause` 标记退货、退款、换货、售后这类条款，判定方式是看章节路径里是否出现退货、退款、换货、售后、保修、质保、赔付、运费险、发票、退换这些关键词。它是为后续检索加权预留的信号，**当前完全不参与在线检索排序**：`search` 只按向量相似度取 Top-K，不读取该字段。
+`is_key_clause` 标记退货、退款、换货、售后这类条款，判定方式是看章节路径里是否出现退货、退款、换货、售后、保修、质保、赔付、运费险、发票、退换这些关键词。当前可将它作为 Milvus 检索前的精确过滤条件；默认排序不按此字段额外加权。
 
 ### 切分
 
@@ -406,11 +406,11 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 索引使用 HNSW，度量用 COSINE。规模不大时 HNSW 的查询延迟比 IVF 更低，这与 `docs/Aiden.md` 的选型一致。
 
-这几个标量字段（source_type、source_id、category、section_path、content_type、is_key_clause、chunk_index）当前**只作为元数据存放**，没有参与检索：`search` 只按向量取 Top-K，只回传 `chunk_id`，不过滤也不加权；结果的有效性过滤发生在 MySQL 侧（见「为什么候选要比结果多」）。留这些字段是为了后续按分类过滤或给关键条款加权时不必重建集合，属于规划能力。
+标量字段（source_type、source_id、category、section_path、content_type、is_key_clause、chunk_index）随向量保存。其中 category、source_type、source_id、content_type、is_key_clause 可在 Milvus 召回前作为精确过滤条件；结果的有效性仍由 MySQL 回表校验。`text` 字段使用内置 chinese analyzer，BM25 函数从它自动生成稀疏向量。
 
 `content` 字段是写入时留下的正文副本，同样**没有参与在线检索**：命中后按主键回 MySQL 取 `category/questions/answer`，不使用这个副本，避免它落后于 MySQL 时把过期正文交给模型。它保留的目的只是让集合自身可读、便于人工排查。
 
-`KnowledgeVectorStore.search(embedding, limit)` 提供单路 dense 相似度检索，返回 `chunk_id`、COSINE 相似度与返回顺序；它只回答「哪条向量最像」，不判断这条知识是否仍然有效。集合不存在或连接失败时会直接抛错，不返回空列表——把服务故障伪装成「没有相关知识」会让 Agent 对用户说出无法核实的结论。
+`KnowledgeVectorStore.search`、`search_bm25` 和 `hybrid_search` 分别提供 dense、BM25 与 Milvus RRF 融合召回，返回 `chunk_id`、策略原始分数与顺序。默认在线路径在融合后用 bge-reranker-v2-m3 精排；MySQL 再校验知识是否有效。集合不存在或连接失败时会抛错，不把服务故障伪装成空结果。
 
 `get_collection_stats` 返回的 `row_count` 统计的是物理存储版本数，upsert 覆盖后旧版本仍在，直到后台压缩完成才收敛。判断集合里有没有重复向量必须按主键去重计数，不能用这个值。
 
@@ -505,7 +505,40 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 尚未验证的部分：真实 BGE-M3（1024 维）尚未跑过；当前实际运行配置和数据库状态需以部署环境为准。离线建库已接入 Agent 工具：`search_faq` 走 Milvus 向量召回，见下一节。
 
-## 在线语义检索
+## 在线混合检索与生成质量控制（当前）
+
+在线默认策略是 `hybrid_rerank`：`normalize_query` 去掉口语前后缀，`expand_retrieval_query` 只在 BM25 查询中补少量同义词，不改写或复制已入库知识。Milvus 2.5+ 的 `text` 字段使用内置 `chinese` analyzer 和 BM25 函数；dense 与 BM25 每路召回 Top-50，`hybrid_search` 用 `RRFRanker(60)` 融合，再按 MySQL 中仍为 `vectorized` 的 chunk 回表。`bge-reranker-v2-m3` 对问题和权威正文精排，最终给 Agent Top-10。`semantic_search` 也提供 `dense`、`bm25`、`hybrid`、`hybrid_rerank` 四个可复现的评估入口。
+
+`semantic_search` 的 `category`、`source_type`、`source_id`、`content_type`、`is_key_clause` 参数在 Milvus 每路召回前执行精确过滤。线上 `search_faq(question, category=None)` 可以指定品类；不指定时检索全库。过滤值只进入固定字段的 Milvus 表达式，不拼接可变字段名。
+
+`search_faq` 给每条证据分配 `[1]` 等编号，并返回 chunk ID、章节路径、原文、来源路径与可用的原文地址。`assess_knowledge` 在生成前检查空召回、重排分数低于 `RAG_MIN_RERANK_SCORE`（初值 0.35），以及模型对证据充分性的自评；不足时明确拒答，并与最终助手消息在同一 MySQL 事务写入 `low_confidence_questions`。生成回答必须只用返回的编号引用知识事实；引用缺失或越界时也改为拒答。生成上下文将排名最高的证据放开头、次高的放结尾。System Prompt 禁止承诺具体到账、送达或赔付结果。
+
+消息表的 `citations` JSON 保存生成时的来源快照，历史消息与 SSE 的 `citations` 事件使用同一结构。前端点击编号即可查看原 chunk 正文与章节路径；Markdown 来源还可经已认证的 `GET /api/knowledge/source/{chunk_id}` 打开原始文档。满意度反馈仅保存在浏览器本地，不写后端。
+
+旧版 `knowledge` 集合没有 BM25 字段时，先在独立 Milvus 2.5+ 实例或新集合上建索引并复制向量；迁移只读旧集合与 MySQL，按相同 chunk ID 幂等写入新集合，不删除旧集合：
+
+```powershell
+# 在 backend 目录，先提供与原服务一致的 DATABASE_URL
+.\.venv\Scripts\python.exe -m app.services.rag.indexing --source knowledge --target knowledge_bm25 --source-uri http://127.0.0.1:19530 --target-uri http://127.0.0.1:19531
+```
+
+正式服务应在自己的环境配置中选择新 URI 和集合；旧 `knowledge` 集合不会被迁移脚本删除或修改。
+
+## 评估体系
+
+评估集 `backend/evals/customer_rag_v1.jsonl` 标注了来源文件与章节、问题类型、难度和答案要点。报告按策略及问题类型、难度输出 Recall@1/5/10、MRR、Faithfulness，另统计无答案问题的拒答率；每题保留召回列表、答案与评审原因。Faithfulness 由当前配置的对话模型判断“回答中的事实是否由本次召回证据直接支持”，属于模型评审分数，应结合逐题结果人工核对。需要只检查检索时可加 `--retrieval-only`。
+
+本次 15 题、四策略的数字和分桶解读见 [`backend/evals/reports/customer_rag_v1.md`](../backend/evals/reports/customer_rag_v1.md)，逐题原始结果见同目录 JSON。修正 ground truth 但问题和召回列表未变时，可用 `--recompute-from` 从已有 JSON 重算检索指标。
+
+```powershell
+# 在 backend 目录，临时指向独立的 Milvus 2.5+ 评估实例
+$env:MILVUS_URI = 'http://127.0.0.1:19531'
+.\.venv\Scripts\python.exe -m evals.run_customer_rag --collection knowledge_bm25 --report evals/reports/customer_rag_v1.json
+```
+
+以下「在线语义检索」保留升级前纯向量链路的历史说明与旧验证记录；本节是当前实现。
+
+## 在线语义检索（历史实现）
 
 `search_faq` 的检索路径。离线把知识写成向量，在线把问题写成向量，两端共用同一份模板与同一个向量客户端。
 
