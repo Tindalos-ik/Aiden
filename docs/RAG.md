@@ -379,7 +379,7 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 ### Milvus 集合
 
-集合名由 `MILVUS_KNOWLEDGE_COLLECTION` 指定，默认 `knowledge`。结构由 `app.persistence.milvus.knowledge_store` 中的 `KnowledgeVectorStore.ensure_collection` 创建：
+集合名由 `MILVUS_KNOWLEDGE_COLLECTION` 指定，当前默认 `knowledge_bm25`。本地 Milvus 2.5+ 服务使用 `http://127.0.0.1:19531`；结构由 `app.persistence.milvus.knowledge_store` 中的 `KnowledgeVectorStore.ensure_collection` 创建：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -540,7 +540,7 @@ System Prompt 要求知识事实只依据本轮 `search_faq` 结果，并逐项�
 | `RAG_ONLINE_STRATEGY` | `hybrid_rerank` | 在线策略；另可选 `dense`、`bm25`、`hybrid` |
 | `RAG_ONLINE_CANDIDATE_LIMIT` | `50` | 每路候选池下限；混合检索仍由 Milvus 封顶 50 |
 | `RAG_ONLINE_RESULT_LIMIT` / `RAG_RERANK_LIMIT` | `10` / `10` | 最终返回上限及重排保留上限 |
-| `RAG_RERANKER_MODEL` / `RAG_MIN_RERANK_SCORE` | `BAAI/bge-reranker-v2-m3` / `0.35` | 本地重排模型或其路径、生成前的重排分数阈值 |
+| `RAG_RERANKER_MODEL` / `RAG_MIN_RERANK_SCORE` | `BAAI/bge-reranker-v2-m3` / `0.35` | 重排模型或本地目录、生成前的重排分数阈值；本机 `.env` 指向 `D:\hf-cache\bge-reranker-v2-m3` |
 | `EMBEDDING_*` / `MILVUS_*` | 见「离线建库」配置 | 线上查询沿用入库模型、维度、向量服务和集合；`MILVUS_KNOWLEDGE_COLLECTION` 选集合 |
 | `OPENAI_THINKING_MODE` | 空（不传参数） | 在线模型思考模式；使用 DeepSeek 思考模型时应设 `disabled` |
 
@@ -550,14 +550,7 @@ DeepSeek 携带 `tools` 的思考模式请求要求回传既有 `reasoning_conte
 
 另用 MH-LP50 具体型号问题走真实在线链路，SSE 依次包含 `start`、`delta`、`citations`、`done`，返回 3 个引用；MySQL 助手消息也保存了相同的 3 个引用及对应 chunk ID，来源章节路径存在，已认证的来源原文接口返回 HTTP 200。这验证了该次问法的回答、引用持久化和原文回链；不代表所有题目都有相同的引用数。
 
-旧 `knowledge` 集合若没有 BM25 字段，应先在独立 Milvus 2.5+ 实例或新集合上建索引并复制向量；迁移只读旧集合与 MySQL，按相同 chunk ID 幂等写入新集合，不删除旧集合：
-
-```powershell
-# 在 backend 目录，先提供与原服务一致的 DATABASE_URL
-.\.venv\Scripts\python.exe -m app.services.rag.indexing --source knowledge --target knowledge_bm25 --source-uri http://127.0.0.1:19530 --target-uri http://127.0.0.1:19531
-```
-
-正式服务应在自己的环境配置中选择新 URI 和集合；旧 `knowledge` 集合不会被迁移脚本删除或修改。
+本地 `backend/.env`、示例配置和代码默认值均指向 Milvus 2.5 的 `knowledge_bm25`。该集合已由旧数据迁移并核对为 84 条记录；新部署仍须按自己的 Milvus 地址和 embedding 维度配置环境变量。运行后端的虚拟环境需安装 `backend/requirements-rag.txt` 中的 `FlagEmbedding` 和 `torch`，否则精排模型无法加载。
 
 ## 评估体系
 

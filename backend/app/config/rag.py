@@ -64,9 +64,9 @@ class RagSettings:
     embedding_batch_size: int = _env_int("EMBEDDING_BATCH_SIZE", 16)
 
     # --- Milvus knowledge 集合 ---
-    milvus_uri: str = os.getenv("MILVUS_URI", "http://127.0.0.1:19530").strip()
+    milvus_uri: str = os.getenv("MILVUS_URI", "http://127.0.0.1:19531").strip()
     milvus_token: str = os.getenv("MILVUS_TOKEN", "").strip()
-    milvus_collection: str = os.getenv("MILVUS_KNOWLEDGE_COLLECTION", "knowledge").strip()
+    milvus_collection: str = os.getenv("MILVUS_KNOWLEDGE_COLLECTION", "knowledge_bm25").strip()
     milvus_insert_batch_size: int = _env_int("MILVUS_INSERT_BATCH_SIZE", 64)
 
     # --- 在线知识检索（search_faq）---
