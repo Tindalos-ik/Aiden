@@ -120,39 +120,44 @@ class Settings:
 
 ## 5. Prompt 与结构化提取
 
-### 5.1 两个 Prompt，各自服务于一个阶段
+### 5.1 回答、分类和补全 Prompt
 
 项目当前没有独立的 Prompt 管理服务或模板目录，提示词以 Python 常量保存：
 
 1. `SYSTEM_PROMPT` 在 `backend/app/agent/graph.py`，用于主回答模型。它说明客服语气、当前可用能力和不得编造数据等约束。`load_context()` 将它放在主模型上下文开头。
-2. `INTENT_RECOGNITION_PROMPT` 在 `backend/app/agent/intent.py`，用于识别用户意图和补全指代。它要求模型只从固定意图集合中选择，并返回规定的 JSON 字段。
+2. `INTENT_CLASSIFICATION_PROMPT` 在 `backend/app/agent/intent.py`，将九类意图列成单选题并提供边界 few-shot 样例；`SEMANTIC_EXTRACTION_PROMPT` 只为可查询意图补全指代和订单目标。
 
-分类时，`_recognition_messages()` 会去掉历史中所有 `SystemMessage`（包括主客服 Prompt），换成专用分类指令，并把 `IntentRecognition` 的 JSON Schema 附加进去。因此分类器可以看到用户和助手的对话历史，但不会继承主 Prompt，也不会收到订单、物流或 FAQ 工具定义。实现见 `backend/app/agent/graph.py`。
+分类和补全时，`_structured_messages()` 会去掉历史中所有 `SystemMessage`（包括主客服 Prompt），换成该阶段专用指令及 JSON Schema。两个请求都使用网关 JSON 模式，再由 Pydantic 校验字段、枚举和范围。分类器可以看到用户和助手的对话历史，但不会继承主 Prompt，也不会收到业务工具定义。实现见 `backend/app/agent/graph.py`。
 
 ### 5.2 输出字段由 Pydantic 模型限制
 
-模型需要给出下列结构（完整字段和约束见 `backend/app/agent/intent.py`）：
+第一阶段 `IntentClassification` 只允许两个字段（完整约束见 `backend/app/agent/intent.py`）：
 
 | 字段 | 用途 |
 | --- | --- |
-| `intent` | `order_query`、`logistics_query`、`faq`、`smalltalk`、`unsupported`、`unclear` 之一。 |
+| `intent` | 九选一：`logistics`、`order`、`product`、`refund_return`、`after_sales`、`complaint`、`smalltalk`、`human`、`other`。 |
+| `cofidence` | 0 到 1 的分类置信度；按请求约定保留此字段拼写。 |
+
+第二阶段 `SemanticExtraction` 只为订单、物流和商品咨询输出以下补全字段：
+
+| 字段 | 用途 |
+| --- | --- |
 | `completed_question` | 用历史补全后的单句问题。例如把“它到哪了”补成能单独理解的物流问题。 |
 | `entities.order_no` | 用户对话中明确出现的订单号；没有则为 `null`。 |
 | `entities.order_reference` | 说明用户指的是具体订单、最近订单、需要从本人订单中确定、多个候选或没有指代。 |
 | `needs_clarification` | 当前请求是否仍缺少查询必要信息。 |
 | `clarification_question` | 可选的澄清文案，不得索取密码、验证码等凭据。 |
-| `confidence` | 0 到 1 的分类置信度；只用于澄清或兜底判断。 |
 
-这里的“结构化提取”是让模型输出有固定键名和类型的 JSON，再由 Pydantic 验证；当前源码没有调用 LangChain 的 `with_structured_output()`。`recognize_intent()` 先用普通模型请求，再通过 `model_validate_json()` 解析模型正文：
+这里的“结构化提取”使用 `response_format={"type":"json_object"}` 请求 JSON，再由 Pydantic 验证；当前源码没有调用 LangChain 的 `with_structured_output()`。`recognize_intent()` 先分类，只有可查询类别再补全：
 
 ```python
-response = await model.ainvoke(_recognition_messages(state["messages"]))
-result = IntentRecognition.model_validate_json(
-    _content_as_text(response.content)
+response = await json_model.ainvoke(
+    _structured_messages(state["messages"], INTENT_CLASSIFICATION_PROMPT, IntentClassification)
 )
+classification = IntentClassification.model_validate_json(_content_as_text(response.content))
 ```
 
-摘录见 `backend/app/agent/graph.py` 中的 `recognize_intent()`。如果 JSON 无法解析或字段验证失败，节点关闭工具权限并返回固定兜底答复。
+摘录见 `backend/app/agent/graph.py` 中的 `recognize_intent()`。如果任一阶段的 JSON 无法解析或字段验证失败，节点关闭工具权限并返回固定兜底答复。
 
 ### 5.3 模型分类结果不会直接授予权限
 
@@ -161,8 +166,8 @@ result = IntentRecognition.model_validate_json(
 `_semantic_route()` 会依次处理分类结果：
 
 1. 检查 `completed_question` 是否为空；空问题走兜底。
-2. 订单、物流和 FAQ 意图的置信度低于 `0.55` 时不进入查询，走澄清/兜底文案；`unclear`、`unsupported` 也分别走固定答复。无工具的 `smalltalk` 不受该置信度门槛限制。
-3. FAQ 意图最多获得 `search_faq` 权限。
+2. 订单、物流和商品咨询意图的 `cofidence` 低于 `0.55` 时不进入查询；`other` 走兜底，退款退货、售后、投诉和人工分别走固定答复。无工具的 `smalltalk` 不受该门槛限制。
+3. 商品咨询意图最多获得 `search_faq` 权限；退款退货政策也归入 `refund_return`，当前没有单独的政策路由。
 4. `smalltalk` 用于问候、自我介绍和能力范围咨询，不分配业务工具；主回答模型只能按 System Prompt 说明身份和已接入能力。
 5. 订单号必须能从真实用户消息或会话历史中逐字验证；分类模型编造或误提取的号码不会成为查询参数。
 6. 订单或物流缺少唯一目标时，服务端可以先查询该用户近期订单并列出选项。只有用户选择的订单经过本轮本人订单结果再次核对后，才会授权后续查询。
@@ -301,9 +306,9 @@ return graph.compile()
 
 源代码：`route_after_generate()`、`after_tools()` 和节点之间的边都定义在 `backend/app/agent/graph.py` 的 `build_support_graph()` 中。
 
-### 例一：FAQ 咨询
+### 例一：商品咨询
 
-识别为 `faq` 且置信度通过后，服务端把 `search_faq` 放入 `allowed_tools`。模型只能用补全后的当前问题作为 `question` 调工具，服务端在 `dispatch_tool_call` 中把 `completed_question` 原样写入参数。工具返回知识候选后，服务端收回权限，再让模型基于这些结果回答；没有结果或结果与问题对不上时，模型必须说明暂时无法核实，不能把模型记忆或 `policies` 表当作查证结果，也不能因为知识块带章节标题就补出条款细节。
+识别为 `product` 且置信度通过后，服务端把 `search_faq` 放入 `allowed_tools`。模型只能用补全后的当前问题作为 `question` 调工具，服务端在 `dispatch_tool_call` 中把 `completed_question` 原样写入参数。工具返回知识候选后，服务端收回权限，再让模型基于这些结果回答；没有结果或结果与问题对不上时，模型必须说明暂时无法核实，不能把模型记忆或 `policies` 表当作查证结果，也不能因为知识块带章节标题就补出条款细节。
 
 ### 例二：用户提供明确订单号查物流
 
@@ -390,7 +395,7 @@ data: {}
 | FastAPI 应用与路由装配 | `backend/app/main.py` 中的 `app` 和 `include_router()` 调用 |
 | Cookie 身份依赖 | `backend/app/api/deps.py` 中的 `current_actor()`；`backend/app/persistence/mysql/chat.py` 中的 `get_user_for_session()` |
 | 发送消息 API、SSE 生命周期 | `backend/app/api/routes/conversations.py` 中的 `stream_message()`；`backend/app/api/sse.py` 中的 `sse_event()` |
-| Prompt、分类、订单目标校验、图节点 | `backend/app/agent/intent.py` 中的 `INTENT_RECOGNITION_PROMPT` 和 `IntentRecognition`；`backend/app/agent/state.py` 中的 `SupportState`；`backend/app/agent/graph.py` 中的 `SYSTEM_PROMPT`、`_semantic_route()` 和 `build_support_graph()` |
+| Prompt、分类、订单目标校验、图节点 | `backend/app/agent/intent.py` 中的 `INTENT_CLASSIFICATION_PROMPT`、`SEMANTIC_EXTRACTION_PROMPT`、`IntentClassification` 和 `SemanticExtraction`；`backend/app/agent/state.py` 中的 `SupportState`；`backend/app/agent/graph.py` 中的 `SYSTEM_PROMPT`、`_semantic_route()` 和 `build_support_graph()` |
 | Agent 历史裁剪与消息状态 | `backend/app/persistence/mysql/chat.py` 中的 `recent_messages()`、`finish_assistant_message()` |
 | 订单、物流、FAQ 数据查询 | `backend/app/services/tools/customer.py` 中的 `query_order()`、`query_logistics()`、`search_faq()`；`backend/app/persistence/mysql/queries.py` 中的 `list_user_orders()`、`get_owned_order_with_shipments()` |
 | 在线语义检索链路 | `backend/app/services/rag/retrieval.py` 中的 `semantic_search()`；`backend/app/services/rag/embedding_text.py` 中的 `build_query_embedding_text()`；`backend/app/persistence/milvus/knowledge_store.py` 中的 `KnowledgeVectorStore.search()`；`backend/app/persistence/mysql/knowledge.py` 中的 `get_vectorized_chunks_by_ids()` |

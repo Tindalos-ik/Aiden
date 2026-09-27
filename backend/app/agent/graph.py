@@ -15,7 +15,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from pydantic import ValidationError
 
-from app.agent.intent import INTENT_RECOGNITION_PROMPT, IntentRecognition
+from app.agent.intent import (
+    INTENT_CLASSIFICATION_PROMPT,
+    SEMANTIC_EXTRACTION_PROMPT,
+    IntentClassification,
+    SemanticExtraction,
+)
 from app.agent.state import SupportState
 from app.config.rag import rag_settings
 from app.config.settings import settings
@@ -74,11 +79,11 @@ _EXPLICIT_LATEST_PATTERN = re.compile(
 )
 
 
-# search_faq 是唯一的知识依据入口：它融合检索已向量化的知识库，命中项覆盖商品 FAQ、
-# 政策与手册。政策正文没有单独的版本或生效期查询能力，售后进度与工单也没有接入本 Agent。
+# search_faq 是商品咨询的知识依据入口；工具库也含政策与手册，但当前九类路由没有
+# 独立政策查询出口。售后进度与工单也没有接入本 Agent。
 SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切、回答简洁，不用网络烂梗。
 
-查询类能力仅包括查询当前登录用户的订单及商品快照、查询其订单物流，以及检索已入库的常见问题、政策与手册知识。对于问候、感谢、请你介绍自己或询问你能做什么，可以不调用工具，直接简短自然地回答。介绍自己或说明能力时，只能说明你是喵购商城的智能客服 Aiden，可以查询本人订单和物流、依据已接入的知识库回答常见问题与政策；明确不要声称自己是真人客服，也不要承诺尚未接入的售后进度、工单或人工转接能力。订单、物流和知识检索仍按本轮问题调用系统提供的工具；工具结果返回后再回答。
+查询类能力仅包括查询当前登录用户的订单及商品快照、查询其订单物流，以及检索已入库的商品知识。对于问候、感谢、请你介绍自己或询问你能做什么，可以不调用工具，直接简短自然地回答。介绍自己或说明能力时，只能说明你是喵购商城的智能客服 Aiden，可以查询本人订单和物流、依据已接入的知识库回答商品问题；明确不要声称自己是真人客服，也不要承诺尚未接入的退款退货办理、售后进度、工单或人工转接能力。订单、物流和知识检索仍按本轮问题调用系统提供的工具；工具结果返回后再回答。
 
 必须遵守：
 1. 订单详情和状态只依据 query_order 的结果；物流只依据 query_logistics 的结果。订单号必须原样使用补全问题中已识别的号码，不得改写或猜测。
@@ -95,7 +100,10 @@ SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切�
 
 _FALLBACK_REPLY = "我还没能确定您想查询的内容。您可以说明是查询订单、物流，还是咨询常见问题；查询订单或物流时请提供订单号。"
 _TOOL_REJECTED_REPLY = "抱歉，我暂时无法安全完成这项查询。请重新说明要查询的订单号、物流信息或常见问题。"
-_UNSUPPORTED_REPLY = "目前我可以协助查询订单、物流，并检索已入库的常见问题与政策知识。售后进度、工单状态和人工转接暂不支持；政策问题只有在知识库返回相关内容时才能说明。"
+_REFUND_RETURN_REPLY = "目前无法办理或查询退款退货申请，也无法核实具体订单是否符合退款退货条件。"
+_AFTER_SALES_REPLY = "目前无法办理或查询售后服务、维修及工单。"
+_COMPLAINT_REPLY = "抱歉给您带来不好的体验。目前我无法创建投诉工单或转接人工，请说明具体问题，我会尽力提供当前可核实的信息。"
+_HUMAN_REPLY = "目前还没有接入人工客服转接。我可以帮您查询订单、物流，或回答已入库的商品问题。"
 _KNOWLEDGE_REFUSAL = "抱歉，现有知识库证据不足，我暂时无法核实这个问题的答案。"
 
 
@@ -391,11 +399,11 @@ def _clarification_reply(result: dict[str, Any]) -> str:
     """使用受控追问模板，避免分类器把凭据或无关要求变成用户可见问题。"""
     intent = result.get("intent")
 
-    if intent == "order_query":
+    if intent == "order":
         return "请告诉我订单号，或说明您想查看最近几笔订单。"
-    if intent == "logistics_query":
+    if intent == "logistics":
         return "请提供要查询物流的订单号；如果您指最近一笔订单，也可以明确说明。"
-    if intent == "faq":
+    if intent == "product":
         # 知识检索的澄清只接受短问题，并屏蔽凭据类要求；其余情况使用固定追问。
         question = result.get("clarification_question")
         if isinstance(question, str):
@@ -411,19 +419,21 @@ def _clarification_reply(result: dict[str, Any]) -> str:
     return _FALLBACK_REPLY
 
 
-def _recognition_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
-    """分类器只接收对话历史、专用指令和输出 schema，不接收业务工具定义。"""
+def _structured_messages(
+    messages: list[BaseMessage], prompt: str, schema: type[IntentClassification] | type[SemanticExtraction]
+) -> list[BaseMessage]:
+    """结构化节点只接收会话历史和本阶段 schema，不接收业务工具定义。"""
     history = [message for message in messages if not isinstance(message, SystemMessage)]
-    prompt = (
-        INTENT_RECOGNITION_PROMPT
+    instruction = (
+        prompt
         + "\n\n只输出一个符合以下 JSON Schema 的 JSON 对象，不要添加 Markdown 或说明：\n"
-        + json.dumps(IntentRecognition.model_json_schema(), ensure_ascii=False)
+        + json.dumps(schema.model_json_schema(), ensure_ascii=False)
     )
-    return [SystemMessage(content=prompt), *history]
+    return [SystemMessage(content=instruction), *history]
 
 
 def _semantic_route(
-    result: IntentRecognition, messages: list[BaseMessage]
+    classification: IntentClassification, result: SemanticExtraction, messages: list[BaseMessage]
 ) -> dict[str, Any]:
     """把结构化语义结果收敛成服务端固定的意图与工具白名单。
 
@@ -431,6 +441,8 @@ def _semantic_route(
     也必须精确命中该列表。订单归属仍由 InjectedState 和 SQL 的 user_id 条件验证。
     """
     data = result.model_dump()
+    data["intent"] = classification.intent
+    data["cofidence"] = classification.cofidence
     entities = data["entities"]
     order_no = (entities.get("order_no") or "").strip() or None
     reference = entities.get("order_reference", "none")
@@ -486,27 +498,18 @@ def _semantic_route(
 
     # 此置信度门槛先于列单路由；needs_clarification 不会屏蔽高置信度的缺目标列单。
     # 无工具的 smalltalk 不受门槛限制；置信度只决定是否进入查询流程，不参与身份或权限判断。
-    if (
-        data["confidence"] < _MIN_INTENT_CONFIDENCE
-        and data["intent"] != "smalltalk"
-    ):
-        base["direct_reply"] = _clarification_reply({**data, "intent": "unclear"})
-        return base
-    if data["intent"] == "unclear":
+    if data["cofidence"] < _MIN_INTENT_CONFIDENCE:
         base["direct_reply"] = _FALLBACK_REPLY
         return base
-    if data["intent"] == "unsupported":
-        base["direct_reply"] = _UNSUPPORTED_REPLY
-        return base
 
-    if data["intent"] not in {"order_query", "logistics_query"}:
+    if data["intent"] not in {"order", "logistics"}:
         if data["intent"] == "smalltalk":
             # 简单对话无需业务工具；主模型只按 System Prompt 说明身份和已接入能力。
             return base
         if data["needs_clarification"]:
             base["direct_reply"] = _clarification_reply(data)
             return base
-        if data["intent"] == "faq":
+        if data["intent"] == "product":
             base["allowed_tools"] = ["search_faq"]
             return base
         base["direct_reply"] = _FALLBACK_REPLY
@@ -577,7 +580,7 @@ def _semantic_route(
                     "allowed_tools": ["query_order"],
                     "order_lookup_pending": True,
                     "order_lookup_mode": (
-                        "selection_order" if data["intent"] == "order_query"
+                        "selection_order" if data["intent"] == "order"
                         else "selection_logistics"
                     ),
                     "selection_order_no": selected_order_no,
@@ -603,7 +606,7 @@ def _semantic_route(
                     "allowed_tools": ["query_order"],
                     "order_lookup_pending": True,
                     "order_lookup_mode": (
-                        "order_list" if data["intent"] == "order_query"
+                        "order_list" if data["intent"] == "order"
                         else "logistics_list"
                     ),
                 }
@@ -619,7 +622,7 @@ def _semantic_route(
                 "allowed_tools": ["query_order"],
                 "order_lookup_pending": True,
                 "order_lookup_mode": (
-                    "order_list" if data["intent"] == "order_query"
+                    "order_list" if data["intent"] == "order"
                     else "logistics_list"
                 ),
             }
@@ -632,7 +635,7 @@ def _semantic_route(
         base["direct_reply"] = _clarification_reply(data)
         return base
 
-    if data["intent"] == "order_query":
+    if data["intent"] == "order":
         if current_order_no:
             base["allowed_tools"] = ["query_order"]
         elif reference == "latest":
@@ -652,7 +655,7 @@ def _semantic_route(
             )
         return base
 
-    if data["intent"] == "logistics_query":
+    if data["intent"] == "logistics":
         if current_order_no:
             if data["needs_clarification"]:
                 base["direct_reply"] = _clarification_reply(data)
@@ -853,6 +856,8 @@ def build_support_graph():
     if thinking_body:
         kwargs["extra_body"] = thinking_body
     model = ChatOpenAI(**kwargs)
+    # 分类与补全请求均使用网关 JSON 模式，Pydantic 再校验枚举、字段和数值范围。
+    json_model = model.bind(response_format={"type": "json_object"})
     # 分开的 ToolNode 让一次通过校验的调用只能到达对应只读工具。
     tool_nodes = {
         "query_order": ToolNode([query_order], handle_tool_errors=False),
@@ -873,21 +878,71 @@ def build_support_graph():
         return {"messages": [SystemMessage(content=SYSTEM_PROMPT), *history]}
 
     async def recognize_intent(state: SupportState) -> dict[str, Any]:
-        """用会话历史补全当前问题，只保存结构化标签和可路由实体。"""
+        """先做九选一分类；受支持的查询再补全订单目标和问题。"""
         try:
-            response = await model.ainvoke(_recognition_messages(state["messages"]))
-            result = IntentRecognition.model_validate_json(
+            response = await json_model.ainvoke(
+                _structured_messages(
+                    state["messages"], INTENT_CLASSIFICATION_PROMPT, IntentClassification
+                )
+            )
+            classification = IntentClassification.model_validate_json(
                 _content_as_text(response.content)
             )
         except (TypeError, ValueError):
-            # 结构化结果损坏时按无法判断处理，不能退回到任意工具调用。
+            # JSON 损坏、枚举越界或字段缺失时关闭所有工具。
             return {
                 "semantic_result": {},
                 "completed_question": _latest_user_text(state["messages"]),
                 "allowed_tools": [],
                 "direct_reply": _FALLBACK_REPLY,
             }
-        return {"semantic_result": result.model_dump()}
+        if classification.intent == "other" or (
+            classification.cofidence < _MIN_INTENT_CONFIDENCE
+            and classification.intent != "smalltalk"
+        ):
+            reply = _FALLBACK_REPLY
+        else:
+            reply = {
+                "refund_return": _REFUND_RETURN_REPLY,
+                "after_sales": _AFTER_SALES_REPLY,
+                "complaint": _COMPLAINT_REPLY,
+                "human": _HUMAN_REPLY,
+            }.get(classification.intent)
+        if reply:
+            return {
+                "semantic_result": {"classification": classification.model_dump()},
+                "completed_question": _latest_user_text(state["messages"]),
+                "allowed_tools": [],
+                "direct_reply": reply,
+            }
+        if classification.intent == "smalltalk":
+            return {
+                "semantic_result": {"classification": classification.model_dump()},
+                "completed_question": _latest_user_text(state["messages"]),
+                "allowed_tools": [],
+            }
+        try:
+            response = await json_model.ainvoke(
+                _structured_messages(
+                    state["messages"], SEMANTIC_EXTRACTION_PROMPT, SemanticExtraction
+                )
+            )
+            extraction = SemanticExtraction.model_validate_json(
+                _content_as_text(response.content)
+            )
+        except (TypeError, ValueError):
+            return {
+                "semantic_result": {},
+                "completed_question": _latest_user_text(state["messages"]),
+                "allowed_tools": [],
+                "direct_reply": _FALLBACK_REPLY,
+            }
+        return {
+            "semantic_result": {
+                "classification": classification.model_dump(),
+                "extraction": extraction.model_dump(),
+            }
+        }
 
     def route_intent(state: SupportState) -> dict[str, Any]:
         """由服务端按有限意图集合计算白名单；模型不能提交工具名来改变路由。"""
@@ -901,10 +956,19 @@ def build_support_graph():
                 "direct_reply": _FALLBACK_REPLY,
             }
         try:
-            recognition = IntentRecognition.model_validate(raw)
-        except ValidationError:
+            classification = IntentClassification.model_validate(raw["classification"])
+        except (KeyError, TypeError, ValidationError):
             return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
-        return _semantic_route(recognition, state.get("messages", []))
+        if classification.intent == "smalltalk":
+            return {
+                "allowed_tools": [],
+                "completed_question": _latest_user_text(state.get("messages", [])),
+            }
+        try:
+            extraction = SemanticExtraction.model_validate(raw["extraction"])
+        except (KeyError, TypeError, ValidationError):
+            return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
+        return _semantic_route(classification, extraction, state.get("messages", []))
 
     async def dispatch_tool_call(state: SupportState) -> dict[str, Any]:
         """由服务端构造已批准的工具调用，避免模型漏调工具或改写订单参数。"""
