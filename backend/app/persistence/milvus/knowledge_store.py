@@ -1,8 +1,7 @@
-"""Milvus `knowledge` 集合的建表、写入、删除与相似度检索封装。
+"""Milvus `knowledge` 集合的建表、写入、删除与 dense/BM25 检索封装。
 
-集合只负责“按相似度检索”，原文与业务字段的权威来源始终是 MySQL 的 knowledge_chunks 表。
-这里的标量字段用于在线检索时做过滤和排序加权，集合本身不承担业务一致性；`search` 因此只
-返回候选与相似度，有效性判断由 MySQL 侧完成。
+原文与业务字段的权威来源始终是 MySQL 的 knowledge_chunks 表。标量字段用于 Milvus
+召回前过滤；三种检索只返回候选 id 和策略分数，有效性判断由 MySQL 侧完成。
 
 幂等的关键：`chunk_id` 就是 MySQL knowledge_chunks 的主键。写入使用 upsert 而不是 insert，
 所以“Milvus 已写成功、MySQL 状态尚未回填”时重跑只会覆盖同一条向量，不会产生重复向量。
@@ -13,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -21,6 +21,8 @@ from app.config.rag import rag_settings
 # 集合与字段名在这里集中定义，写入端和后续在线检索端共用同一份常量。
 CHUNK_ID_FIELD = "chunk_id"
 VECTOR_FIELD = "embedding"
+TEXT_FIELD = "text"
+SPARSE_FIELD = "sparse_embedding"
 METADATA_FIELD = "metadata"
 # HNSW 的度量方式。建索引与检索必须一致，否则相似度含义不同、排序不可比。
 METRIC_TYPE = "COSINE"
@@ -47,10 +49,8 @@ def _hit_field(hit: Any, name: str) -> Any:
 class KnowledgeVector:
     """一条待写入 Milvus 的知识向量。
 
-    `metadata` 保存不参与 embedding 的检索辅助信息（section_path、content_type、
-    is_key_clause、questions 数量、前后块 id 等）。它们当前只随向量存放，在线检索并不读取：
-    `search` 只按向量取 Top-K 并回传 chunk_id，过滤与取原文都在 MySQL 侧完成。保留这些字段是
-    为了让集合自身可读，以及后续需要按分类过滤或按关键条款加权时不必重建集合。
+    `text` 是 BM25 function 的正文输入；`content` 保留旧集合的可读正文副本。
+    metadata 保存问法、前后块 id 等，不参与召回，在线原文仍从 MySQL 读取。
     """
 
     chunk_id: str
@@ -64,15 +64,16 @@ class KnowledgeVector:
     is_key_clause: bool
     chunk_index: int
     content: str
+    text: str
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class KnowledgeMatch:
-    """一次相似度检索的命中项。
+    """一次检索的命中项。
 
-    `score` 是 COSINE 相似度（越大越相似），`rank` 是 Milvus 返回顺序（0 为最相似）。检索只
-    说明“这条向量在库里最像”，不代表这条知识仍然有效——有效性与原文一律以 MySQL 为准。
+    `score` 是当前策略的原始分数：COSINE、BM25 或 RRF，不可跨策略比较。
+    `rank` 是 Milvus 返回顺序；有效性与原文一律以 MySQL 为准。
     """
 
     chunk_id: str
@@ -117,21 +118,15 @@ class KnowledgeVectorStore:
         return self._dimension
 
     def ensure_collection(self) -> None:
-        """集合不存在时创建；已存在时校验维度是否一致。
+        """集合不存在时创建；已存在时校验维度和 BM25 字段。
 
         维度不一致直接报错，因为 Milvus 不允许同一集合内混用不同维度，报错能立刻指出
         需要换集合名或重建集合，而不是在写入阶段留下难以理解的失败。
         """
         if self._client.has_collection(self._collection):
-            existing = self._existing_dimension()
-            if existing is not None and existing != self._dimension:
-                raise RuntimeError(
-                    f"Milvus 集合 {self._collection} 的向量维度是 {existing}，"
-                    f"与当前配置的 {self._dimension} 不一致。请调整 EMBEDDING_DIMENSION "
-                    "或更换 MILVUS_KNOWLEDGE_COLLECTION 后再建库。"
-                )
+            self.require_bm25_schema()
             return
-        from pymilvus import DataType
+        from pymilvus import DataType, Function, FunctionType
 
         schema = self._client.create_schema(auto_id=False, enable_dynamic_field=False)
         schema.add_field(CHUNK_ID_FIELD, DataType.VARCHAR, is_primary=True, max_length=64)
@@ -147,6 +142,14 @@ class KnowledgeVectorStore:
         schema.add_field("chunk_index", DataType.INT32)
         # 正文随向量一起存放，方便在线检索直接取回候选内容；MySQL 仍是权威原文。
         schema.add_field("content", DataType.VARCHAR, max_length=65535)
+        # text 由 Milvus 中文 analyzer 分词，BM25 function 自动生成稀疏向量。
+        schema.add_field(TEXT_FIELD, DataType.VARCHAR, max_length=65535,
+                         enable_analyzer=True, analyzer_params={"type": "chinese"})
+        schema.add_field(SPARSE_FIELD, DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_function(Function(
+            name="text_bm25", input_field_names=[TEXT_FIELD],
+            output_field_names=[SPARSE_FIELD], function_type=FunctionType.BM25,
+        ))
         schema.add_field(METADATA_FIELD, DataType.JSON)
 
         index_params = self._client.prepare_index_params()
@@ -157,9 +160,49 @@ class KnowledgeVectorStore:
             metric_type="COSINE",
             params={"M": 16, "efConstruction": 200},
         )
+        index_params.add_index(
+            field_name=SPARSE_FIELD, index_type="SPARSE_INVERTED_INDEX",
+            metric_type="BM25", params={"inverted_index_algo": "DAAT_MAXSCORE"},
+        )
         self._client.create_collection(
             collection_name=self._collection, schema=schema, index_params=index_params
         )
+
+    def existing_dimension(self) -> int:
+        """读取已有集合的 dense 维度，供不调用向量服务的旧集合迁移使用。"""
+        if not self._client.has_collection(self._collection):
+            raise RuntimeError(f"Milvus 集合 {self._collection} 不存在。")
+        dimension = self._existing_dimension()
+        if dimension is None:
+            raise RuntimeError(f"无法读取 Milvus 集合 {self._collection} 的向量维度。")
+        return dimension
+
+    def require_bm25_schema(self, *, check_dimension: bool = True) -> None:
+        """在线只读检查 schema；旧集合给出明确迁移提示，不会自动改动集合。"""
+        actual = self.existing_dimension()
+        description = self._client.describe_collection(collection_name=self._collection)
+        fields = {item["name"] for item in description.get("fields", [])}
+        if not {TEXT_FIELD, SPARSE_FIELD}.issubset(fields):
+            raise RuntimeError(
+                f"Milvus 集合 {self._collection} 是旧 schema，缺少 text/BM25 字段。"
+                "请迁移到新集合后设置 MILVUS_KNOWLEDGE_COLLECTION；旧集合不会被修改。"
+            )
+        if check_dimension and actual != self._dimension:
+            raise RuntimeError(
+                f"Milvus 集合 {self._collection} 为 {actual} 维，当前 EMBEDDING_DIMENSION "
+                f"为 {self._dimension}。请将配置改为与原向量模型一致的维度。"
+            )
+
+    def read_embeddings(self, chunk_ids: list[str]) -> dict[str, list[float]]:
+        """按 MySQL 主键只读取旧集合 dense 向量；供迁移时避免重新调用 embedding 服务。"""
+        if not chunk_ids:
+            return {}
+        rows = self._client.query(
+            collection_name=self._collection,
+            filter=f"{CHUNK_ID_FIELD} in {json.dumps(chunk_ids, ensure_ascii=False)}",
+            output_fields=[CHUNK_ID_FIELD, VECTOR_FIELD], limit=len(chunk_ids),
+        )
+        return {str(row[CHUNK_ID_FIELD]): list(row[VECTOR_FIELD]) for row in rows}
 
     def upsert(self, vectors: list[KnowledgeVector]) -> list[str]:
         """写入或覆盖向量，返回写成功的 chunk_id 列表。
@@ -179,25 +222,61 @@ class KnowledgeVectorStore:
             written.extend(row[CHUNK_ID_FIELD] for row in batch)
         return written
 
-    def search(self, embedding: list[float], *, limit: int) -> list[KnowledgeMatch]:
-        """按 dense 向量相似度检索候选，返回按相似度降序、序号从 0 开始的命中列表。
-
-        只做单路 dense 检索：没有关键词召回、没有多路融合，也没有重排——知识块的向量化文本
-        已经由 category、questions、answer 共同构成，在这里再叠一层文本匹配只会让排序不可解释。
-
-        集合不存在时 `pymilvus` 会抛错，本方法不做兜底：调用方必须区分“检索服务不可用”与
-        “没有相关知识”，静默返回空列表会把服务故障伪装成知识缺失。
-        """
+    def search(self, embedding: list[float], *, limit: int, filter: str = "") -> list[KnowledgeMatch]:
+        """纯 dense 入口；filter 在 Milvus 召回前生效。"""
         if not embedding or limit <= 0:
             return []
         results = self._client.search(
             collection_name=self._collection,
             data=[embedding],
             limit=limit,
-            # ef 只影响 HNSW 的检索宽度与召回率，取值高于建索引时的 efConstruction 才有意义。
-            search_params={"metric_type": METRIC_TYPE, "params": {"ef": 64}},
+            # ef 至少覆盖当前候选数，避免请求 Top-50 时 HNSW 搜索宽度不足。
+            search_params={"metric_type": METRIC_TYPE, "params": {"ef": max(64, limit)}},
             output_fields=[CHUNK_ID_FIELD],
+            filter=filter,
         )
+        return self._matches(results)
+
+    def search_bm25(self, query: str, *, limit: int, filter: str = "") -> list[KnowledgeMatch]:
+        """纯 Milvus 原生 BM25 入口，query 由集合的中文 analyzer 处理。"""
+        if not query.strip() or limit <= 0:
+            return []
+        results = self._client.search(
+            collection_name=self._collection, data=[query], anns_field=SPARSE_FIELD,
+            search_params={"metric_type": "BM25", "params": {}},
+            limit=limit, filter=filter, output_fields=[CHUNK_ID_FIELD],
+        )
+        return self._matches(results)
+
+    def hybrid_search(
+        self, embedding: list[float], query: str, *, limit: int = 50, filter: str = "",
+    ) -> list[KnowledgeMatch]:
+        """dense 和 BM25 各取 limit 条，再由 Milvus RRFRanker 融合。"""
+        if not embedding or not query.strip() or limit <= 0:
+            return []
+        from pymilvus import AnnSearchRequest, RRFRanker
+
+        requests = [
+            AnnSearchRequest(
+                data=[embedding], anns_field=VECTOR_FIELD,
+                param={"metric_type": METRIC_TYPE, "params": {"ef": max(64, limit)}},
+                limit=limit, expr=filter or None,
+            ),
+            AnnSearchRequest(
+                data=[query], anns_field=SPARSE_FIELD,
+                param={"metric_type": "BM25", "params": {}},
+                limit=limit, expr=filter or None,
+            ),
+        ]
+        results = self._client.hybrid_search(
+            collection_name=self._collection, reqs=requests, ranker=RRFRanker(60),
+            limit=limit * 2, output_fields=[CHUNK_ID_FIELD],
+        )
+        return self._matches(results)
+
+    @staticmethod
+    def _matches(results: Any) -> list[KnowledgeMatch]:
+        """统一提取三种搜索的主键和原始分数。"""
         matches: list[KnowledgeMatch] = []
         for rank, hit in enumerate(results[0] if results else []):
             # 主键在不同版本里可能落在 chunk_id、id 或 pk 上，逐个尝试后仍取不到就跳过这条命中，
@@ -263,6 +342,7 @@ class KnowledgeVectorStore:
             "is_key_clause": vector.is_key_clause,
             "chunk_index": vector.chunk_index,
             "content": vector.content,
+            TEXT_FIELD: vector.text,
             METADATA_FIELD: vector.metadata,
         }
 

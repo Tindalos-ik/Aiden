@@ -1,25 +1,17 @@
-"""在线语义检索：用户问题 -> BGE-M3 dense 向量 -> Milvus Top-K -> MySQL 权威原文。
+"""在线知识检索：query 归一化 -> Milvus 预过滤与召回 -> MySQL 校验 -> 可选精排。
 
-这一段是离线建库的镜像：离线把知识写成向量，在线把问题写成向量，两端共用
-`app.services.rag.embedding_text.build_embedding_text` 的模板与同一个 `EmbeddingClient`。
-
-三条硬约束：
-
-1. **单路 dense 检索。** 不叠关键词召回、不做 MySQL LIKE 兜底、不做混合检索或重排。排序只有
-   一个来源（Milvus 的 COSINE 相似度），出问题时能直接解释为什么是这几条。
-2. **原文只信 MySQL。** Milvus 的 `content` 字段只是写库时留下的副本，可能落后于 MySQL；命中的
-   块要按主键回到 `knowledge_chunks` 取 `category/questions/answer`，且只接受当前有效
-   （`vectorized`）的块。Milvus 里找不到对应原文、状态不符或内容已失效的命中项一律丢弃。
-3. **故障不等于空结果。** 向量服务或 Milvus 不可用时直接抛 `RetrievalError`，由工具层返回既有的
-   通用错误语义；绝不静默退回关键词查询——那会让“检索服务坏了”表现成“没有这条知识”。
-
-会话边界：Milvus 检索（含网络往返）期间不持有任何 MySQL Session，回表时才开短事务，与
-`app.persistence.mysql.knowledge` 的约定一致。
+MySQL 是知识正文和有效性的权威源。外部模型与 Milvus 调用期间不持有 MySQL Session；
+服务故障抛 RetrievalError，不把失败伪装成空结果。
 """
 
 from __future__ import annotations
 
+import json
+import math
+import re
 from dataclasses import dataclass
+from functools import lru_cache
+from typing import Literal
 
 from app.config.rag import rag_settings
 from app.persistence.mysql import knowledge as knowledge_repo
@@ -29,25 +21,113 @@ from app.persistence.milvus.knowledge_store import KnowledgeVectorStore
 from .embedding import EmbeddingClient, EmbeddingError
 from .embedding_text import build_query_embedding_text
 
+RetrievalStrategy = Literal["dense", "bm25", "hybrid", "hybrid_rerank"]
+_STRATEGIES = frozenset({"dense", "bm25", "hybrid", "hybrid_rerank"})
+_FILLER_PREFIX = re.compile(r"^(?:请问|麻烦问一下|我想问一下|帮我看看|您好|你好)[，,\s]*")
+_FILLER_SUFFIX = re.compile(r"(?:啊|呀|呢|哈|嘛|呗|哦|吧|啦|哇|请问|谢谢)+[？?！!。\s]*$")
+_SPACE = re.compile(r"\s+")
+# 只在检索 query 中扩展，不改变知识原文、BM25 索引或向量模板。
+_SYNONYMS = {
+    "退钱": "退款", "返钱": "退款", "退货款": "退款",
+    "寄回": "退货", "退回去": "退货", "换一个": "换货",
+    "快递": "物流", "包裹": "物流", "邮费": "运费",
+    "开发票": "发票", "多久到": "配送时效",
+}
+
 
 class RetrievalError(RuntimeError):
-    """在线检索依赖不可用或返回结果不符合约定。
-
-    调用方应把它当作“检索暂时无法完成”处理，而不是“没有匹配知识”。
-    """
+    """检索依赖不可用或返回结果不符合约定。"""
 
 
 @dataclass(frozen=True)
 class SemanticKnowledgeHit:
-    """一条通过校验的检索结果：原文来自 MySQL，相似度来自 Milvus。
+    """通过 MySQL 有效性校验的结果。
 
-    `score` 是 COSINE 相似度，`rank` 是 Milvus 的返回顺序（0 最相似）。两者都保留，是为了让
-    工具层和排查过程能看出 Agent 拿到的是哪几条、排序依据是什么。
+    默认 hybrid_rerank 的 score 与 rerank_score 相同，均为原始 reranker logit 的 sigmoid
+    值，范围 0..1，越大越相关，但不是校准后的正确率；0.5 可作待校准的初始低置信度
+    阈值。其他策略 score 分别是 COSINE、
+    BM25 或 RRF 原始分数，rerank_score 为 None，不能共用同一低置信度阈值。
     """
 
     chunk: KnowledgeChunkRow
     score: float
     rank: int
+    rerank_score: float | None = None
+
+    @property
+    def chunk_id(self) -> str:
+        """稳定知识块主键，四种策略均可用于评估对齐。"""
+        return self.chunk.id
+
+
+def normalize_query(question: str) -> str:
+    """去除口语末尾语气词与多余空白，保留实体、否定词和业务条件。"""
+    normalized = _FILLER_PREFIX.sub("", _SPACE.sub(" ", question).strip())
+    normalized = _FILLER_SUFFIX.sub("", normalized).strip()
+    return normalized or question.strip()
+
+
+def expand_retrieval_query(question: str) -> str:
+    """给 BM25 查询附加少量业务同义词；dense 仍只编码归一化问题。"""
+    terms = [canonical for colloquial, canonical in _SYNONYMS.items()
+             if colloquial in question and canonical not in question]
+    return " ".join([question, *dict.fromkeys(terms)])
+
+
+def _scalar_filter(
+    *, category: str | None, source_type: str | None, source_id: str | None,
+    content_type: str | None, is_key_clause: bool | None,
+) -> str:
+    """只允许固定标量列；值用 JSON 引号编码，避免用户文本进入 Milvus 表达式。"""
+    values = {
+        "category": category, "source_type": source_type,
+        "source_id": source_id, "content_type": content_type,
+        "is_key_clause": is_key_clause,
+    }
+    return " and ".join(
+        f"{field} == {json.dumps(value, ensure_ascii=False)}"
+        for field, value in values.items() if value is not None
+    )
+
+
+@lru_cache(maxsize=2)
+def _load_reranker(model_name: str):
+    """按进程缓存模型，避免每次在线查询重新加载权重。"""
+    try:
+        from FlagEmbedding import FlagReranker
+    except ImportError as exc:
+        raise RetrievalError("缺少 FlagEmbedding，无法运行 bge-reranker-v2-m3 精排。") from exc
+    return FlagReranker(model_name, use_fp16=False)
+
+
+def _rerank(question: str, chunks: list[KnowledgeChunkRow]) -> list[float]:
+    """使用 MySQL 权威正文计算 pair 分数，并将 logit 映射到 0..1。"""
+    if not chunks:
+        return []
+    pairs = [
+        [question, f"分类：{chunk.category}\n问题：{'｜'.join(chunk.questions)}\n答案：{chunk.answer}"]
+        for chunk in chunks
+    ]
+    try:
+        raw_scores = _load_reranker(rag_settings.reranker_model).compute_score(pairs)
+    except RetrievalError:
+        raise
+    except Exception as exc:
+        raise RetrievalError(f"重排模型调用失败：{exc}") from exc
+    if isinstance(raw_scores, (float, int)):
+        raw_scores = [raw_scores]
+    if len(raw_scores) != len(chunks):
+        raise RetrievalError("重排模型返回的分数条数与候选条数不一致。")
+    # 对极端 logit 使用稳定写法，保持分数在 0..1。
+    normalized_scores: list[float] = []
+    for score in raw_scores:
+        value = float(score)
+        if value >= 0:
+            normalized_scores.append(1.0 / (1.0 + math.exp(-value)))
+        else:
+            exponent = math.exp(value)
+            normalized_scores.append(exponent / (1.0 + exponent))
+    return normalized_scores
 
 
 def semantic_search(
@@ -55,61 +135,91 @@ def semantic_search(
     *,
     limit: int | None = None,
     candidate_limit: int | None = None,
+    strategy: RetrievalStrategy | None = None,
+    category: str | None = None,
+    source_type: str | None = None,
+    source_id: str | None = None,
+    content_type: str | None = None,
+    is_key_clause: bool | None = None,
+    collection: str | None = None,
     store: KnowledgeVectorStore | None = None,
     client: EmbeddingClient | None = None,
 ) -> list[SemanticKnowledgeHit]:
-    """按语义相似度检索当前有效的知识，返回最多 `limit` 条。
+    """检索最多 limit 条有效知识；默认 hybrid_rerank，默认结果 Top-10。
 
-    输入 `question` 是已经过工具层校验（非空、长度可控）的用户问题；空问题返回空列表而不调用
-    外部服务。
-
-    流程：拼 query 文本 -> BGE-M3 dense 向量 -> Milvus 取候选 -> MySQL 按主键回表并过滤 ->
-    按相似度截取最终条数。候选数默认大于最终条数，用于补足被过滤掉的失效命中。
-
-    `store` 与 `client` 只在测试或复用连接时显式传入；默认按当前配置构造，两端都读
-    `app.config.rag` 的同一份 embedding/milvus 配置，因此 query 向量与库中向量必定同源。
+    dense、bm25、hybrid、hybrid_rerank 为评估策略入口。candidate_limit 是每一路的
+    Top-K（默认 50）；hybrid 融合最多返回 2K，精排后保留最多 RAG_RERANK_LIMIT。
+    所有可选标量过滤均为精确匹配，在 Milvus 每一路召回前生效；collection 可显式
+    覆盖 MILVUS_KNOWLEDGE_COLLECTION，便于迁移验收和隔离评估。
     """
-    normalized_question = question.strip()
-    if not normalized_question:
+    normalized = normalize_query(question)
+    if not normalized:
         return []
-
+    selected = strategy or rag_settings.online_strategy
+    if selected not in _STRATEGIES:
+        raise ValueError(f"未知检索策略：{selected}")
     result_limit = limit if limit is not None else rag_settings.effective_online_result_limit
     if result_limit <= 0:
         return []
-    candidate_pool = candidate_limit if candidate_limit is not None else rag_settings.online_candidate_pool
-    candidate_pool = max(candidate_pool, result_limit)
+    pool = candidate_limit if candidate_limit is not None else rag_settings.online_candidate_pool
+    pool = max(pool, result_limit, 1)
+    expression = _scalar_filter(
+        category=category, source_type=source_type, source_id=source_id,
+        content_type=content_type, is_key_clause=is_key_clause,
+    )
+    lexical_query = expand_retrieval_query(normalized)
 
-    active_client = client or EmbeddingClient()
+    # 先校验集合，确保旧 schema 即使遇到未启动的向量服务，也能给出明确迁移提示。
     try:
-        vector = active_client.embed_documents([build_query_embedding_text(normalized_question)])[0]
-    except EmbeddingError as exc:
-        raise RetrievalError(f"生成问题向量失败：{exc}") from exc
+        configured_dimension = client.expected_dimension if client else rag_settings.embedding_dimension
+        if store is not None and collection is not None and store.collection != collection:
+            raise ValueError("store.collection 与显式 collection 不一致")
+        active_store = store or KnowledgeVectorStore(
+            collection=collection, dimension=configured_dimension
+        )
+        if selected != "dense":
+            active_store.require_bm25_schema(check_dimension=selected != "bm25")
+    except Exception as exc:
+        raise RetrievalError(f"Milvus 集合不可用于 {selected} 检索：{exc}") from exc
 
-    active_store = store or KnowledgeVectorStore(dimension=active_client.expected_dimension)
+    vector = None
+    active_client = None
+    if selected != "bm25":
+        active_client = client or EmbeddingClient()
+        try:
+            vector = active_client.embed_documents([build_query_embedding_text(normalized)])[0]
+        except EmbeddingError as exc:
+            raise RetrievalError(f"生成问题向量失败：{exc}") from exc
+
     try:
-        matches = active_store.search(vector, limit=candidate_pool)
-    except RetrievalError:
-        raise
-    except Exception as exc:  # Milvus 连接、集合缺失、索引未就绪等统一转为可读错误
+        if selected == "dense":
+            matches = active_store.search(vector, limit=pool, filter=expression)
+        elif selected == "bm25":
+            matches = active_store.search_bm25(lexical_query, limit=pool, filter=expression)
+        else:
+            matches = active_store.hybrid_search(vector, lexical_query, limit=pool, filter=expression)
+    except Exception as exc:
         raise RetrievalError(f"Milvus 检索失败：{exc}") from exc
     if not matches:
         return []
 
-    # Milvus 返回的候选可能重复（同一条知识被多次写入或索引未收敛），回表前先按主键去重，
-    # 否则同一条知识会在结果里占掉多个位置，把真正不同的知识挤出 Top-K。
-    ordered_ids = list(dict.fromkeys(match.chunk_id for match in matches))
-    score_by_id = {match.chunk_id: match.score for match in matches}
-    rank_by_id = {match.chunk_id: match.rank for match in matches}
-    chunks = knowledge_repo.get_vectorized_chunks_by_ids(ordered_ids)
+    # 保留 Milvus 的融合顺序，再按主键回表校验当前状态，避免过期向量进入精排。
+    unique_matches = list({match.chunk_id: match for match in matches}.values())
+    chunks = knowledge_repo.get_vectorized_chunks_by_ids([match.chunk_id for match in unique_matches])
+    chunks_by_id = {chunk.id: chunk for chunk in chunks}
+    valid = [(match, chunks_by_id[match.chunk_id]) for match in unique_matches
+             if match.chunk_id in chunks_by_id]
 
-    hits = [
-        SemanticKnowledgeHit(
-            chunk=chunk,
-            score=score_by_id[chunk.id],
-            rank=rank_by_id[chunk.id],
-        )
-        for chunk in chunks
+    if selected == "hybrid_rerank":
+        scores = _rerank(normalized, [chunk for _, chunk in valid])
+        ranked = sorted(zip(valid, scores), key=lambda item: (-item[1], item[0][0].rank,
+                                                               item[0][0].chunk_id))
+        top = min(result_limit, max(rag_settings.rerank_limit, 1))
+        return [
+            SemanticKnowledgeHit(chunk=chunk, score=score, rank=rank, rerank_score=score)
+            for rank, ((_, chunk), score) in enumerate(ranked[:top])
+        ]
+    return [
+        SemanticKnowledgeHit(chunk=chunk, score=match.score, rank=rank)
+        for rank, (match, chunk) in enumerate(valid[:result_limit])
     ]
-    # 回表顺序已经按候选顺序，这里显式再排一次，避免依赖数据库返回顺序。
-    hits.sort(key=lambda hit: (-hit.score, hit.rank, hit.chunk.id))
-    return hits[:result_limit]

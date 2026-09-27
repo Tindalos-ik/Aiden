@@ -1,7 +1,7 @@
-"""RAG 相关配置：离线建库参数与在线语义检索参数。
+"""RAG 相关配置：离线建库参数与在线混合检索参数。
 
 与 `app.config.settings` 分开，是因为这两组参数只服务于 RAG 流程（离线建库与 `search_faq`
-的向量召回），不参与订单、物流等其他对话链路。所有外部地址和凭据都从进程环境
+的知识召回），不参与订单、物流等其他对话链路。所有外部地址和凭据都从进程环境
 （本地 `backend/.env`）读取，示例文件里只放占位值。
 
 在线检索复用这里的 `embedding_*` 与 `milvus_*`：query 向量必须与库中向量出自同一个模型和
@@ -69,13 +69,18 @@ class RagSettings:
     milvus_collection: str = os.getenv("MILVUS_KNOWLEDGE_COLLECTION", "knowledge").strip()
     milvus_insert_batch_size: int = _env_int("MILVUS_INSERT_BATCH_SIZE", 64)
 
-    # --- 在线语义检索（search_faq）---
+    # --- 在线知识检索（search_faq）---
     # 最终交给 Agent 的知识条数上限。
-    online_result_limit: int = _env_int("RAG_ONLINE_RESULT_LIMIT", 5)
+    online_result_limit: int = _env_int("RAG_ONLINE_RESULT_LIMIT", 10)
     # 送给 Milvus 的候选条数。之所以取得比最终结果多，是因为 Milvus 命中项还要回 MySQL 校验
     # “当前有效且已向量化”：Milvus 与 MySQL 之间允许存在短暂不一致（回填前中断、向量已删但
     # 索引尚未收敛等），多取候选才能在过滤掉失效项之后仍能凑满最终条数。
-    online_candidate_limit: int = _env_int("RAG_ONLINE_CANDIDATE_LIMIT", 20)
+    online_candidate_limit: int = _env_int("RAG_ONLINE_CANDIDATE_LIMIT", 50)
+    # 默认在线路径；评估时可逐次传 strategy 覆盖。
+    online_strategy: str = os.getenv("RAG_ONLINE_STRATEGY", "hybrid_rerank").strip()
+    # bge-reranker-v2-m3 通过 FlagEmbedding 在检索进程内加载；可填本地模型目录。
+    reranker_model: str = os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3").strip()
+    rerank_limit: int = _env_int("RAG_RERANK_LIMIT", 10)
 
     # --- 切分参数 ---
     # 单块上限。注意：真正的上限还要受 EMBEDDING_MAX_SEQ_TOKENS 约束（取两者较小值），

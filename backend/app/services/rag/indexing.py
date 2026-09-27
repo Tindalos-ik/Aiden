@@ -250,6 +250,8 @@ def vectorize_pending(
                 is_key_clause=item.is_key_clause,
                 chunk_index=item.chunk_index,
                 content=item.answer,
+                # BM25 只索引权威正文；问法与分类仍由 dense 模板和标量字段承载。
+                text=item.answer,
                 metadata={
                     "questions": item.questions,
                     "prev_chunk_id": item.prev_chunk_id,
@@ -263,6 +265,125 @@ def vectorize_pending(
         # 只有 Milvus 确认写成功后才回填状态；回填前中断则下次重跑，覆盖同一主键。
         vectorized += knowledge_repo.mark_chunks_vectorized(written)
     return VectorizeResult(scanned=len(pending), vectorized=vectorized)
+
+
+def reindex_vectorized(
+    *, store: KnowledgeVectorStore | None = None, client: EmbeddingClient | None = None,
+    page_size: int = 200,
+) -> int:
+    """将 MySQL 已向量化的有效块重写到当前 Milvus 集合，供 BM25 schema 切换使用。
+
+    只读取 MySQL，保持块 id 与状态不变；目标集合应先配置为新名字。按页读取避免一次
+    持有全部知识，重复执行仍按主键 upsert。pending 块随后由 vectorize_pending 补齐。
+    """
+    if page_size <= 0:
+        raise ValueError("page_size 必须大于零")
+    active_client = client or EmbeddingClient()
+    active_store = store or KnowledgeVectorStore(dimension=active_client.expected_dimension)
+    active_store.ensure_collection()
+    total = 0
+    offset = 0
+    seen_ids: set[str] = set()
+    while True:
+        page = knowledge_repo.list_knowledge_chunks(limit=page_size, offset=offset)
+        if not page:
+            break
+        offset += len(page)
+        current = [item for item in page if item.vector_status == "vectorized" and item.id not in seen_ids]
+        seen_ids.update(item.id for item in current)
+        for start in range(0, len(current), rag_settings.embedding_batch_size):
+            batch = current[start : start + rag_settings.embedding_batch_size]
+            embeddings = active_client.embed_documents([item.embedding_text for item in batch])
+            vectors = [
+                KnowledgeVector(
+                    chunk_id=item.id, embedding=embedding, source_type=item.source_type,
+                    source_id=item.source_id, source_path=item.source_path,
+                    category=item.category, section_path=item.section_path,
+                    content_type=item.content_type, is_key_clause=item.is_key_clause,
+                    chunk_index=item.chunk_index, content=item.answer, text=item.answer,
+                    metadata={
+                        "questions": item.questions,
+                        "prev_chunk_id": item.prev_chunk_id,
+                        "next_chunk_id": item.next_chunk_id,
+                        "embedding_fingerprint": item.embedding_fingerprint,
+                    },
+                )
+                for item, embedding in zip(batch, embeddings)
+            ]
+            total += len(active_store.upsert(vectors))
+    expected = knowledge_repo.count_chunks_by_status().get("vectorized", 0)
+    if len(seen_ids) != expected:
+        raise RuntimeError(
+            f"重建索引只扫描到 {len(seen_ids)}/{expected} 个已向量化块；"
+            "请在知识库停止写入时重跑，并调大 page_size。"
+        )
+    return total
+
+
+def migrate_legacy_collection(
+    source_collection: str, target_collection: str, *, page_size: int = 64,
+) -> tuple[int, int]:
+    """把旧集合 dense 向量和 MySQL 权威正文复制到新 BM25 集合。
+
+    源集合只读，目标集合创建或按同一 chunk_id upsert；不调用 embedding/reranker 服务，
+    不改变 MySQL 状态。返回 (复制块数, 向量维度)。运行期间应暂停知识写入。
+    """
+    source_name = source_collection.strip()
+    target_name = target_collection.strip()
+    if not source_name or not target_name or source_name == target_name:
+        raise ValueError("必须指定不同的源集合和目标集合名称")
+    if page_size <= 0:
+        raise ValueError("page_size 必须大于零")
+
+    source_store = KnowledgeVectorStore(collection=source_name)
+    dimension = source_store.existing_dimension()
+    target_store = KnowledgeVectorStore(collection=target_name, dimension=dimension)
+    target_store.ensure_collection()
+
+    copied = 0
+    offset = 0
+    seen_ids: set[str] = set()
+    while True:
+        page = knowledge_repo.list_knowledge_chunks(limit=page_size, offset=offset)
+        if not page:
+            break
+        offset += len(page)
+        current = [item for item in page if item.vector_status == "vectorized" and item.id not in seen_ids]
+        ids = [item.id for item in current]
+        seen_ids.update(ids)
+        embeddings = source_store.read_embeddings(ids)
+        missing = [chunk_id for chunk_id in ids if chunk_id not in embeddings]
+        if missing:
+            raise RuntimeError(
+                f"旧集合 {source_name} 缺少 {len(missing)} 条已向量化块，首个 chunk_id={missing[0]}。"
+                "目标集合已写入的块可保留，补齐旧集合后重跑即可。"
+            )
+        vectors = [
+            KnowledgeVector(
+                chunk_id=item.id, embedding=embeddings[item.id],
+                source_type=item.source_type, source_id=item.source_id,
+                source_path=item.source_path, category=item.category,
+                section_path=item.section_path, content_type=item.content_type,
+                is_key_clause=item.is_key_clause, chunk_index=item.chunk_index,
+                content=item.answer, text=item.answer,
+                metadata={
+                    "questions": item.questions,
+                    "prev_chunk_id": item.prev_chunk_id,
+                    "next_chunk_id": item.next_chunk_id,
+                    "embedding_fingerprint": item.embedding_fingerprint,
+                },
+            )
+            for item in current
+        ]
+        copied += len(target_store.upsert(vectors))
+
+    expected = knowledge_repo.count_chunks_by_status().get("vectorized", 0)
+    if len(seen_ids) != expected:
+        raise RuntimeError(
+            f"迁移只扫描到 {len(seen_ids)}/{expected} 个已向量化块；"
+            "请在知识库停止写入时重跑，并调大 page_size。"
+        )
+    return copied, dimension
 
 
 def cleanup_superseded_vectors(store: KnowledgeVectorStore | None = None) -> int:
@@ -284,3 +405,18 @@ def cleanup_superseded_vectors(store: KnowledgeVectorStore | None = None) -> int
 def length_measurement_note() -> str:
     """返回当前长度计量的说明行，导入时输出以便核对切分参数是否符合预期。"""
     return get_length_meter().measurement.describe()
+
+
+if __name__ == "__main__":
+    # 在 backend 目录运行：python -m app.services.rag.indexing --source knowledge --target knowledge_bm25
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(description="非破坏性复制旧 Milvus 向量到新 BM25 集合")
+    parser.add_argument("--source", required=True, help="旧 dense 集合名称，只读")
+    parser.add_argument("--target", required=True, help="新 BM25 集合名称，创建或幂等写入")
+    parser.add_argument("--page-size", type=int, default=64)
+    args = parser.parse_args()
+    count, dim = migrate_legacy_collection(args.source, args.target, page_size=args.page_size)
+    print(json.dumps({"source": args.source, "target": args.target,
+                      "copied": count, "dimension": dim}, ensure_ascii=False))
