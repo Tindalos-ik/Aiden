@@ -199,6 +199,20 @@ button { -webkit-tap-highlight-color: transparent; }
 .bubble-user { color: white; border-color: #6874de; border-radius: 12px 3px 12px 12px; background: linear-gradient(145deg, #6974df, #5865d3); box-shadow: 0 3px 10px #5965d51c; }
 .bubble-error { border-color: #f2d9d8; background: #fffafa; }
 .message-content { color: #4c5167; font-size: 11px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
+.citation-marker { display: inline; margin: 0 1px; padding: 0 2px; color: #505fc9; border: 0; border-radius: 3px; background: #eef0ff; cursor: pointer; font: inherit; font-weight: 700; line-height: inherit; }
+.citation-marker:hover, .citation-marker:focus-visible { color: #3445b6; background: #e1e5ff; outline: 2px solid #cbd1ff; outline-offset: 1px; }
+.citation-detail { width: min(360px, 72vw); display: grid; gap: 8px; font-size: 12px; line-height: 1.6; }
+.citation-section { color: #353c59; font-weight: 650; overflow-wrap: anywhere; }
+.citation-path { color: #858a9e; font-size: 11px; overflow-wrap: anywhere; }
+.citation-original { max-height: 260px; overflow: auto; padding: 10px; color: #4c5268; border: 1px solid #eef0f5; border-radius: 7px; background: #f8f9fc; white-space: pre-wrap; overflow-wrap: anywhere; }
+.citation-detail a { justify-self: start; color: #505fc9; font-weight: 600; }
+.citation-unavailable { color: #9da1af; }
+.answer-feedback { display: flex; align-items: center; gap: 8px; margin-top: 5px; color: #a2a6b4; font-size: 10px; }
+.answer-feedback button { display: inline-flex; align-items: center; gap: 4px; padding: 3px 5px; color: #9297a8; border: 0; border-radius: 5px; background: transparent; cursor: pointer; font: inherit; }
+.answer-feedback button:hover:not(:disabled), .answer-feedback button:focus-visible { color: #505fc9; background: #f0f2ff; }
+.answer-feedback button:disabled { cursor: default; }
+.answer-feedback button.feedback-selected { color: #505fc9; background: #eef0ff; }
+.feedback-confirmed { color: #7d8499; }
 .bubble-user .message-content { color: white; }
 .typing-dots { display: flex; gap: 4px; padding: 3px 2px; }
 .typing-dots i { width: 5px; height: 5px; border-radius: 50%; background: #9499d9; animation: pulse 1s infinite ease-in-out; }

@@ -1,12 +1,76 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { Alert, Avatar, Button, Drawer, Empty, Input, Spin, Tooltip, message } from 'antd';
-import { ArrowUpOutlined, CheckCircleFilled, ClockCircleOutlined, CustomerServiceOutlined, FileTextOutlined, PlusOutlined, StopOutlined, UserOutlined } from '@ant-design/icons';
+import { Alert, Avatar, Button, Drawer, Empty, Input, Popover, Spin, Tooltip, message } from 'antd';
+import { ArrowUpOutlined, CheckCircleFilled, ClockCircleOutlined, CustomerServiceOutlined, DislikeFilled, DislikeOutlined, FileTextOutlined, LikeFilled, LikeOutlined, PlusOutlined, StopOutlined, UserOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { api, apiMode } from '../api';
 import { PageHeader, StatusPill } from '../components/Common';
-import type { Actor, Conversation, Message as ChatMessageType, OrderCard, StreamEvent } from '../types';
+import type { Actor, Citation, Conversation, Message as ChatMessageType, OrderCard, StreamEvent } from '../types';
+
+const FEEDBACK_KEY = 'aiden-answer-feedback-v1';
+type AnswerFeedback = 'satisfied' | 'unsatisfied';
+
+function feedbackId(userId: string, item: ChatMessageType) {
+  return `${apiMode}:${userId}:${item.conversationId}:${item.id}`;
+}
+
+function savedFeedback(id: string): AnswerFeedback | null {
+  try {
+    const value = (JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}') as Record<string, { rating?: string }>)[id]?.rating;
+    return value === 'satisfied' || value === 'unsatisfied' ? value : null;
+  } catch { return null; }
+}
+
+function FeedbackControls({ item, userId }: { item: ChatMessageType; userId: string }) {
+  const id = feedbackId(userId, item);
+  const [rating, setRating] = useState<AnswerFeedback | null>(() => savedFeedback(id));
+  const submit = (selected: AnswerFeedback) => {
+    if (rating) return;
+    const existing = savedFeedback(id);
+    if (existing) { setRating(existing); return; }
+    try {
+      const all = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}') as Record<string, { rating: AnswerFeedback; createdAt: string }>;
+      all[id] = { rating: selected, createdAt: new Date().toISOString() };
+      localStorage.setItem(FEEDBACK_KEY, JSON.stringify(all));
+    } catch { /* 浏览器禁用存储时，仍锁定当前页面上的选择。 */ }
+    setRating(selected);
+  };
+  return <div className="answer-feedback" aria-label="回答反馈">
+    <button type="button" className={rating === 'satisfied' ? 'feedback-selected' : ''} disabled={Boolean(rating)} aria-label="满意" aria-pressed={rating === 'satisfied'} onClick={() => submit('satisfied')}>{rating === 'satisfied' ? <LikeFilled /> : <LikeOutlined />}<span>满意</span></button>
+    <button type="button" className={rating === 'unsatisfied' ? 'feedback-selected' : ''} disabled={Boolean(rating)} aria-label="不满意" aria-pressed={rating === 'unsatisfied'} onClick={() => submit('unsatisfied')}>{rating === 'unsatisfied' ? <DislikeFilled /> : <DislikeOutlined />}<span>不满意</span></button>
+    {rating && <span className="feedback-confirmed">已反馈</span>}
+  </div>;
+}
+
+function safeSourceUrl(value?: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+  } catch { return null; }
+}
+
+function CitationContent({ citation }: { citation: Citation }) {
+  const sourceUrl = safeSourceUrl(citation.sourceUrl);
+  return <div className="citation-detail">
+    <div className="citation-section">{citation.sectionPath || '未标注章节'}</div>
+    {citation.sourcePath && <div className="citation-path">{citation.sourcePath}</div>}
+    <div className="citation-original">{citation.content}</div>
+    {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer">跳回原文 ↗</a> : <span className="citation-unavailable">暂无原文链接</span>}
+  </div>;
+}
+
+function AnswerContent({ item }: { item: ChatMessageType }) {
+  const content = plainMessageText(item.content);
+  if (item.role !== 'assistant' || !item.citations?.length) return <>{content}</>;
+  const citations = new Map(item.citations.map((citation) => [citation.number, citation]));
+  return <>{content.split(/(\[\d+\])/g).map((part, index) => {
+    const number = /^\[(\d+)\]$/.exec(part)?.[1];
+    const citation = number ? citations.get(Number(number)) : undefined;
+    return citation ? <Popover key={index} trigger="click" title={`来源 [${citation.number}]`} content={<CitationContent citation={citation} />}><button type="button" className="citation-marker" aria-label={`查看来源 ${citation.number}`}>{part}</button></Popover> : part;
+  })}</>;
+}
 
 const suggestions = [
   '我的订单到哪了？',
@@ -37,7 +101,7 @@ function OrderCardView({ order }: { order: OrderCard }) {
   </div>;
 }
 
-export function MessageBubble({ item }: { item: ChatMessageType }) {
+export function MessageBubble({ item, feedbackUserId }: { item: ChatMessageType; feedbackUserId?: string }) {
   if (item.role === 'system') return <div className="system-message"><span>{item.content}</span></div>;
   const fromUser = item.role === 'user';
   const fromStaff = item.role === 'staff';
@@ -46,7 +110,7 @@ export function MessageBubble({ item }: { item: ChatMessageType }) {
     <div className="chat-column">
       <div className={`message-byline ${fromUser ? 'byline-user' : ''}`}>{fromUser ? '我' : fromStaff ? '人工客服' : 'Aiden'}<time>{timeLabel(item.createdAt)}</time></div>
       <div className={`message-bubble ${fromUser ? 'bubble-user' : 'bubble-agent'} ${item.status === 'error' ? 'bubble-error' : ''}`}>
-        {item.content && <div className="message-content">{plainMessageText(item.content)}</div>}
+        {item.content && <div className="message-content"><AnswerContent item={item} /></div>}
         {!item.content && item.status === 'streaming' && <div className="typing-dots"><i /><i /><i /></div>}
         {item.orderCard && <OrderCardView order={item.orderCard} />}
         {item.toolStatuses && item.toolStatuses.length > 0 && <div className="tool-trail">{item.toolStatuses.map((status, index) => <div key={`${status}-${index}`}><CheckCircleFilled />{status}</div>)}</div>}
@@ -54,6 +118,7 @@ export function MessageBubble({ item }: { item: ChatMessageType }) {
         {item.status === 'stopped' && <div className="message-state-note"><StopOutlined /> 已停止生成</div>}
         {item.status === 'error' && <div className="message-state-note message-state-error"><span /> 这条回复没有完成</div>}
       </div>
+      {item.role === 'assistant' && item.status === 'complete' && feedbackUserId && <FeedbackControls key={feedbackId(feedbackUserId, item)} item={item} userId={feedbackUserId} />}
     </div>
     {fromUser && <Avatar className="chat-avatar user-avatar" icon={<UserOutlined />} />}
   </div>;
@@ -90,13 +155,13 @@ function WelcomePanel({ onAsk }: { onAsk: (text: string) => void }) {
   </div>;
 }
 
-function MessageTimeline({ messages, loading, error, retry }: { messages: ChatMessageType[]; loading: boolean; error: unknown; retry: () => void }) {
+function MessageTimeline({ messages, loading, error, retry, feedbackUserId }: { messages: ChatMessageType[]; loading: boolean; error: unknown; retry: () => void; feedbackUserId: string }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages]);
   if (loading) return <div className="chat-load-state"><Spin /><span>正在载入历史消息…</span></div>;
   if (error) return <div className="chat-load-state"><Alert type="error" showIcon message="消息暂时无法载入" description={error instanceof Error ? error.message : '请检查网络连接后重试'} action={<Button size="small" onClick={retry}>重试</Button>} /></div>;
   if (!messages.length) return null;
-  return <div className="message-timeline">{messages.map((item) => <MessageBubble item={item} key={item.id} />)}<div ref={bottomRef} /></div>;
+  return <div className="message-timeline">{messages.map((item) => <MessageBubble item={item} feedbackUserId={feedbackUserId} key={item.id} />)}<div ref={bottomRef} /></div>;
 }
 
 export function UserWorkspace() {
@@ -182,11 +247,13 @@ export function UserWorkspace() {
         } else if (event.type === 'delta') {
           setStreamingText('Aiden 正在回复…');
           updateAssistant(assistantId, (item) => ({ ...item, content: item.content + (event.text ?? '') }));
+        } else if (event.type === 'citations' && event.citations) {
+          updateAssistant(assistantId, (item) => ({ ...item, citations: event.citations }));
         } else if (event.type === 'handoff') {
           setStreamingText('已为你通知人工客服');
           queryClient.setQueryData<Conversation[]>(['conversations'], (items) => items?.map((item) => item.id === conversationId ? { ...item, status: 'waiting' } : item));
         } else if (event.type === 'done') {
-          updateAssistant(assistantId, (item) => ({ ...item, status: item.status === 'stopped' ? 'stopped' : 'complete' }));
+          updateAssistant(assistantId, (item) => ({ ...item, status: item.status === 'stopped' ? 'stopped' : 'complete', citations: event.citations ?? item.citations }));
           setStreamingText('');
         } else if (event.type === 'error') {
           updateAssistant(assistantId, (item) => ({ ...item, status: 'error', content: event.error || '生成失败，请重试。' }));
@@ -240,7 +307,7 @@ export function UserWorkspace() {
             {conversation.status === 'waiting' && <div className="handoff-banner"><span className="handoff-banner-icon"><ClockCircleOutlined /></span><div><b>{apiMode === 'mock' ? '已进入人工客服队列' : '人工客服暂未接入'}</b><span>{apiMode === 'mock' ? '客服专员接入后会在此处回复你，请稍候。' : '请新建会话继续使用智能客服。'}</span></div>{apiMode === 'mock' && <span className="queue-pulse" />}</div>}
             {conversation.status === 'staff' && <div className="staff-banner"><span className="staff-banner-icon"><CustomerServiceOutlined /></span><div><b>{conversation.assignedStaffName || '人工客服'}正在为你服务</b><span>你可以在此查看人工客服的回复。</span></div></div>}
             {conversation.status === 'closed' && <div className="closed-banner"><span>本次人工服务已结束。</span><Button size="small" onClick={() => createConversation.mutate()}>新建咨询</Button></div>}
-            <MessageTimeline messages={selectedMessages} loading={messagesQuery.isLoading} error={messagesQuery.error} retry={() => void messagesQuery.refetch()} />
+            <MessageTimeline messages={selectedMessages} loading={messagesQuery.isLoading} error={messagesQuery.error} retry={() => void messagesQuery.refetch()} feedbackUserId={actor.id} />
             {messages.length === 0 && !messagesQuery.isLoading && <WelcomePanel onAsk={(text) => void send(text)} />}
             {isBusy && <div className="streaming-indicator"><span className="streaming-bars"><i /><i /><i /></span>{streamingText || '正在生成回复…'}{apiMode === 'mock' && <span className="streaming-mode">本地模拟</span>}</div>}
           </div>

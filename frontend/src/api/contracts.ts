@@ -6,7 +6,9 @@ export interface AidenApi {
   logout(): Promise<void>;
   listConversations(): Promise<Conversation[]>;
   createConversation(): Promise<Conversation>;
+  /** 历史 assistant 消息可携带 citations；mock 模式不生成虚构来源。 */
   listMessages(conversationId: string): Promise<Message[]>;
+  /** citations SSE 事件的 payload 为 { citations: Citation[] }，编号与回答中的 [n] 一致。 */
   sendMessageStream(
     conversationId: string,
     text: string,

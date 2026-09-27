@@ -1,5 +1,5 @@
 import type { AidenApi } from './contracts';
-import type { Actor, Conversation, Message, OrderCard, StreamEvent } from '../types';
+import type { Actor, Citation, Conversation, Message, OrderCard, StreamEvent } from '../types';
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
@@ -106,8 +106,16 @@ export async function readSseStream(
   }
 }
 
+function citationsFrom(value: unknown): Citation[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is Citation => typeof item === 'object' && item !== null
+    && Number.isInteger(item.number) && item.number > 0
+    && typeof item.chunkId === 'string' && typeof item.content === 'string'
+    && typeof item.sectionPath === 'string');
+}
+
 function normalizedEvent(raw: RawSseEvent): StreamEvent | null {
-  const known = new Set<StreamEvent['type']>(['start', 'tool_status', 'order_card', 'delta', 'handoff', 'done', 'error']);
+  const known = new Set<StreamEvent['type']>(['start', 'tool_status', 'order_card', 'delta', 'citations', 'handoff', 'done', 'error']);
   let payload: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(raw.data);
@@ -129,6 +137,7 @@ function normalizedEvent(raw: RawSseEvent): StreamEvent | null {
     order,
     error: typeof payload.error === 'string' ? payload.error : typeof payload.message === 'string' && type === 'error' ? payload.message : undefined,
     conversation,
+    citations: citationsFrom(payload.citations),
   };
 }
 

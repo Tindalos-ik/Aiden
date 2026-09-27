@@ -34,6 +34,16 @@ export interface OrderCard {
   updatedAt?: string;
 }
 
+/** [number] 对应回答中的引用编号；content 是被引用 chunk 的原文。 */
+export interface Citation {
+  number: number;
+  chunkId: string;
+  content: string;
+  sectionPath: string;
+  sourcePath?: string | null;
+  sourceUrl?: string | null;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -43,16 +53,18 @@ export interface Message {
   status: MessageStatus;
   orderCard?: OrderCard;
   toolStatuses?: string[];
+  citations?: Citation[];
 }
 
 export interface StreamEvent {
-  type: 'start' | 'tool_status' | 'order_card' | 'delta' | 'handoff' | 'done' | 'error';
+  type: 'start' | 'tool_status' | 'order_card' | 'delta' | 'citations' | 'handoff' | 'done' | 'error';
   messageId?: string;
   text?: string;
   status?: string;
   order?: OrderCard;
   error?: string;
   conversation?: Conversation;
+  citations?: Citation[];
 }
 
 export interface DemoAccount {

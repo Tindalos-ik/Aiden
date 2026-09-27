@@ -186,6 +186,7 @@ export const mockApi: AidenApi = {
 
     const userMessage: Message = { id: clientMessageId, conversationId, role: 'user', content: text, createdAt: new Date().toISOString(), status: 'complete' };
     const assistantId = makeId('assistant');
+    // 演示回答来自本地模拟订单，不附会知识库 chunk 或原文链接。
     const assistant: Message = { id: assistantId, conversationId, role: 'assistant', content: '', createdAt: new Date().toISOString(), status: 'streaming', toolStatuses: [] };
     updateMessage(db, userMessage);
     updateMessage(db, assistant);
