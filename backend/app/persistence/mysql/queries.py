@@ -10,13 +10,29 @@ FAQ 的在线检索不在这里：它走 Milvus 的向量召回，原文由 know
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
+from typing import NamedTuple
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload, load_only, selectinload
 
-from .models import Conversation, Message, Order, Policy, Shipment, TrackingEvent
+from .models import AfterSaleRequest, Conversation, Message, Order, Policy, Shipment, TrackingEvent
 
 MAX_QUERY_LIMIT = 500
+
+
+class AfterSaleSummary(NamedTuple):
+    """只保留客服回答售后进度所需的业务字段，不带用户或数据库主键。"""
+
+    request_no: str
+    order_no: str
+    request_type: str
+    status: str
+    reason: str
+    requested_amount: Decimal | None
+    created_at: datetime
+    updated_at: datetime
+    resolved_at: datetime | None
 
 
 def _checked_limit(limit: int) -> int:
@@ -60,6 +76,42 @@ def list_user_orders(
         stmt = stmt.where(Order.order_no == order_no)
     stmt = stmt.options(selectinload(Order.items))
     return list(session.scalars(stmt))
+
+
+def list_user_after_sale_requests(
+    session: Session,
+    user_id: str,
+    *,
+    request_no: str | None = None,
+    order_no: str | None = None,
+) -> list[AfterSaleSummary]:
+    """精确查本人申请号或订单号；无编号时按申请时间返回最近至多五条。
+
+    两个编号同时传入时同时匹配。申请及关联订单都在 SQL 中限制归属，
+    不存在的编号与其他用户的编号得到相同的空结果。
+    """
+    stmt = (
+        select(
+            AfterSaleRequest.request_no,
+            Order.order_no,
+            AfterSaleRequest.request_type,
+            AfterSaleRequest.status,
+            AfterSaleRequest.reason,
+            AfterSaleRequest.requested_amount,
+            AfterSaleRequest.created_at,
+            AfterSaleRequest.updated_at,
+            AfterSaleRequest.resolved_at,
+        )
+        .join(Order, AfterSaleRequest.order_id == Order.id)
+        .where(AfterSaleRequest.user_id == user_id, Order.user_id == user_id)
+        .order_by(AfterSaleRequest.created_at.desc(), AfterSaleRequest.request_no.desc())
+        .limit(5)
+    )
+    if request_no is not None:
+        stmt = stmt.where(AfterSaleRequest.request_no == request_no)
+    if order_no is not None:
+        stmt = stmt.where(Order.order_no == order_no)
+    return [AfterSaleSummary(*row) for row in session.execute(stmt)]
 
 
 def get_owned_order_with_shipments(
