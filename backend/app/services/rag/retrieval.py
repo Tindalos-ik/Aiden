@@ -114,7 +114,8 @@ def _rerank(question: str, chunks: list[KnowledgeChunkRow]) -> list[float]:
         raise
     except Exception as exc:
         raise RetrievalError(f"重排模型调用失败：{exc}") from exc
-    if isinstance(raw_scores, (float, int)):
+    # 单候选时某些 FlagEmbedding 版本返回 numpy 标量，它不是 Python float。
+    if isinstance(raw_scores, (float, int)) or not hasattr(raw_scores, "__len__"):
         raw_scores = [raw_scores]
     if len(raw_scores) != len(chunks):
         raise RetrievalError("重排模型返回的分数条数与候选条数不一致。")

@@ -18,6 +18,10 @@ class SupportState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
     # 模型节点生成并交给保存节点的最终回答。
     answer: str
+    # 本轮已检索证据的编号映射；仅最终回答实际引用的项会落到消息行。
+    citations: list[dict[str, object]]
+    # 知识不足时与回答在同一事务入低置信度问题池。
+    low_confidence: dict[str, str]
     # 已认证用户 ID，供上下文查询和写回答时做归属校验。
     user_id: str
     # 语义识别节点的结构化字段；只保留意图、补全问题、实体、澄清标记和置信度。

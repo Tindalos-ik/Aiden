@@ -76,7 +76,6 @@ async def stream_message(
 
     async def event_stream():
         answer_so_far = ""
-        pending_deltas: list[str] = []
         finished = False
         try:
             # start 也放进 try/finally；客户端若在收到首个事件后立即断开，仍会标记 stopped。
@@ -88,6 +87,8 @@ async def stream_message(
                 finished = True
                 if pair.replay_content:
                     yield sse_event("delta", {"text": pair.replay_content})
+                if pair.replay_citations:
+                    yield sse_event("citations", {"citations": pair.replay_citations})
                 yield sse_event("done", {})
                 return
 
@@ -112,31 +113,17 @@ async def stream_message(
                     "user_id": actor["id"],
                 }
                 async for event in graph.astream_events(initial_state, version="v2"):
-                    if (
-                        event.get("event") == "on_chat_model_stream"
-                        and event.get("metadata", {}).get("langgraph_node") == "generate"
-                    ):
-                        chunk = event.get("data", {}).get("chunk")
-                        content = getattr(chunk, "content", "")
-                        if isinstance(content, str) and content:
-                            pending_deltas.append(content)
-                        elif isinstance(content, list):
-                            content_text = "".join(
-                                part.get("text", "") for part in content if isinstance(part, dict)
-                            )
-                            if content_text:
-                                pending_deltas.append(content_text)
                     if event.get("event") == "on_chain_end" and event.get("name") == "generate":
                         output = event.get("data", {}).get("output", {})
                         answer = output.get("answer") if isinstance(output, dict) else None
                         if isinstance(answer, str):
                             answer_so_far = answer
                             if answer:
-                                # 先暂存本轮模型片段，确认节点没有生成工具调用后再发送，
-                                # 防止把模型的工具计划或工具前置文字当作客服回答。
-                                for text in pending_deltas or [answer]:
-                                    yield sse_event("delta", {"text": text})
-                        pending_deltas.clear()
+                                # 只发送经过引用校验的最终文本，避免模型草稿先于拒答流出。
+                                yield sse_event("delta", {"text": answer})
+                            citations = output.get("citations", []) if isinstance(output, dict) else []
+                            if citations:
+                                yield sse_event("citations", {"citations": citations})
 
                 if not answer_so_far:
                     raise RuntimeError("模型没有生成可显示的回答。")

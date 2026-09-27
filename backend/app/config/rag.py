@@ -80,6 +80,8 @@ class RagSettings:
     online_strategy: str = os.getenv("RAG_ONLINE_STRATEGY", "hybrid_rerank").strip()
     # bge-reranker-v2-m3 通过 FlagEmbedding 在检索进程内加载；可填本地模型目录。
     reranker_model: str = os.getenv("RAG_RERANKER_MODEL", "BAAI/bge-reranker-v2-m3").strip()
+    # sigmoid 映射后的重排分数只用于初筛，阈值需按评估集持续标定。
+    online_min_rerank_score: float = _env_float("RAG_MIN_RERANK_SCORE", 0.35)
     rerank_limit: int = _env_int("RAG_RERANK_LIMIT", 10)
 
     # --- 切分参数 ---

@@ -516,6 +516,8 @@ class Message(UUIDPrimaryKey, Base):
     )
     sender_role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # 保存回答所依据的 chunk 快照，历史消息仍能展示生成当时的章节和原文。
+    citations: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     client_message_id: Mapped[str | None] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="complete", server_default=text("'complete'")
@@ -525,6 +527,23 @@ class Message(UUIDPrimaryKey, Base):
     )
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class LowConfidenceQuestion(UUIDPrimaryKey, Base):
+    """保存知识不足时的原始问法，供后续补库和人工复核。"""
+
+    __tablename__ = "low_confidence_questions"
+    __table_args__ = (Index("ix_low_confidence_questions_conversation", "conversation_id", "created_at"),)
+
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    original_question: Mapped[str] = mapped_column(Text, nullable=False)
+    entrypoint: Mapped[str] = mapped_column(String(40), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DATETIME(fsp=6), nullable=False, default=utc_now_naive, server_default=func.current_timestamp(6)
+    )
 
 
 class Ticket(UUIDPrimaryKey, TimestampMixin, Base):

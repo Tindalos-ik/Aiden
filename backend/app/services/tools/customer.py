@@ -3,8 +3,8 @@
 每个工具从 LangGraph 已认证状态注入 user_id，模型参数中不包含身份字段；数据库
 Session 只在同步查询期间打开，返回给模型的内容是经过筛选的普通 Python 数据。
 
-`search_faq` 是唯一的语义检索入口：问题和知识都用同一套 BGE-M3 dense 向量，检索在 Milvus
-完成，原文由 MySQL 的 `knowledge_chunks` 提供。这里不保留任何关键词或 LIKE 兜底逻辑。
+`search_faq` 是知识检索入口：Milvus 负责融合召回，原文由 MySQL 的
+`knowledge_chunks` 提供。引用编号随结果返回给生成层。
 """
 
 from __future__ import annotations
@@ -183,12 +183,8 @@ def _display_question(chunk_questions: list[str], section_path: str) -> str:
 
 
 @tool
-def search_faq(question: str) -> str:
-    """按语义相似度检索已入库的常见问题、政策与手册知识，返回匹配问题、答案和分类。
-
-    出参契约与接入向量检索前保持一致：成功返回 `status`、`results`、`message`，每个结果只有
-    `category`、`question`、`answer` 三个字段；不把 ORM 对象、向量或内部异常交给模型。
-    """
+def search_faq(question: str, category: str | None = None) -> str:
+    """检索已入库知识；可先按品类过滤，再返回可追溯的编号证据。"""
     normalized_question = question.strip()
     if not normalized_question:
         return _json_result(
@@ -200,8 +196,11 @@ def search_faq(question: str) -> str:
         )
 
     try:
-        # 最终条数上限来自配置（RAG_ONLINE_RESULT_LIMIT，默认 5 条）。
-        hits = semantic_search(normalized_question, limit=rag_settings.effective_online_result_limit)
+        hits = semantic_search(
+            normalized_question,
+            category=category.strip() if category else None,
+            limit=rag_settings.effective_online_result_limit,
+        )
     except RetrievalError:
         # 向量服务或 Milvus 不可用时明确报错，不退回关键词查询：静默降级会把“检索服务故障”
         # 表现成“没有这条知识”，让 Agent 对用户说出无法核实的结论。
@@ -211,11 +210,17 @@ def search_faq(question: str) -> str:
 
     results = [
         {
+            "citation": f"[{index}]",
+            "chunkId": hit.chunk.id,
+            "sectionPath": hit.chunk.section_path,
+            "sourcePath": hit.chunk.source_path,
+            "sourceUrl": f"/api/knowledge/source/{hit.chunk.id}" if hit.chunk.source_type == "markdown" else None,
             "category": hit.chunk.category,
             "question": _display_question(hit.chunk.questions, hit.chunk.section_path),
             "answer": hit.chunk.answer,
+            "score": getattr(hit, "rerank_score", None),
         }
-        for hit in hits
+        for index, hit in enumerate(hits, 1)
     ]
     return _json_result(
         {

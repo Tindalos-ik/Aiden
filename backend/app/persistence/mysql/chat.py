@@ -20,7 +20,7 @@ from sqlalchemy.orm import selectinload
 from app.config.settings import settings
 
 from .database import get_session_factory
-from .models import Conversation, LoginSession, Message, User, utc_now_naive
+from .models import Conversation, LoginSession, LowConfidenceQuestion, Message, User, utc_now_naive
 
 MessageStatus = Literal["complete", "streaming", "error", "stopped"]
 
@@ -71,6 +71,7 @@ def _message_from_model(message: Message) -> dict[str, Any]:
         "conversationId": message.conversation_id,
         "role": message.sender_role,
         "content": message.content,
+        "citations": message.citations or [],
         "createdAt": _iso_utc(message.created_at),
         "status": message.status,
     }
@@ -216,6 +217,7 @@ class MessagePair:
     assistant_message_id: str
     should_generate: bool = True
     replay_content: str = ""
+    replay_citations: list[dict[str, Any]] | None = None
 
 
 def create_message_pair(
@@ -267,6 +269,7 @@ def create_message_pair(
                     return MessagePair(
                         existing_user.id, assistant.id, should_generate=False,
                         replay_content=assistant.content,
+                        replay_citations=assistant.citations or [],
                     )
                 if assistant.status == "streaming":
                     raise ValueError("这条消息仍在生成回答，请稍后刷新会话")
@@ -281,6 +284,7 @@ def create_message_pair(
                 if other_stream:
                     raise ValueError("当前会话正在生成回答，请稍后再发送")
                 assistant.content = ""
+                assistant.citations = []
                 assistant.status = "streaming"
                 assistant.created_at = now + timedelta(microseconds=1)
                 conversation.updated_at = assistant.created_at
@@ -367,6 +371,9 @@ def finish_assistant_message(
     user_id: str,
     content: str,
     status: MessageStatus,
+    *,
+    citations: list[dict[str, Any]] | None = None,
+    low_confidence: dict[str, str] | None = None,
 ) -> None:
     """仅把仍在生成的助手行从 streaming 转为终态，并校验会话归属。"""
     now = utc_now_naive()
@@ -389,9 +396,19 @@ def finish_assistant_message(
         if message.status != "streaming":
             return
         message.content = content
+        message.citations = citations or []
         message.status = status
         conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.user_id != user_id:
             raise LookupError("会话不存在")
         conversation.updated_at = now
         conversation.last_message_preview = content[:120]
+        if low_confidence is not None:
+            session.add(LowConfidenceQuestion(
+                id=str(uuid4()),
+                conversation_id=conversation_id,
+                original_question=low_confidence["original_question"],
+                entrypoint=low_confidence["entrypoint"],
+                reason=low_confidence["reason"],
+                created_at=now,
+            ))
