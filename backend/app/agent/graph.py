@@ -22,23 +22,21 @@ from app.agent.intent import (
     SemanticExtraction,
 )
 from app.agent.state import SupportState
+from app.agent.service_intent import SERVICE_EXTRACTION_PROMPT, ServiceExtraction
 from app.config.rag import rag_settings
 from app.config.settings import settings
 from app.persistence.mysql.chat import finish_assistant_message, recent_messages
-from app.services.tools.customer import query_logistics, query_order, search_faq
+from app.services.tools.registry import SUPPORT_TOOLS_BY_NAME
 
 
-# 每个意图只接入当前确实存在的只读工具。这个映射完全由服务端定义，绝不从模型
-# 返回的名字创建 ToolNode，也不把用户身份放进模型可填写的参数。
-_TOOLS_BY_NAME = {
-    query_order.name: query_order,
-    query_logistics.name: query_logistics,
-    search_faq.name: search_faq,
-}
-_TOOL_NODE_BY_NAME = {
-    "query_order": "run_query_order",
-    "query_logistics": "run_query_logistics",
-    "search_faq": "run_search_faq",
+# 工具注册和意图权限由服务端静态定义；模型不能提交工具名或用户身份。
+_TOOLS_BY_NAME = SUPPORT_TOOLS_BY_NAME
+_TOOL_NODE_BY_NAME = {name: f"run_{name}" for name in _TOOLS_BY_NAME}
+_SERVICE_TOOL_BY_GOAL = {
+    "policy": "query_policy",
+    "after_sale_status": "query_after_sale",
+    "ticket_status": "query_ticket",
+    "create_ticket": "create_ticket",
 }
 _MIN_INTENT_CONFIDENCE = 0.55
 _ORDER_TOKEN_PATTERN = re.compile(
@@ -79,17 +77,16 @@ _EXPLICIT_LATEST_PATTERN = re.compile(
 )
 
 
-# search_faq 是商品咨询的知识依据入口；工具库也含政策与手册，但当前九类路由没有
-# 独立政策查询出口。售后进度与工单也没有接入本 Agent。
+# 政策按生效版本查询；售后、工单状态只读查询，人工诉求和投诉可登记工单。
 SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切、回答简洁，不用网络烂梗。
 
-查询类能力仅包括查询当前登录用户的订单及商品快照、查询其订单物流，以及检索已入库的商品知识。对于问候、感谢、请你介绍自己或询问你能做什么，可以不调用工具，直接简短自然地回答。介绍自己或说明能力时，只能说明你是喵购商城的智能客服 Aiden，可以查询本人订单和物流、依据已接入的知识库回答商品问题；明确不要声称自己是真人客服，也不要承诺尚未接入的退款退货办理、售后进度、工单或人工转接能力。订单、物流和知识检索仍按本轮问题调用系统提供的工具；工具结果返回后再回答。
+可以查询当前登录用户的订单、物流、售后申请和工单进度，检索已入库商品知识及当前生效政策，并登记待人工处理的工单。对于问候、感谢或自我介绍，可以不调用工具简短回答。你不是真人客服；登记工单不等于实时接入人工，也不等于已经创建退款退货申请。查询和登记结果必须以本轮工具返回为准。
 
 必须遵守：
 1. 订单详情和状态只依据 query_order 的结果；物流只依据 query_logistics 的结果。订单号必须原样使用补全问题中已识别的号码，不得改写或猜测。
-2. 知识类问题只能依据 search_faq 实际返回的结果作答。调用时把补全后的当前问题作为 question 参数；检索侧负责归一和同义词扩展。回答每个知识事实时标出对应结果的 citation 编号，如 [1]。不能引用未返回的编号。
-3. search_faq 没有返回内容，或返回的内容与用户问题对不上时，明确说暂时无法核实。不得把 policies 表、模型记忆、常识或其他用户的历史回答当作已检索的政策；也不得因为知识块带章节标题就编造条款细节、生效日期或适用范围。
-4. 退货/退款申请进度、工单状态和人工转接目前没有查询能力；不能伪装成查过，也不能声称已转接人工。政策条款没有单独的版本或生效期查询，知识库返回什么就答什么。
+2. 商品知识问题只能依据 search_faq 实际返回的结果作答。调用时把补全后的当前问题作为 question 参数；检索侧负责归一和同义词扩展。回答每个知识事实时标出对应结果的 citation 编号，如 [1]。不能引用未返回的编号。
+3. search_faq 没有返回内容，或返回内容与问题不符时，说明暂时无法核实。政策规则只能依据 query_policy 本轮返回的有效版本；说明政策名称、版本和适用的生效时间，不从模型记忆或其他用户历史补条款。
+4. 售后申请进度只依据 query_after_sale，工单进度只依据 query_ticket。create_ticket 成功时只说明已登记工单及工单号；不能声称退款申请已提交、人工已接入或处理结果已确定。创建失败时不得说已登记。
 5. 查询为空、报错或结果互相矛盾时如实说明；不得编造订单、金额、物流节点、日期、政策或承诺。
 6. 缺少唯一订单目标时，服务端可能先列出本人近期订单。语义识别可以结合最近一条规范订单列表中的序号或商品内容补全用户选择；只有该选择经服务端核验且属于当前用户时才能继续查询，不得自行猜选。
 7. 工具计划和原始工具结果都不是最终答复。工具结果返回后再回答，不要把工具参数、JSON 或内部结果原样当成答案。
@@ -98,12 +95,8 @@ SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切�
 10. 禁止承诺具体到账时间、退款必定成功、物流必定在某日送达、无条件赔付、政策永久有效或人工服务一定接入；即使用户要求保证，也只能陈述已核实的当前事实与知识条款。"""
 
 
-_FALLBACK_REPLY = "我还没能确定您想查询的内容。您可以说明是查询订单、物流，还是咨询常见问题；查询订单或物流时请提供订单号。"
-_TOOL_REJECTED_REPLY = "抱歉，我暂时无法安全完成这项查询。请重新说明要查询的订单号、物流信息或常见问题。"
-_REFUND_RETURN_REPLY = "目前无法办理或查询退款退货申请，也无法核实具体订单是否符合退款退货条件。"
-_AFTER_SALES_REPLY = "目前无法办理或查询售后服务、维修及工单。"
-_COMPLAINT_REPLY = "抱歉给您带来不好的体验。目前我无法创建投诉工单或转接人工，请说明具体问题，我会尽力提供当前可核实的信息。"
-_HUMAN_REPLY = "目前还没有接入人工客服转接。我可以帮您查询订单、物流，或回答已入库的商品问题。"
+_FALLBACK_REPLY = "我还没能确定您需要哪项服务。请说明要查询订单、物流、售后申请、政策或工单，或说明需要人工协助的具体问题。"
+_TOOL_REJECTED_REPLY = "抱歉，我暂时无法安全完成这项操作。请重新说明要查询或登记的问题。"
 _KNOWLEDGE_REFUSAL = "抱歉，现有知识库证据不足，我暂时无法核实这个问题的答案。"
 
 
@@ -430,6 +423,34 @@ def _structured_messages(
         + json.dumps(schema.model_json_schema(), ensure_ascii=False)
     )
     return [SystemMessage(content=instruction), *history]
+
+
+def _service_route(
+    classification: IntentClassification, result: ServiceExtraction, messages: list[BaseMessage]
+) -> dict[str, Any]:
+    """把服务目标映射到固定工具，并核对编号确实来自本轮用户原文。"""
+    current_text = _latest_user_text(messages)
+    data = result.model_dump()
+    goal = data["goal"]
+    if classification.intent in {"complaint", "human"} and goal not in {
+        "ticket_status", "create_ticket"
+    }:
+        goal = "create_ticket"
+    for key in ("order_no", "request_no", "ticket_no"):
+        value = data.get(key)
+        if not isinstance(value, str) or value.casefold() not in current_text.casefold():
+            data[key] = None
+    data["goal"] = goal
+    return {
+        "semantic_result": {
+            "classification": classification.model_dump(),
+            "service": data,
+        },
+        "completed_question": data["completed_question"].strip(),
+        "allowed_tools": [_SERVICE_TOOL_BY_GOAL[goal]],
+        "direct_reply": "",
+        "order_lookup_pending": False,
+    }
 
 
 def _semantic_route(
@@ -858,11 +879,10 @@ def build_support_graph():
     model = ChatOpenAI(**kwargs)
     # 分类与补全请求均使用网关 JSON 模式，Pydantic 再校验枚举、字段和数值范围。
     json_model = model.bind(response_format={"type": "json_object"})
-    # 分开的 ToolNode 让一次通过校验的调用只能到达对应只读工具。
+    # 分开的 ToolNode 让一次通过校验的调用只能到达对应工具。
     tool_nodes = {
-        "query_order": ToolNode([query_order], handle_tool_errors=False),
-        "query_logistics": ToolNode([query_logistics], handle_tool_errors=False),
-        "search_faq": ToolNode([search_faq], handle_tool_errors=False),
+        name: ToolNode([tool], handle_tool_errors=False)
+        for name, tool in _TOOLS_BY_NAME.items()
     }
 
     async def load_context(state: SupportState) -> dict[str, Any]:
@@ -878,7 +898,7 @@ def build_support_graph():
         return {"messages": [SystemMessage(content=SYSTEM_PROMPT), *history]}
 
     async def recognize_intent(state: SupportState) -> dict[str, Any]:
-        """先做九选一分类；受支持的查询再补全订单目标和问题。"""
+        """先做九选一分类，再按查询类型补全订单目标或服务动作。"""
         try:
             response = await json_model.ainvoke(
                 _structured_messages(
@@ -900,26 +920,40 @@ def build_support_graph():
             classification.cofidence < _MIN_INTENT_CONFIDENCE
             and classification.intent != "smalltalk"
         ):
-            reply = _FALLBACK_REPLY
-        else:
-            reply = {
-                "refund_return": _REFUND_RETURN_REPLY,
-                "after_sales": _AFTER_SALES_REPLY,
-                "complaint": _COMPLAINT_REPLY,
-                "human": _HUMAN_REPLY,
-            }.get(classification.intent)
-        if reply:
             return {
                 "semantic_result": {"classification": classification.model_dump()},
                 "completed_question": _latest_user_text(state["messages"]),
                 "allowed_tools": [],
-                "direct_reply": reply,
+                "direct_reply": _FALLBACK_REPLY,
             }
         if classification.intent == "smalltalk":
             return {
                 "semantic_result": {"classification": classification.model_dump()},
                 "completed_question": _latest_user_text(state["messages"]),
                 "allowed_tools": [],
+            }
+        if classification.intent in {"refund_return", "after_sales", "complaint", "human"}:
+            try:
+                response = await json_model.ainvoke(
+                    _structured_messages(
+                        state["messages"], SERVICE_EXTRACTION_PROMPT, ServiceExtraction
+                    )
+                )
+                service = ServiceExtraction.model_validate_json(
+                    _content_as_text(response.content)
+                )
+            except (TypeError, ValueError):
+                return {
+                    "semantic_result": {},
+                    "completed_question": _latest_user_text(state["messages"]),
+                    "allowed_tools": [],
+                    "direct_reply": _FALLBACK_REPLY,
+                }
+            return {
+                "semantic_result": {
+                    "classification": classification.model_dump(),
+                    "service": service.model_dump(),
+                }
             }
         try:
             response = await json_model.ainvoke(
@@ -964,6 +998,12 @@ def build_support_graph():
                 "allowed_tools": [],
                 "completed_question": _latest_user_text(state.get("messages", [])),
             }
+        if classification.intent in {"refund_return", "after_sales", "complaint", "human"}:
+            try:
+                service = ServiceExtraction.model_validate(raw["service"])
+            except (KeyError, TypeError, ValidationError):
+                return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
+            return _service_route(classification, service, state.get("messages", []))
         try:
             extraction = SemanticExtraction.model_validate(raw["extraction"])
         except (KeyError, TypeError, ValidationError):
@@ -980,6 +1020,8 @@ def build_support_graph():
         args: dict[str, Any] = {}
         semantic = state.get("semantic_result", {})
         entities = semantic.get("entities", {}) if isinstance(semantic, dict) else {}
+        service = semantic.get("service", {}) if isinstance(semantic, dict) else {}
+        classification = semantic.get("classification", {}) if isinstance(semantic, dict) else {}
 
         if name == "search_faq":
             args["question"] = state.get("completed_question", "").strip()
@@ -997,6 +1039,23 @@ def build_support_graph():
             if not isinstance(order_no, str) or not order_no.strip():
                 return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
             args["order_no"] = order_no.strip()
+        elif name == "query_policy":
+            args["question"] = state.get("completed_question", "").strip()
+        elif name == "query_after_sale":
+            for key in ("request_no", "order_no"):
+                value = service.get(key) if isinstance(service, dict) else None
+                if isinstance(value, str) and value.strip():
+                    args[key] = value.strip()
+        elif name == "query_ticket":
+            ticket_no = service.get("ticket_no") if isinstance(service, dict) else None
+            if isinstance(ticket_no, str) and ticket_no.strip():
+                args["ticket_no"] = ticket_no.strip()
+        elif name == "create_ticket":
+            issue_type = classification.get("intent") if isinstance(classification, dict) else None
+            if issue_type not in {"refund_return", "after_sales", "complaint", "human"}:
+                return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
+            args["issue_type"] = issue_type
+            args["description"] = _latest_user_text(state.get("messages", []))
 
         call = {
             "name": name,
