@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Collapse, Empty, Select, Space, Spin, Table, Tag, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api, apiMode } from '../api';
 import { ragApi } from '../api/rag';
@@ -60,8 +60,24 @@ function StrategyResult({ item }: { item: RagEvalCase }) {
 export function RagEvals() {
   const [questionType, setQuestionType] = useState('all');
   const [difficulty, setDifficulty] = useState('all');
+  const [startError, setStartError] = useState('');
+  const lastLoadedJobId = useRef<string | null>(null);
   const actor = useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: Infinity });
   const report = useQuery({ queryKey: ['rag-eval-report-v1'], queryFn: ragApi.evalReport, enabled: apiMode === 'remote', retry: 0 });
+  const jobs = useQuery({ queryKey: ['rag-jobs'], queryFn: ragApi.jobs, enabled: apiMode === 'remote', refetchInterval: 2000 });
+  const latestEvalJob = jobs.data?.items.find((item) => item.kind === 'evaluate');
+  const workingJob = jobs.data?.items.find((item) => item.status === 'queued' || item.status === 'running');
+  const startEvaluation = useMutation({
+    mutationFn: () => ragApi.startJob('evaluate'),
+    onSuccess: () => { setStartError(''); void jobs.refetch(); },
+    onError: (error) => setStartError(error instanceof Error ? error.message : '评估启动失败'),
+  });
+
+  useEffect(() => {
+    if (latestEvalJob?.status !== 'completed' || lastLoadedJobId.current === latestEvalJob.id) return;
+    lastLoadedJobId.current = latestEvalJob.id;
+    void report.refetch();
+  }, [latestEvalJob?.id, latestEvalJob?.status, report.refetch]);
 
   const questions = useMemo(() => {
     const grouped = new Map<string, RagEvalCase[]>();
@@ -85,13 +101,16 @@ export function RagEvals() {
   return <div className="workspace-shell rag-shell">
     <PageHeader actor={actor.data} />
     <main className="rag-main eval-main">
-      <div className="rag-heading"><div><Text className="section-kicker">RAG EVALUATION</Text><Title level={2}>客服 RAG 评估</Title><Paragraph type="secondary">逐题核对人工标注、四策略召回与生成答案。显示的是已保存的 v1 评估快照。</Paragraph></div><Space wrap><Link to="/staff/rag">返回建库控制台</Link><Button icon={<ReloadOutlined />} disabled={apiMode !== 'remote'} onClick={() => void report.refetch()}>刷新报告</Button></Space></div>
+      <div className="rag-heading"><div><Text className="section-kicker">RAG EVALUATION</Text><Title level={2}>客服 RAG 评估</Title><Paragraph type="secondary">逐题核对人工标注、四策略召回与生成答案。手动运行完成后，页面会自动载入新报告。</Paragraph></div><Space wrap><Link to="/staff/rag">返回建库控制台</Link><Button type="primary" disabled={apiMode !== 'remote' || !!workingJob || jobs.isLoading || jobs.isError} loading={startEvaluation.isPending} onClick={() => startEvaluation.mutate()}>运行四策略评估</Button><Button icon={<ReloadOutlined />} disabled={apiMode !== 'remote'} onClick={() => void report.refetch()}>刷新报告</Button></Space></div>
       {apiMode === 'mock' ? <Alert showIcon type="warning" message="演示模式不提供真实评估报告" description="请切换 VITE_API_MODE=remote 并使用员工账号登录。" /> : <>
+        {startError && <Alert showIcon type="error" message={startError} closable onClose={() => setStartError('')} />}
+        {jobs.isError && <Alert showIcon type="error" message="评估任务状态读取失败" description={jobs.error instanceof Error ? jobs.error.message : '请检查后端服务'} action={<Button size="small" onClick={() => void jobs.refetch()}>重试</Button>} />}
+        {latestEvalJob && <Alert showIcon type={latestEvalJob.status === 'failed' ? 'error' : latestEvalJob.status === 'completed' ? 'success' : 'info'} message={latestEvalJob.status === 'completed' ? '评估任务已完成' : latestEvalJob.status === 'failed' ? '评估失败，旧报告仍可查看' : '评估正在后台运行'} description={latestEvalJob.error || (latestEvalJob.status === 'completed' ? '新报告已写入，页面会自动刷新；也可手动点击“刷新报告”。' : latestEvalJob.progress) || `启动时间：${new Date(latestEvalJob.createdAt).toLocaleString('zh-CN')}`} />}
         {report.isLoading && <Card><Spin /></Card>}
         {report.isError && <Alert showIcon type="error" message="评估报告加载失败" description={report.error instanceof Error ? report.error.message : '请检查后端服务'} action={<Button size="small" onClick={() => void report.refetch()}>重试</Button>} />}
         {report.data && <>
           <Card className="rag-card" title="总体指标">
-            <Paragraph type="secondary">{firstStrategy?.overall.count ?? 0} 道题，其中 {firstStrategy?.overall.answerable ?? 0} 道可回答；Recall 与 MRR 只统计可回答题，Faithfulness 统计全部题目，库外拒答率只统计库外题。评审模型：{report.data.faithfulness_judge ?? '未评审（仅检索）'}；集合：{report.data.collection}。</Paragraph>
+            <Paragraph type="secondary">{firstStrategy?.overall.count ?? 0} 道题，其中 {firstStrategy?.overall.answerable ?? 0} 道可回答；Recall 与 MRR 只统计可回答题，Faithfulness 统计全部题目，库外拒答率只统计库外题。评审模型：{report.data.faithfulness_judge ?? '未评审（仅检索）'}；集合：{report.data.collection}；生成时间：{report.data.generated_at ? new Date(report.data.generated_at).toLocaleString('zh-CN') : '历史报告未记录'}。</Paragraph>
             <Table size="small" rowKey="key" pagination={false} scroll={{ x: 900 }} columns={metricColumns()} dataSource={Object.entries(report.data.strategies).map(([key, value]) => ({ key, name: strategyNames[key] ?? key, metrics: value.overall }))} />
           </Card>
           <Card className="rag-card" title="按问题类型对比">

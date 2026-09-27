@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -163,14 +166,16 @@ def recompute_report(report: dict[str, Any], dataset: Path = DATASET) -> dict[st
 
 
 def run(*, dataset: Path = DATASET, generate: bool = True,
-        collection: str | None = None) -> dict[str, Any]:
-    """每个策略跑同一组题；collection 可显式指向新建的 BM25 集合。"""
+        collection: str | None = None,
+        on_progress: Callable[[int, int, str, str], None] | None = None) -> dict[str, Any]:
+    """每个策略跑同一组题；每完成一题通知进度，便于后台任务展示状态。"""
     from app.persistence.milvus.knowledge_store import KnowledgeVectorStore
 
     cases = _cases(dataset)
     model = _model() if generate else None
     store = KnowledgeVectorStore(collection=collection) if collection else None
     rows: list[dict[str, Any]] = []
+    total = len(STRATEGIES) * len(cases)
     for strategy in STRATEGIES:
         for case in cases:
             print(f"[{strategy}] {case['id']}", file=sys.stderr, flush=True)
@@ -192,9 +197,27 @@ def run(*, dataset: Path = DATASET, generate: bool = True,
                 **numbers, "answer": answer, "faithfulness": faithfulness,
                 "judge_reason": judge_reason, "refused": refused,
             })
+            if on_progress:
+                on_progress(len(rows), total, strategy, case["id"])
     return {"dataset": str(dataset), "collection": collection or "configured default",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "faithfulness_judge": settings.openai_model if generate else None,
             "strategies": _group(rows), "cases": rows}
+
+
+def write_report(report: dict[str, Any], path: Path) -> None:
+    """同目录写临时文件再替换，避免评估页面读到未写完的报告。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=f"{path.stem}.", suffix=".tmp", delete=False) as output:
+            temporary = Path(output.name)
+            json.dump(report, output, ensure_ascii=False, indent=2)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -208,8 +231,7 @@ def main() -> None:
     report = (recompute_report(json.loads(args.recompute_from.read_text(encoding="utf-8")), args.dataset)
               if args.recompute_from else
               run(dataset=args.dataset, generate=not args.retrieval_only, collection=args.collection))
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_report(report, args.report)
     print(json.dumps({"report": str(args.report), "strategies": report["strategies"]}, ensure_ascii=False))
 
 

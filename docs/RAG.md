@@ -567,7 +567,7 @@ DeepSeek 携带 `tools` 的思考模式请求要求回传既有 `reasoning_conte
 | Faithfulness | 统计有生成答案及模型评审结果的题。模型逐条判断答案里的可验证事实是否由本次召回证据直接支持；纯拒答且未增加事实可以得 1。它不测答案完整性、业务事实真伪或跨来源冲突。 |
 | 库外拒答率 | 只统计 `ground_truth` 为空的题。脚本检查生成答案是否包含“无法核实”“无法确认”“证据不足”“不能保证”等词，再对 0/1 取平均；这是词面规则，不等于人工判断的拒答质量。 |
 
-报告的 `strategies.*.overall`、`by_type`、`by_difficulty` 用同一口径汇总，并保留每桶的题数、可回答题数。`cases` 对每道题和每种策略保存召回排名、答案、Recall、MRR、Faithfulness、评审理由及拒答标记。Faithfulness 来自当前配置的对话模型，是模型评审结果；结合 `answer_facts` 和原始证据人工复核，尤其注意来源冲突与具体时效承诺。本次报告数字与解读见 [`backend/evals/reports/customer_rag_v1.md`](../backend/evals/reports/customer_rag_v1.md)，完整逐题快照见同目录 JSON；该快照使用 Milvus 2.5 `knowledge_bm25` 和 512 维 `bge-small-zh-v1.5` dense 模型，没有测试 1024 维 BGE-M3 dense 模型，样本量也不足以外推线上胜率。
+报告的 `strategies.*.overall`、`by_type`、`by_difficulty` 用同一口径汇总，并保留每桶的题数、可回答题数。`cases` 对每道题和每种策略保存召回排名、答案、Recall、MRR、Faithfulness、评审理由及拒答标记。Faithfulness 来自当前配置的对话模型，是模型评审结果；结合 `answer_facts` 和原始证据人工复核，尤其注意来源冲突与具体时效承诺。初始基线数字与解读见 [`backend/evals/reports/customer_rag_v1.md`](../backend/evals/reports/customer_rag_v1.md)；页面读取的同目录 JSON 可由手动评估更新，二者之后可能不同。初始快照使用 Milvus 2.5 `knowledge_bm25` 和 512 维 `bge-small-zh-v1.5` dense 模型，没有测试 1024 维 BGE-M3 dense 模型，样本量也不足以外推线上胜率。
 
 ### 运行、重算与页面核对
 
@@ -581,7 +581,9 @@ $env:MILVUS_URI = 'http://127.0.0.1:19531'
 
 只需检索指标时加 `--retrieval-only`：报告中 `answer`、`faithfulness`、`judge_reason`、`faithfulness_judge` 为 `null`，库外题的 `refused` 也为 `null`；页面应显示未生成、未评审，而非零分。若只修正标注、问题正文和召回列表未变，可用 `--recompute-from evals/reports/customer_rag_v1.json` 从保存的召回重算检索指标；该模式保留旧答案及评审，不会再次请求生成模型。
 
-员工以 remote 模式登录后，从 `/staff/rag` 进入 `/staff/evals`。前端 `RagEvals` 经 `ragApi.evalReport` 调用员工鉴权的只读 `GET /api/rag/evals/customer-rag-v1`，后端只读取固定的 `backend/evals/reports/customer_rag_v1.json`，不触发检索、生成或重评。页面展示四策略总体指标和 `by_type` 分桶对比；按题型、难度筛选 15 道题后，可逐题核对 ground truth、答案要点、四策略召回排名、生成答案、拒答和 Faithfulness 理由。目标章节按上述文件名与章节路径规则标亮。页面“刷新报告”只重新读取这份文件；若命令输出到其他路径，需先把要展示的报告保存到这个固定路径。
+员工以 remote 模式登录后，从 `/staff/rag` 进入 `/staff/evals`。点击“运行四策略评估”会通过员工鉴权的 `POST /api/rag/jobs/evaluate` 启动后台任务；服务器使用当前配置的知识库、固定的 `customer_rag_v1.jsonl` 题集，依次运行四种策略的检索、生成与模型评审。任务复用建库控制台的跨进程锁，同一时间只接受一项控制台任务；前端每 2 秒读取 `GET /api/rag/jobs` 显示已完成题数和失败状态。运行较久时页面仍显示上一份报告，失败时也保留旧报告。任务完成后先写同目录临时文件，再原子替换 `backend/evals/reports/customer_rag_v1.json`；页面自动重新请求员工鉴权的 `GET /api/rag/evals/customer-rag-v1`，无需重启服务。“刷新报告”只重新读取文件，不启动评估；命令行输出到其他路径的报告不会显示在该页面。
+
+页面展示四策略总体指标和 `by_type` 分桶对比；按题型、难度筛选 15 道题后，可逐题核对 ground truth、答案要点、四策略召回排名、生成答案、拒答和 Faithfulness 理由。目标章节按上述文件名与章节路径规则标亮。新报告记录 `generated_at`；旧版报告缺少该字段时页面显示“历史报告未记录”。任务进度只保存在当前 API 进程内，服务重启后进度会消失，但已经完成写入的报告仍保留。手动评估不会自动新增或修改测试题，也不会通过线上聊天编排链路验证低置信度入池。
 
 ## 历史对话挖掘
 

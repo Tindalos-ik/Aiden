@@ -198,6 +198,7 @@ export interface RagEvalCase {
 export interface RagEvalReport {
   dataset: string;
   collection: string;
+  generated_at?: string;
   faithfulness_judge: string | null;
   strategies: Record<string, {
     overall: RagEvalMetrics;
