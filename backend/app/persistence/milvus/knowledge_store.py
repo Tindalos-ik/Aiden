@@ -23,6 +23,7 @@ CHUNK_ID_FIELD = "chunk_id"
 VECTOR_FIELD = "embedding"
 TEXT_FIELD = "text"
 SPARSE_FIELD = "sparse_embedding"
+HYBRID_CANDIDATE_LIMIT = 50
 METADATA_FIELD = "metadata"
 # HNSW 的度量方式。建索引与检索必须一致，否则相似度含义不同、排序不可比。
 METRIC_TYPE = "COSINE"
@@ -251,26 +252,27 @@ class KnowledgeVectorStore:
     def hybrid_search(
         self, embedding: list[float], query: str, *, limit: int = 50, filter: str = "",
     ) -> list[KnowledgeMatch]:
-        """dense 和 BM25 各取 limit 条，再由 Milvus RRFRanker 融合。"""
+        """dense 与 BM25 各最多取 50 条；RRF 融合结果也最多返回 50 条。"""
         if not embedding or not query.strip() or limit <= 0:
             return []
         from pymilvus import AnnSearchRequest, RRFRanker
 
+        candidate_limit = min(limit, HYBRID_CANDIDATE_LIMIT)
         requests = [
             AnnSearchRequest(
                 data=[embedding], anns_field=VECTOR_FIELD,
-                param={"metric_type": METRIC_TYPE, "params": {"ef": max(64, limit)}},
-                limit=limit, expr=filter or None,
+                param={"metric_type": METRIC_TYPE, "params": {"ef": max(64, candidate_limit)}},
+                limit=candidate_limit, expr=filter or None,
             ),
             AnnSearchRequest(
                 data=[query], anns_field=SPARSE_FIELD,
                 param={"metric_type": "BM25", "params": {}},
-                limit=limit, expr=filter or None,
+                limit=candidate_limit, expr=filter or None,
             ),
         ]
         results = self._client.hybrid_search(
             collection_name=self._collection, reqs=requests, ranker=RRFRanker(60),
-            limit=limit * 2, output_fields=[CHUNK_ID_FIELD],
+            limit=candidate_limit, output_fields=[CHUNK_ID_FIELD],
         )
         return self._matches(results)
 

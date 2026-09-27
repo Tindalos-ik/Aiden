@@ -148,7 +148,8 @@ def semantic_search(
     """检索最多 limit 条有效知识；默认 hybrid_rerank，默认结果 Top-10。
 
     dense、bm25、hybrid、hybrid_rerank 为评估策略入口。candidate_limit 是每一路的
-    Top-K（默认 50）；hybrid 融合最多返回 2K，精排后保留最多 RAG_RERANK_LIMIT。
+    Top-K（默认 50）；hybrid 各路与 RRF 融合输出均封顶 50，随后精排最多保留
+    RAG_RERANK_LIMIT（默认 10）。
     所有可选标量过滤均为精确匹配，在 Milvus 每一路召回前生效；collection 可显式
     覆盖 MILVUS_KNOWLEDGE_COLLECTION，便于迁移验收和隔离评估。
     """
