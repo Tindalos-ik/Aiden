@@ -46,7 +46,9 @@ mock 的流式输出由浏览器适配器分段生成，不代表已连接模型
 
 ## 连接 FastAPI
 
-FastAPI 提供普通用户对话闭环，以及员工专用 RAG 建库控制台。remote 员工登录后进入 `/staff/rag`，可预览切块、导入知识、挖掘对话和补齐向量。人工客服接管会话的 `/api/staff/*` 接口仍未实现，remote 员工不会进入 mock 的接待工作台。订单和物流工具是否返回数据取决于后端数据与服务配置。
+FastAPI 提供普通用户对话闭环，以及员工专用 RAG 建库控制台和评估页面。remote 员工登录后进入 `/staff/rag`，可预览切块、导入知识、挖掘对话和补齐向量；从这里进入 `/staff/evals`，可查看已保存的四策略指标、按题型分桶结果，并按题型和难度展开核对每道题。评估页只读取报告快照，不会重新跑模型。人工客服接管会话的 `/api/staff/*` 接口仍未实现，remote 员工不会进入 mock 的接待工作台。订单和物流工具是否返回数据取决于后端数据与服务配置。
+
+remote 用户页中，知识类回答的 `[1]` 等引用编号可点击查看来源 chunk 的章节路径和正文；Markdown 来源提供跳回原文的链接。每段已完成的助手回答下方有“满意 / 不满意”反馈，选择后显示“已反馈”并锁定。反馈当前只按用户和消息保存在浏览器 `localStorage`，不上传后端；浏览器换设备或清理本地数据后不会同步。
 
 设置：
 
@@ -59,7 +61,7 @@ VITE_API_BASE_URL=/api
 
 ### 本地启动
 
-需要 Python 3.10+、Node.js、npm、MySQL。真实建库还需要按 `docs/RAG.md` 配置 BGE-M3、Milvus 和对话抽取 LLM。在仓库根目录开两个 PowerShell 窗口。
+需要 Python 3.10+、Node.js、npm、MySQL。真实建库和在线混合检索还需要按 [`docs/RAG.md`](../docs/RAG.md) 配置与集合维度一致的 embedding 服务、Milvus 2.5+、`bge-reranker-v2-m3` 及对话模型；历史对话挖掘另需配置抽取模型。在仓库根目录开两个 PowerShell 窗口。
 
 后端窗口：
 
@@ -134,6 +136,8 @@ npm run dev
 
 员工建库接口均要求登录 Cookie 中的员工身份；mock 模式不会调用。`GET /api/rag/overview` 返回服务健康、知识块/批次/候选状态和文档列表；`GET /api/rag/milvus` 只读查看真实 Milvus 集合的维度、记录统计数和分页标量字段，并按主键核对 MySQL 状态；`GET /api/rag/preview?file=...` 只读预览知识目录中的 Markdown 切块；`GET /api/rag/chunks` 与 `GET /api/rag/mining` 查看入库块和挖掘摘要；`GET /api/rag/jobs` 查看当前 API 进程内的任务。`POST /api/rag/jobs/{kind}` 支持 `import-markdown`、`import-markdown-all`、`import-faq`、`mine`、`vectorize`、`cleanup`，其中单文档导入的请求体是 `{ "file": "知识目录内相对路径.md" }`。`POST /api/rag/embedding/start` 和 `/stop` 控制当前 API 进程亲自启动的本地 BGE 服务。写任务返回 202 表示已排队，冲突返回 409；任务结果从 `/jobs` 查询。`mine` 只运行一轮，不自动补向量，需另触发 `vectorize`。详见 [`docs/RAG.md`](../docs/RAG.md#员工建库控制台)。
 
+`GET /api/rag/evals/customer-rag-v1` 也要求员工登录，只读返回 `backend/evals/reports/customer_rag_v1.json`，包含 15 道题 × 4 策略的总体、分桶和逐题结果。`/staff/evals` 通过 `ragApi.evalReport` 读取该接口；在页面点击“刷新报告”只重新读取文件。完整评估与标注重算命令见 [`docs/RAG.md` 的评估体系](../docs/RAG.md#评估体系)。
+
 Conversation 建议包含 `id`、`userId`、`userName`（队列展示用，可选）、`subject`、`status`（`bot | waiting | staff | closed`）、`createdAt`、`updatedAt`、`assignedStaffId`、`assignedStaffName`、`lastMessagePreview`。时间用 ISO 8601 字符串。Message 包含 `id`、`conversationId`、`role`（`user | assistant | staff | system`）、`content`、`createdAt`、`status`（`complete | streaming | error | stopped`），订单回答可提供 `orderCard` 与 `toolStatuses`。`orderCard` 包含 `orderId`、`product`、`amount`、`status`（`物流中 | 已签收 | 退款中`）、`logistics`，以及可选的 `carrier`、`updatedAt`。
 
 SSE 至少支持以下事件。每个事件一行 `event:`，数据放在一行或多行 `data:` 中；多行 data 会按 SSE 规则拼接后解析。也可以在 JSON 中用 `type` 指定事件类型。
@@ -165,13 +169,13 @@ data: {"error":"订单服务暂时不可用"}
 
 ## 代码组织
 
-- `src/pages/`：登录、用户会话、mock 人工客服工作台及 `RagConsole.tsx` 员工建库控制台。
+- `src/pages/`：登录、用户会话、mock 人工客服工作台、`RagConsole.tsx` 员工建库控制台及 `RagEvals.tsx` 评估页面。
 - `src/components/`：品牌、模式提示、会话状态等共享 UI。
 - `src/api/contracts.ts`：页面使用的统一适配器接口。
 - `src/api/mock.ts`：本地持久化、跨标签同步和模拟 Agent 行为。
 - `src/data/demoData.ts`：演示账号和各用户独立的订单数据。
 - `src/api/remote.ts`：Cookie、HTTP 和增量 SSE 解析。
-- `src/api/rag.ts`：员工建库 API、Cookie 请求和错误处理。
+- `src/api/rag.ts`：员工建库与评估报告 API、Cookie 请求和错误处理。
 - `src/types.ts`：身份、会话、消息、订单与流事件类型。
 
 TanStack Query 管理服务端数据及刷新；不使用额外全局状态库。普通用户与客服使用独立路由，最终权限仍由 API 服务端校验。
