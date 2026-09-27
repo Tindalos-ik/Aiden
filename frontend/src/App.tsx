@@ -7,6 +7,7 @@ import { LoginPage } from './pages/LoginPage';
 import { UserWorkspace } from './pages/UserWorkspace';
 import { StaffWorkspace } from './pages/StaffWorkspace';
 import { RagConsole } from './pages/RagConsole';
+import { RagEvals } from './pages/RagEvals';
 import { mockChannelName, mockStorageKey } from './api/mock';
 import type { Role } from './types';
 import { Brand, SpinnerPage } from './components/Common';
@@ -74,6 +75,7 @@ function AppRoutes() {
       <Route path="/app/:conversationId" element={<RoleGate role="user"><UserWorkspace /></RoleGate>} />
       <Route path="/staff" element={<RoleGate role="staff">{apiMode === 'remote' ? <Navigate to="/staff/rag" replace /> : <StaffWorkspace />}</RoleGate>} />
       <Route path="/staff/rag" element={<RoleGate role="staff"><RagConsole /></RoleGate>} />
+      <Route path="/staff/evals" element={<RoleGate role="staff"><RagEvals /></RoleGate>} />
       <Route path="/staff/:conversationId" element={<RoleGate role="staff">{apiMode === 'remote' ? <Navigate to="/staff/rag" replace /> : <StaffWorkspace />}</RoleGate>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

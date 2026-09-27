@@ -530,6 +530,8 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 本次 15 题、四策略的数字和分桶解读见 [`backend/evals/reports/customer_rag_v1.md`](../backend/evals/reports/customer_rag_v1.md)，逐题原始结果见同目录 JSON。修正 ground truth 但问题和召回列表未变时，可用 `--recompute-from` 从已有 JSON 重算检索指标。
 
+员工以 remote 模式登录后，可从 `/staff/rag` 进入独立的 `/staff/evals` 评估页面。页面读取员工鉴权的只读 `GET /api/rag/evals/customer-rag-v1`，展示报告 JSON 中的总体四策略指标及按问题类型的分桶指标，并按题型、难度筛选题目；每题可核对 ground truth、答案要点、四策略召回排名、生成答案、拒答和 Faithfulness 评审。目标章节按召回来源路径的最后文件名和章节路径标亮，与评估脚本一致。页面只读取已保存的报告，不运行评估；`--retrieval-only` 生成的报告会将答案及评审显示为未生成、未评审。
+
 ```powershell
 # 在 backend 目录，临时指向独立的 Milvus 2.5+ 评估实例
 $env:MILVUS_URI = 'http://127.0.0.1:19531'

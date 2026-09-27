@@ -78,7 +78,7 @@ export function RagConsole() {
   return <div className="workspace-shell rag-shell">
     <PageHeader actor={actorQuery.data} />
     <main className="rag-main">
-      <div className="rag-heading"><div><Text className="section-kicker">KNOWLEDGE OPERATIONS</Text><Title level={2}>RAG 建库控制台</Title><Paragraph type="secondary">预览切块、导入来源、挖掘对话，再按 pending 状态补齐向量。</Paragraph></div><Space>{apiMode === 'mock' && <Link to="/staff">返回员工工作台</Link>}<Button icon={<ReloadOutlined />} onClick={() => void refresh()} disabled={!enabled}>刷新</Button></Space></div>
+      <div className="rag-heading"><div><Text className="section-kicker">KNOWLEDGE OPERATIONS</Text><Title level={2}>RAG 建库控制台</Title><Paragraph type="secondary">预览切块、导入来源、挖掘对话，再按 pending 状态补齐向量。</Paragraph></div><Space wrap><Link to="/staff/evals">查看 RAG 评估</Link>{apiMode === 'mock' && <Link to="/staff">返回员工工作台</Link>}<Button icon={<ReloadOutlined />} onClick={() => void refresh()} disabled={!enabled}>刷新</Button></Space></div>
       {!enabled ? <Alert showIcon type="warning" message="演示模式不可建库" description="此页面不会模拟启动向量服务、写入 MySQL 或 Milvus。请切换 VITE_API_MODE=remote 并使用员工账号登录。" /> : <>
         {actionError && <Alert type="error" showIcon message={actionError} closable onClose={() => setActionError('')} />}
         {overview.isError && <Alert type="error" showIcon message="建库总览加载失败" description={errorText(overview.error)} action={<Button size="small" onClick={() => void overview.refetch()}>重试</Button>} />}

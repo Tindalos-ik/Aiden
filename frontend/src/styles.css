@@ -439,3 +439,19 @@ button { -webkit-tap-highlight-color: transparent; }
 .rag-status-tags { margin-bottom: 12px; }
 @media (max-width: 850px) { .rag-grid { grid-template-columns: 1fr; } .rag-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 580px) { .rag-main { width: calc(100% - 24px); padding-top: 18px; } .rag-heading { flex-direction: column; } .rag-file-select { min-width: 180px; max-width: 100%; } .rag-config { grid-template-columns: 1fr; } }
+.eval-main .ant-card-body { min-width: 0; }
+.eval-bucket-value { display: inline-block; line-height: 1.65; white-space: nowrap; }
+.eval-truth { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
+.eval-truth ul { margin: 6px 0 0; padding-left: 20px; }
+.eval-truth .ant-tag { margin-top: 8px; white-space: normal; }
+.eval-strategies { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.eval-strategy-card { min-width: 0; border-radius: 10px; }
+.eval-result-tags { margin-bottom: 14px; }
+.eval-ranking { padding-left: 24px; margin: 8px 0 18px; }
+.eval-ranking li { padding: 5px 7px; overflow-wrap: anywhere; }
+.eval-ranking li::marker { color: #69768b; }
+.eval-ranking li.eval-hit { background: #f0f9f1; border-radius: 5px; }
+.eval-ranking li > span { display: block; }
+.eval-answer { margin: 8px 0 18px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; }
+.eval-judge { margin: 8px 0 0 !important; white-space: pre-wrap; }
+@media (max-width: 850px) { .eval-strategies, .eval-truth { grid-template-columns: 1fr; } }

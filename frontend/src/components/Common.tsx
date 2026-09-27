@@ -48,7 +48,7 @@ export function PageHeader({ actor }: { actor: Actor }) {
     navigate('/login', { replace: true });
   };
   return <header className="app-topbar">
-    <div className="topbar-left"><Brand compact /><span className="topbar-divider" /><span className="workspace-label">{actor.role === 'staff' ? location.pathname.startsWith('/staff/rag') ? 'RAG 建库控制台' : '人工客服工作台' : '智能订单客服'}</span></div>
+    <div className="topbar-left"><Brand compact /><span className="topbar-divider" /><span className="workspace-label">{actor.role === 'staff' ? location.pathname.startsWith('/staff/evals') ? 'RAG 评估' : location.pathname.startsWith('/staff/rag') ? 'RAG 建库控制台' : '人工客服工作台' : '智能订单客服'}</span></div>
     <div className="topbar-right"><ModePill />
       {actor.role === 'staff' && <Button type="text" icon={<DatabaseOutlined />} onClick={() => navigate('/staff/rag')}>RAG 建库</Button>}
       {apiMode === 'mock' && <Button className="reset-button" type="text" icon={<ReloadOutlined />} loading={busy} onClick={reset}>重置演示</Button>}

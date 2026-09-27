@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -10,12 +13,22 @@ from app.services.rag import admin_console
 from app.services.rag.runtime_control import AlreadyRunningError
 
 router = APIRouter(prefix="/api/rag", tags=["rag-admin"], dependencies=[Depends(current_staff)])
+_EVAL_REPORT = Path(__file__).resolve().parents[3] / "evals" / "reports" / "customer_rag_v1.json"
 
 
 class StartJobRequest(BaseModel):
     """文件名是知识目录内的相对路径；其余任务不接受浏览器传入运行参数。"""
 
     file: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/evals/customer-rag-v1")
+def customer_rag_v1_report() -> dict:
+    """只读返回固定版本评估快照；不接受文件路径，也不触发实时检索或模型评审。"""
+    if not _EVAL_REPORT.is_file():
+        raise HTTPException(status_code=404, detail="客服 RAG 评估报告不存在")
+    with _EVAL_REPORT.open(encoding="utf-8") as report_file:
+        return json.load(report_file)
 
 
 @router.get("/overview")

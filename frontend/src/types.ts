@@ -164,3 +164,45 @@ export interface RagMiningSnapshot {
   batches: Array<{ id: string; runId: string | null; status: string; turnCount: number; candidateCount: number; error: string | null; updatedAt: string | null }>;
   candidates: Record<string, RagCandidate[]>;
 }
+
+export interface RagEvalMetrics {
+  count: number;
+  answerable: number;
+  'recall@1': number | null;
+  'recall@5': number | null;
+  'recall@10': number | null;
+  mrr: number | null;
+  faithfulness: number | null;
+  unanswerable_refusal_rate: number | null;
+}
+
+export interface RagEvalCase {
+  strategy: string;
+  id: string;
+  query: string;
+  type: string;
+  difficulty: string;
+  ground_truth: Array<{ source_path: string; section: string }>;
+  answer_facts: string[];
+  retrieved: Array<{ chunk_id: string; source_path: string | null; section_path: string; score: number }>;
+  'recall@1': number | null;
+  'recall@5': number | null;
+  'recall@10': number | null;
+  mrr: number | null;
+  answer: string | null;
+  faithfulness: number | null;
+  judge_reason: string | null;
+  refused: 0 | 1 | null;
+}
+
+export interface RagEvalReport {
+  dataset: string;
+  collection: string;
+  faithfulness_judge: string | null;
+  strategies: Record<string, {
+    overall: RagEvalMetrics;
+    by_type: Record<string, RagEvalMetrics>;
+    by_difficulty: Record<string, RagEvalMetrics>;
+  }>;
+  cases: RagEvalCase[];
+}
