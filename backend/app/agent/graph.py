@@ -865,6 +865,8 @@ def build_support_graph():
         "api_key": settings.openai_api_key,
         "temperature": 0.2,
         "streaming": True,
+        # 兼容接口的流式响应需要显式请求 usage，回调才能拿到准确的 token 消耗。
+        "stream_usage": settings.langfuse_enabled,
         "max_tokens": 800,
     }
     if settings.openai_base_url:
@@ -1252,4 +1254,11 @@ def build_support_graph():
     graph.add_edge("assess_knowledge", "generate")
     graph.add_edge("generate", "save_answer")
     graph.add_edge("save_answer", END)
-    return graph.compile()
+    compiled = graph.compile(name="aiden_support")
+    # 图在每条新消息中构建一次；在编译出口绑定一个回调，让节点、模型和工具
+    # 共享同一条 trace，而不必在每个模型调用或 ToolNode 上重复传 callbacks。
+    if settings.langfuse_enabled:
+        from langfuse.langchain import CallbackHandler
+
+        return compiled.with_config({"callbacks": [CallbackHandler(update_trace=True)]})
+    return compiled

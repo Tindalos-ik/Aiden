@@ -37,6 +37,11 @@ class Settings:
     # 只作用于在线对话（agent/graph.py 的 ChatOpenAI）。离线对话挖掘走自己的裸 OpenAI
     # 客户端（services/rag/extraction.py，读 MINING_LLM_*），不受这里影响。
     openai_thinking_mode: str = os.getenv("OPENAI_THINKING_MODE", "").strip().lower()
+    # 仅作开关判断；Langfuse SDK 自行从环境读取凭据和上报地址。
+    langfuse_enabled: bool = all(
+        os.getenv(name, "").strip()
+        for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL")
+    )
     session_cookie_name: str = os.getenv("SESSION_COOKIE_NAME", "aiden_session").strip()
     session_cookie_secure: bool = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in {"1", "true", "yes"}
     # MySQL URL 由数据库模块从环境读取；这里仅保留 Cookie 的本地/部署配置。
