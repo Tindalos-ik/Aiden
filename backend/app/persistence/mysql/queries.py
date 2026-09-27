@@ -16,7 +16,7 @@ from typing import NamedTuple
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload, load_only, selectinload
 
-from .models import AfterSaleRequest, Conversation, Message, Order, Policy, Shipment, TrackingEvent
+from .models import AfterSaleRequest, Conversation, Message, Order, Policy, Shipment, Ticket, TrackingEvent
 
 MAX_QUERY_LIMIT = 500
 
@@ -32,6 +32,17 @@ class AfterSaleSummary(NamedTuple):
     requested_amount: Decimal | None
     created_at: datetime
     updated_at: datetime
+    resolved_at: datetime | None
+
+
+class TicketQuerySummary(NamedTuple):
+    """工单查询可公开的字段，不包含数据库主键及用户、客服身份。"""
+
+    ticket_no: str
+    issue_type: str
+    description: str
+    status: str
+    created_at: datetime
     resolved_at: datetime | None
 
 
@@ -112,6 +123,31 @@ def list_user_after_sale_requests(
     if order_no is not None:
         stmt = stmt.where(Order.order_no == order_no)
     return [AfterSaleSummary(*row) for row in session.execute(stmt)]
+
+
+def list_user_tickets(
+    session: Session, user_id: str, *, ticket_no: str | None = None
+) -> list[TicketQuerySummary]:
+    """只读本人工单；指定公开编号时精确匹配，否则返回最近至多五条。
+
+    用户归属与可选编号均在同一 SQL 中过滤；仅投影工具允许公开的字段。
+    """
+    stmt = (
+        select(
+            Ticket.ticket_no,
+            Ticket.issue_type,
+            Ticket.description,
+            Ticket.status,
+            Ticket.created_at,
+            Ticket.resolved_at,
+        )
+        .where(Ticket.user_id == user_id)
+        .order_by(Ticket.created_at.desc(), Ticket.ticket_no.desc())
+        .limit(1 if ticket_no is not None else 5)
+    )
+    if ticket_no is not None:
+        stmt = stmt.where(Ticket.ticket_no == ticket_no)
+    return [TicketQuerySummary(*row) for row in session.execute(stmt)]
 
 
 def get_owned_order_with_shipments(
