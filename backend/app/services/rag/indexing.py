@@ -321,12 +321,18 @@ def reindex_vectorized(
 
 
 def migrate_legacy_collection(
-    source_collection: str, target_collection: str, *, page_size: int = 64,
+    source_collection: str,
+    target_collection: str,
+    *,
+    source_uri: str | None = None,
+    target_uri: str | None = None,
+    page_size: int = 64,
 ) -> tuple[int, int]:
     """把旧集合 dense 向量和 MySQL 权威正文复制到新 BM25 集合。
 
     源集合只读，目标集合创建或按同一 chunk_id upsert；不调用 embedding/reranker 服务，
-    不改变 MySQL 状态。返回 (复制块数, 向量维度)。运行期间应暂停知识写入。
+    不改变 MySQL 状态。源、目标 URI 可分别指定；未指定的一侧使用 MILVUS_URI。
+    返回 (复制块数, 向量维度)。运行期间应暂停知识写入。
     """
     source_name = source_collection.strip()
     target_name = target_collection.strip()
@@ -335,9 +341,11 @@ def migrate_legacy_collection(
     if page_size <= 0:
         raise ValueError("page_size 必须大于零")
 
-    source_store = KnowledgeVectorStore(collection=source_name)
+    source_store = KnowledgeVectorStore(uri=source_uri, collection=source_name)
     dimension = source_store.existing_dimension()
-    target_store = KnowledgeVectorStore(collection=target_name, dimension=dimension)
+    target_store = KnowledgeVectorStore(
+        uri=target_uri, collection=target_name, dimension=dimension
+    )
     target_store.ensure_collection()
 
     copied = 0
@@ -408,15 +416,21 @@ def length_measurement_note() -> str:
 
 
 if __name__ == "__main__":
-    # 在 backend 目录运行：python -m app.services.rag.indexing --source knowledge --target knowledge_bm25
+    # 在 backend 目录运行；源和目标可以指向独立的 Milvus 实例。
     import argparse
     import json
 
     parser = argparse.ArgumentParser(description="非破坏性复制旧 Milvus 向量到新 BM25 集合")
     parser.add_argument("--source", required=True, help="旧 dense 集合名称，只读")
     parser.add_argument("--target", required=True, help="新 BM25 集合名称，创建或幂等写入")
+    parser.add_argument("--source-uri", default=None, help="旧 Milvus 地址；默认使用 MILVUS_URI")
+    parser.add_argument("--target-uri", default=None, help="新 Milvus 地址；默认使用 MILVUS_URI")
     parser.add_argument("--page-size", type=int, default=64)
     args = parser.parse_args()
-    count, dim = migrate_legacy_collection(args.source, args.target, page_size=args.page_size)
+    count, dim = migrate_legacy_collection(
+        args.source, args.target,
+        source_uri=args.source_uri, target_uri=args.target_uri,
+        page_size=args.page_size,
+    )
     print(json.dumps({"source": args.source, "target": args.target,
                       "copied": count, "dimension": dim}, ensure_ascii=False))
