@@ -196,6 +196,40 @@ def get_effective_policy(
     return session.scalar(stmt)
 
 
+def list_matching_effective_policies(
+    session: Session, topics: tuple[str, ...], *, at: datetime | None = None, limit: int = 5
+) -> list[Policy]:
+    """按政策主题读取当前有效版本，匹配文本、时间和条数都在 SQL 中限定。
+
+    ``contains(autoescape=True)`` 会绑定并转义用户问题识别出的主题词，避免把
+    ``%``、``_`` 当作 LIKE 通配符。日期沿用本项目的 UTC DATETIME 约定。
+    """
+    if not topics:
+        return []
+
+    instant = _utc_naive(at)
+    topic_filters = [
+        or_(
+            Policy.policy_key.contains(topic, autoescape=True),
+            Policy.name.contains(topic, autoescape=True),
+            Policy.content.contains(topic, autoescape=True),
+        )
+        for topic in topics
+    ]
+    stmt = (
+        select(Policy)
+        .where(
+            Policy.is_active.is_(True),
+            Policy.effective_from <= instant,
+            or_(Policy.effective_until.is_(None), Policy.effective_until > instant),
+            or_(*topic_filters),
+        )
+        .order_by(Policy.effective_from.desc(), Policy.created_at.desc(), Policy.version.desc())
+        .limit(_checked_limit(limit))
+    )
+    return list(session.scalars(stmt))
+
+
 def list_conversation_messages(
     session: Session, user_id: str, conversation_id: str, *, limit: int = 200
 ) -> list[Message]:
