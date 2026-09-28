@@ -87,7 +87,7 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
 & $python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'
 if ($LASTEXITCODE -ne 0) { throw 'backend/.venv must use Python 3.10 or newer.' }
 
-& $python -c 'import fastapi, uvicorn, sqlalchemy, alembic, langgraph, langchain_openai, pymysql' *> $null
+& $python -c 'import fastapi, uvicorn, sqlalchemy, alembic, langgraph, langchain, langchain_openai, langfuse.langchain, pymysql' *> $null
 if ($LASTEXITCODE -ne 0) {
     Write-Host 'Installing backend dependencies...'
     & $python -m pip install -r (Join-Path $backend 'requirements.txt')
