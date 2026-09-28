@@ -171,6 +171,8 @@ export function UserWorkspace() {
   const [draft, setDraft] = useState('');
   const [mobileListOpen, setMobileListOpen] = useState(false);
   const [streamingText, setStreamingText] = useState('');
+  const [humanSending, setHumanSending] = useState(false);
+  const humanSendingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const actorQuery = useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: Infinity });
   const actor = actorQuery.data as Actor | undefined;
@@ -200,7 +202,7 @@ export function UserWorkspace() {
     onSuccess: async (updated) => {
       queryClient.setQueryData<Conversation[]>(['conversations'], (items) => items?.map((item) => item.id === updated.id ? updated : item));
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['conversations'] }), queryClient.invalidateQueries({ queryKey: ['messages', conversationId] })]);
-      message.success('已加入人工客服队列');
+      message.success(updated.status === 'staff' ? '人工客服已接入' : '已进入人工客服队列');
     },
     onError: (error) => message.error(error instanceof Error ? error.message : '申请转人工失败'),
   });
@@ -218,7 +220,27 @@ export function UserWorkspace() {
   };
   const send = async (raw: string) => {
     const text = raw.trim();
-    if (!text || !conversationId || !conversation || abortRef.current || conversation.status !== 'bot') return;
+    if (!text || !conversationId || !conversation || abortRef.current || humanSendingRef.current || conversation.status === 'closed') return;
+    if (conversation.status === 'waiting' || conversation.status === 'staff') {
+      humanSendingRef.current = true;
+      setHumanSending(true);
+      setDraft('');
+      try {
+        const sent = await api.sendHumanMessage(conversationId, text);
+        queryClient.setQueryData<ChatMessageType[]>(['messages', conversationId], (items = []) =>
+          items.some((item) => item.id === sent.id) ? items : [...items, sent]);
+        await Promise.all([queryClient.invalidateQueries({ queryKey: ['messages', conversationId] }),
+          queryClient.invalidateQueries({ queryKey: ['conversations'] })]);
+      } catch (error) {
+        setDraft(text);
+        message.error(error instanceof Error ? error.message : '发送留言失败');
+        await queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      } finally {
+        humanSendingRef.current = false;
+        setHumanSending(false);
+      }
+      return;
+    }
     setDraft('');
     setStreamingText('正在连接 Aiden…');
     const clientMessageId = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `client-${Date.now()}`;
@@ -250,8 +272,8 @@ export function UserWorkspace() {
         } else if (event.type === 'citations' && event.citations) {
           updateAssistant(assistantId, (item) => ({ ...item, citations: event.citations }));
         } else if (event.type === 'handoff') {
-          setStreamingText('已为你通知人工客服');
-          queryClient.setQueryData<Conversation[]>(['conversations'], (items) => items?.map((item) => item.id === conversationId ? { ...item, status: 'waiting' } : item));
+          setStreamingText('已进入人工客服队列');
+          void queryClient.invalidateQueries({ queryKey: ['conversations'] });
         } else if (event.type === 'done') {
           updateAssistant(assistantId, (item) => ({ ...item, status: item.status === 'stopped' ? 'stopped' : 'complete', citations: event.citations ?? item.citations }));
           setStreamingText('');
@@ -297,24 +319,23 @@ export function UserWorkspace() {
       <section className="user-chat-panel">
         <div className="chat-panel-header">
           <div className="chat-title-cluster"><Button className="mobile-tools" type="text" icon={<FileTextOutlined />} onClick={() => setMobileListOpen(true)} aria-label="打开会话列表" /><span className="chat-title-mark"><span className="mini-brand-mark">a</span></span><div><div className="chat-title">{conversation?.subject || '订单咨询'}</div><div className="chat-title-sub">{apiMode === 'mock' ? '专属智能客服 · 订单信息仅对本人可见' : '智能客服 · 当前未接入订单数据'}</div></div></div>
-          {conversation && <div className="chat-header-actions"><StatusPill status={conversation.status} />{conversation.status === 'bot' && (apiMode === 'remote'
-            ? <Tooltip title="第一版尚未接入人工客服"><span><Button className="handoff-button" icon={<CustomerServiceOutlined />} disabled>人工服务未接入</Button></span></Tooltip>
-            : <Button className="handoff-button" icon={<CustomerServiceOutlined />} loading={requestHandoff.isPending} onClick={() => requestHandoff.mutate()}>转人工</Button>)}</div>}
+          {conversation && <div className="chat-header-actions"><StatusPill status={conversation.status} />{conversation.status === 'bot' &&
+            <Button className="handoff-button" icon={<CustomerServiceOutlined />} loading={requestHandoff.isPending} disabled={isBusy} onClick={() => requestHandoff.mutate()}>转人工</Button>}</div>}
         </div>
         {conversationQuery.isError && <Alert className="inline-alert" type="error" showIcon message="连接会话服务失败" description={conversationQuery.error instanceof Error ? conversationQuery.error.message : '请稍后重试'} action={<Button size="small" onClick={() => void conversationQuery.refetch()}>重试</Button>} />}
         {conversationQuery.isLoading ? <div className="chat-load-state"><Spin /><span>正在载入会话…</span></div> : !conversationId && !conversations.length ? <div className="chat-empty-state"><Empty description={<span>从一次订单咨询开始</span>}><Button type="primary" icon={<PlusOutlined />} onClick={() => createConversation.mutate()}>新建会话</Button></Empty></div> : conversationId && !conversation && !conversationQuery.isLoading ? <div className="chat-empty-state"><Empty description="找不到这个会话"><Button onClick={() => navigate('/app')}>返回会话列表</Button></Empty></div> : conversation && <>
           <div className="chat-scroll-area">
-            {conversation.status === 'waiting' && <div className="handoff-banner"><span className="handoff-banner-icon"><ClockCircleOutlined /></span><div><b>{apiMode === 'mock' ? '已进入人工客服队列' : '人工客服暂未接入'}</b><span>{apiMode === 'mock' ? '客服专员接入后会在此处回复你，请稍候。' : '请新建会话继续使用智能客服。'}</span></div>{apiMode === 'mock' && <span className="queue-pulse" />}</div>}
-            {conversation.status === 'staff' && <div className="staff-banner"><span className="staff-banner-icon"><CustomerServiceOutlined /></span><div><b>{conversation.assignedStaffName || '人工客服'}正在为你服务</b><span>你可以在此查看人工客服的回复。</span></div></div>}
+            {conversation.status === 'waiting' && <div className="handoff-banner"><span className="handoff-banner-icon"><ClockCircleOutlined /></span><div><b>已进入人工客服队列</b><span>客服专员接入后会在此处回复，你也可以继续留言。</span></div><span className="queue-pulse" /></div>}
+            {conversation.status === 'staff' && <div className="staff-banner"><span className="staff-banner-icon"><CustomerServiceOutlined /></span><div><b>{conversation.assignedStaffName || '人工客服'}已接入</b><span>你可以在此继续与客服交流。</span></div></div>}
             {conversation.status === 'closed' && <div className="closed-banner"><span>本次人工服务已结束。</span><Button size="small" onClick={() => createConversation.mutate()}>新建咨询</Button></div>}
             <MessageTimeline messages={selectedMessages} loading={messagesQuery.isLoading} error={messagesQuery.error} retry={() => void messagesQuery.refetch()} feedbackUserId={actor.id} />
             {messages.length === 0 && !messagesQuery.isLoading && <WelcomePanel onAsk={(text) => void send(text)} />}
             {isBusy && <div className="streaming-indicator"><span className="streaming-bars"><i /><i /><i /></span>{streamingText || '正在生成回复…'}{apiMode === 'mock' && <span className="streaming-mode">本地模拟</span>}</div>}
           </div>
           <div className="composer-wrap">
-            {conversation.status === 'closed' ? <div className="composer-closed">此会话已结束。<Button type="link" onClick={() => createConversation.mutate()}>开始新的咨询</Button></div> : conversation.status !== 'bot' ? <div className="composer-locked"><CustomerServiceOutlined /><span>{conversation.status === 'waiting' ? (apiMode === 'mock' ? '客服接入后，你可以在这里继续交流' : '人工客服暂未接入；请新建会话继续咨询') : '请在此查看客服专员的回复'}</span>{apiMode === 'remote' && conversation.status === 'waiting' && <Button type="link" onClick={() => createConversation.mutate()}>新建会话</Button>}</div> : <div className="composer-box">
-              <Input.TextArea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onInputKeyDown} autoSize={{ minRows: 1, maxRows: 5 }} placeholder={apiMode === 'mock' ? '描述你遇到的订单问题…' : '输入消息开始对话…'} disabled={isBusy} aria-label="输入消息" />
-              <div className="composer-toolbar"><span className="composer-hint">Enter 发送 · Shift + Enter 换行</span>{isBusy ? <Button className="stop-button" type="primary" danger icon={<StopOutlined />} onClick={() => abortRef.current?.abort()}>停止生成</Button> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} disabled={!draft.trim()} onClick={() => void send(draft)}>发送</Button>}</div>
+            {conversation.status === 'closed' ? <div className="composer-closed">此会话已结束。<Button type="link" onClick={() => createConversation.mutate()}>开始新的咨询</Button></div> : <div className="composer-box">
+              <Input.TextArea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onInputKeyDown} autoSize={{ minRows: 1, maxRows: 5 }} placeholder={conversation.status === 'bot' ? '输入消息开始对话…' : '在原会话继续留言…'} disabled={isBusy || humanSending} aria-label="输入消息" />
+              <div className="composer-toolbar"><span className="composer-hint">Enter 发送 · Shift + Enter 换行</span>{isBusy ? <Button className="stop-button" type="primary" danger icon={<StopOutlined />} onClick={() => abortRef.current?.abort()}>停止生成</Button> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} loading={humanSending} disabled={!draft.trim()} onClick={() => void send(draft)}>发送</Button>}</div>
             </div>}
             <div className="composer-disclaimer"><span className="composer-lock">◆</span>{apiMode === 'mock' ? '演示模式使用本地模拟数据，请勿输入真实个人信息' : '当前未接入订单和商城政策数据，请勿将回答作为具体订单或政策核实结果'}</div>
           </div>

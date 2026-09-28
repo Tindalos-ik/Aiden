@@ -241,9 +241,6 @@ def create_message_pair(
         )
         if conversation is None:
             raise LookupError("会话不存在")
-        if conversation.status != "bot":
-            raise ValueError("此会话当前不能发送智能客服消息")
-
         if client_message_id:
             # 同一个客户端键必须对应同一段内容，否则拒绝覆盖已有用户消息。
             existing_user = session.scalar(
@@ -273,6 +270,8 @@ def create_message_pair(
                     )
                 if assistant.status == "streaming":
                     raise ValueError("这条消息仍在生成回答，请稍后刷新会话")
+                if conversation.status != "bot":
+                    raise ValueError("此会话已转人工，不能重新生成智能客服回答")
                 other_stream = session.scalar(
                     select(Message.id).where(
                         Message.conversation_id == conversation_id,
@@ -290,6 +289,9 @@ def create_message_pair(
                 conversation.updated_at = assistant.created_at
                 conversation.last_message_preview = content[:120]
                 return MessagePair(existing_user.id, assistant.id)
+
+        if conversation.status != "bot":
+            raise ValueError("此会话当前不能发送智能客服消息")
 
         active_stream = session.scalar(
             select(Message.id)
@@ -374,10 +376,15 @@ def finish_assistant_message(
     *,
     citations: list[dict[str, Any]] | None = None,
     low_confidence: dict[str, str] | None = None,
-) -> None:
-    """仅把仍在生成的助手行从 streaming 转为终态，并校验会话归属。"""
+    handoff: bool = False,
+) -> bool:
+    """完成回答，并在需要时同一事务转入人工队列；返回是否本次转接。"""
     now = utc_now_naive()
     with get_session_factory().begin() as session:
+        conversation = session.scalar(select(Conversation).where(
+            Conversation.id == conversation_id, Conversation.user_id == user_id).with_for_update())
+        if conversation is None:
+            raise LookupError("会话不存在")
         message = session.scalar(
             select(Message)
             .join(Conversation, Conversation.id == Message.conversation_id)
@@ -387,22 +394,26 @@ def finish_assistant_message(
                 Message.sender_role == "assistant",
                 Conversation.user_id == user_id,
             )
-            .with_for_update()
         )
         if message is None:
             raise LookupError("会话不存在")
         # Graph 保存完成答案后，SSE 取消收尾可能稍后尝试写 stopped；终态只能由
         # create_message_pair 的显式重试重置，收尾写入不能覆盖已经落库的结果。
         if message.status != "streaming":
-            return
+            return False
         message.content = content
         message.citations = citations or []
         message.status = status
-        conversation = session.get(Conversation, conversation_id)
-        if conversation is None or conversation.user_id != user_id:
-            raise LookupError("会话不存在")
         conversation.updated_at = now
         conversation.last_message_preview = content[:120]
+        changed = status == "complete" and handoff and conversation.status == "bot"
+        if changed:
+            conversation.status = "waiting"
+            session.add(Message(conversation_id=conversation_id, sender_role="system",
+                                content="已进入人工客服队列，请稍候。", status="complete",
+                                created_at=now + timedelta(microseconds=1)))
+            conversation.updated_at = now + timedelta(microseconds=1)
+            conversation.last_message_preview = "已进入人工客服队列，请稍候。"
         if low_confidence is not None:
             session.add(LowConfidenceQuestion(
                 id=str(uuid4()),
@@ -412,3 +423,4 @@ def finish_assistant_message(
                 reason=low_confidence["reason"],
                 created_at=now,
             ))
+        return changed

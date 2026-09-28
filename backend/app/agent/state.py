@@ -29,6 +29,9 @@ class SupportState(TypedDict, total=False):
     requests: list[dict[str, object]]
     request_index: int
     request_results: list[dict[str, object]]
+    # 当前项是否明确要求实时人工；最终回答入库时才提交状态转换。
+    handoff_requested: bool
+    handoff_required: bool
     request_tool_start: int
     query_cache: list[dict[str, str]]
     pending_cache_key: str

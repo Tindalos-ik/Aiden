@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from app.agent.graph import build_support_graph, model_configuration_error
 from app.api.deps import current_actor
-from app.api.schemas import CreateConversationRequest, StreamMessageRequest
+from app.api.schemas import CreateConversationRequest, HumanMessageRequest, StreamMessageRequest
 from app.api.sse import sse_event
 from app.persistence.mysql.chat import (
     create_conversation as create_mysql_conversation,
@@ -18,10 +18,36 @@ from app.persistence.mysql.chat import (
     list_owned_messages,
     list_user_conversations,
 )
+from app.persistence.mysql.human_support import request_handoff, send_human_message
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
+
+
+@router.post("/{conversation_id}/handoff")
+def handoff(conversation_id: str, actor: dict = Depends(current_actor)) -> dict[str, Any]:
+    """用户申请实时人工队列，和登记工单是独立操作。"""
+    try:
+        return request_handoff(conversation_id, actor["id"])
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{conversation_id}/messages")
+def send_user_human_message(conversation_id: str, body: HumanMessageRequest,
+                            actor: dict = Depends(current_actor)) -> dict[str, Any]:
+    """waiting/staff 阶段在原会话写入用户留言。"""
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail="消息内容不能为空")
+    try:
+        return send_human_message(conversation_id, actor["id"], "user", body.text.strip())
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="会话不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("")
@@ -61,9 +87,6 @@ async def stream_message(
     conversation = get_owned_conversation(conversation_id, actor["id"])
     if not conversation:
         raise HTTPException(status_code=404, detail="会话不存在")
-    if conversation["status"] != "bot":
-        raise HTTPException(status_code=409, detail="此会话当前不能发送智能客服消息")
-
     text = body.text.strip()
     if not text:
         raise HTTPException(status_code=422, detail="消息内容不能为空")
@@ -113,7 +136,7 @@ async def stream_message(
                     "user_id": actor["id"],
                 }
                 async for event in graph.astream_events(initial_state, version="v2"):
-                    if event.get("event") == "on_chain_end" and event.get("name") == "generate":
+                    if event.get("event") == "on_chain_end" and event.get("name") == "save_answer":
                         output = event.get("data", {}).get("output", {})
                         answer = output.get("answer") if isinstance(output, dict) else None
                         if isinstance(answer, str):
@@ -124,6 +147,8 @@ async def stream_message(
                             citations = output.get("citations", []) if isinstance(output, dict) else []
                             if citations:
                                 yield sse_event("citations", {"citations": citations})
+                            if output.get("handoff_committed"):
+                                yield sse_event("handoff", {})
 
                 if not answer_so_far:
                     raise RuntimeError("模型没有生成可显示的回答。")

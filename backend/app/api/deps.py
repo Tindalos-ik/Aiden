@@ -20,7 +20,7 @@ def current_actor(actor: dict = Depends(current_identity)) -> dict:
 
 
 def current_staff(actor: dict = Depends(current_identity)) -> dict:
-    """管理操作仅允许持有当前有效 Cookie 且角色为 staff 的员工。"""
+    """员工路由仅允许持有有效 Cookie 且角色为 staff 的员工。"""
     if actor["role"] != "staff":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅员工可访问建库控制台")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅员工可访问此功能")
     return actor

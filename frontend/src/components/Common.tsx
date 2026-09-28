@@ -51,11 +51,13 @@ export function PageHeader({ actor }: { actor: Actor }) {
     <div className="topbar-left"><Brand compact /><span className="topbar-divider" /><span className="workspace-label">{actor.role === 'staff' ? location.pathname.startsWith('/staff/evals') ? 'RAG 评估' : location.pathname.startsWith('/staff/rag') ? 'RAG 建库控制台' : '人工客服工作台' : '智能订单客服'}</span></div>
     <div className="topbar-right"><ModePill />
       {actor.role === 'staff' && <Button type="text" icon={<DatabaseOutlined />} onClick={() => navigate('/staff/rag')}>RAG 建库</Button>}
+      {actor.role === 'staff' && location.pathname.startsWith('/staff/rag') && <Button type="text" icon={<CustomerServiceOutlined />} onClick={() => navigate('/staff')}>客服工作台</Button>}
       {apiMode === 'mock' && <Button className="reset-button" type="text" icon={<ReloadOutlined />} loading={busy} onClick={reset}>重置演示</Button>}
       <Dropdown menu={{ items: [
         { key: 'identity', label: <span>{actor.name} · {actor.role === 'staff' ? '客服专员' : '普通用户'}</span>, disabled: true },
         ...(apiMode === 'mock' ? [{ key: 'reset', label: '重置演示数据', icon: <ReloadOutlined />, onClick: reset }] : []),
         ...(actor.role === 'staff' ? [{ key: 'rag', label: 'RAG 建库控制台', icon: <DatabaseOutlined />, onClick: () => navigate('/staff/rag') }] : []),
+        ...(actor.role === 'staff' ? [{ key: 'service', label: '人工客服工作台', icon: <CustomerServiceOutlined />, onClick: () => navigate('/staff') }] : []),
         { key: 'logout', label: '退出登录', icon: <LogoutOutlined />, onClick: logout },
       ] }} trigger={['click']}>
         <button className="account-trigger"><Avatar size={32} style={{ backgroundColor: actor.avatarColor || '#5b68c8' }}>{actor.name.slice(0, 1)}</Avatar><span className="account-name">{actor.name}</span><DownOutlined className="account-chevron" /></button>

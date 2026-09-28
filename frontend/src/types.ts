@@ -19,8 +19,8 @@ export interface Conversation {
   status: ConversationStatus;
   createdAt: string;
   updatedAt: string;
-  assignedStaffId?: string;
-  assignedStaffName?: string;
+  assignedStaffId?: string | null;
+  assignedStaffName?: string | null;
   lastMessagePreview?: string;
 }
 

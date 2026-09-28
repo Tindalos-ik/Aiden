@@ -116,8 +116,8 @@ function chooseOrder(text: string, orders: OrderCard[]): OrderCard {
 }
 
 function answerFor(text: string, order: OrderCard): { answer: string; handoff: boolean; query: boolean } {
-  if (/投诉|转人工|人工客服|联系人工/.test(text)) {
-    return { answer: '我来为你联系人工客服，稍后会有专员接入当前会话。你可以继续在这里补充订单情况。', handoff: true, query: false };
+  if (/转人工|找真人|找人工|联系人工客服|接入人工/.test(text)) {
+    return { answer: '已进入人工客服队列，客服接单后会在本会话回复。你可以继续补充问题。', handoff: true, query: false };
   }
   if (/退款|退钱|退货/.test(text)) {
     const urgent = /一直|超过|没到|争议|投诉|不同意/.test(text);
@@ -125,7 +125,7 @@ function answerFor(text: string, order: OrderCard): { answer: string; handoff: b
       answer: urgent
         ? `我查到订单 ${order.orderId} 的退款当前显示为“${order.status}”。退款由商家处理，如果你对处理进度有争议，我可以为你转接人工专员继续核实。`
         : `我查到订单 ${order.orderId} 当前为“${order.status}”，${order.logistics}。退款到账时间会受支付渠道影响；如果状态长时间没有变化，可以申请人工专员帮你跟进。`,
-      handoff: urgent,
+      handoff: false,
       query: true,
     };
   }
@@ -176,6 +176,24 @@ export const mockApi: AidenApi = {
     if (!conversation || (actor.role === 'user' && conversation.userId !== actor.id)) throw new Error('无权查看此会话');
     return sortedMessages(conversationId, db);
   },
+  async listStaffMessages(conversationId) {
+    return this.listMessages(conversationId);
+  },
+  async sendHumanMessage(conversationId, text) {
+    const actor = requireUser();
+    const db = database();
+    const conversation = db.conversations.find((item) => item.id === conversationId && item.userId === actor.id);
+    if (!conversation) throw new Error('找不到当前会话');
+    if (conversation.status !== 'waiting' && conversation.status !== 'staff') throw new Error('此会话当前不能发送消息');
+    const now = new Date().toISOString();
+    const sent: Message = { id: makeId('user-message'), conversationId, role: 'user', content: text, createdAt: now, status: 'complete' };
+    updateMessage(db, sent);
+    conversation.updatedAt = now;
+    conversation.lastMessagePreview = text;
+    storeConversation(db, conversation);
+    writeDatabase(db);
+    return sent;
+  },
   async sendMessageStream(conversationId, text, clientMessageId, onEvent, signal) {
     const actor = requireUser();
     const db = database();
@@ -207,7 +225,6 @@ export const mockApi: AidenApi = {
       if (current) {
         current.updatedAt = new Date().toISOString();
         current.lastMessagePreview = assistant.content.slice(-70) || text;
-        if (result.handoff) current.status = 'waiting';
         storeConversation(latest, current);
       }
       writeDatabase(latest);
@@ -269,7 +286,7 @@ export const mockApi: AidenApi = {
     conversation.status = 'waiting';
     conversation.updatedAt = new Date().toISOString();
     conversation.lastMessagePreview = '用户申请转人工';
-    const systemMessage: Message = { id: makeId('message'), conversationId, role: 'system', content: '已为你接入人工客服，请稍候。', createdAt: new Date().toISOString(), status: 'complete' };
+    const systemMessage: Message = { id: makeId('message'), conversationId, role: 'system', content: '已进入人工客服队列，请稍候。', createdAt: new Date().toISOString(), status: 'complete' };
     updateMessage(db, systemMessage);
     storeConversation(db, conversation);
     writeDatabase(db);
@@ -277,7 +294,7 @@ export const mockApi: AidenApi = {
   },
   async listQueue() {
     requireStaff();
-    return database().conversations.filter((item) => item.status === 'waiting' || item.status === 'staff').map((item) => ({ ...item, userName: demoAccounts.find((account) => account.id === item.userId)?.name })).sort((a, b) => (a.status === b.status ? a.updatedAt.localeCompare(b.updatedAt) : a.status === 'waiting' ? -1 : 1));
+    return database().conversations.filter((item) => item.status === 'waiting' || item.status === 'staff' || item.status === 'closed').map((item) => ({ ...item, userName: demoAccounts.find((account) => account.id === item.userId)?.name })).sort((a, b) => (a.status === b.status ? a.updatedAt.localeCompare(b.updatedAt) : a.status === 'waiting' ? -1 : 1));
   },
   async acceptConversation(conversationId) {
     const staff = requireStaff();

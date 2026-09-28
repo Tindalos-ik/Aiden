@@ -19,3 +19,8 @@ class StreamMessageRequest(BaseModel):
     """流式发送请求；幂等键长度按前端契约校验，不用作数据库消息主键。"""
     text: str = Field(min_length=1, max_length=4000)
     clientMessageId: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class HumanMessageRequest(BaseModel):
+    """人工阶段的普通留言；不触发智能客服生成。"""
+    text: str = Field(min_length=1, max_length=4000)

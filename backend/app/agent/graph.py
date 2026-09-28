@@ -900,7 +900,7 @@ _REQUEST_GOALS = {
     "refund_return": {"policy", "after_sale_status", "ticket_status", "create_ticket"},
     "after_sales": {"policy", "after_sale_status", "ticket_status", "create_ticket"},
     "complaint": {"ticket_status", "create_ticket"},
-    "human": {"ticket_status", "create_ticket"},
+    "human": {"ticket_status", "create_ticket", "other"},
     "smalltalk": {"smalltalk"},
     "other": {"other"},
 }
@@ -1063,6 +1063,10 @@ def build_support_graph():
             request = SupportRequest.model_validate(requests[index])
         except (TypeError, ValidationError):
             return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
+        if request.intent == "human" and request.goal == "other":
+            # 意图分流已经确认实时真人诉求；最终回答入库时才提交会话状态。
+            return {"allowed_tools": [], "direct_reply": "已进入人工客服队列，客服接单后会在本会话回复。",
+                    "handoff_requested": True, "request_tool_start": len(state.get("messages", [])), "citations": []}
         if request.goal == "create_ticket" and any(
             cached.get("name") == "create_ticket" for cached in state.get("query_cache", [])
         ):
@@ -1084,6 +1088,7 @@ def build_support_graph():
         routed["request_tool_start"] = len(state.get("messages", []))
         routed["cached_tool_hit"] = False
         routed["citations"] = []
+        routed["handoff_requested"] = False
         return routed
 
     async def dispatch_tool_call(state: SupportState) -> dict[str, Any]:
@@ -1273,7 +1278,8 @@ def build_support_graph():
         answer = answers[0] if len(answers) == 1 else "\n".join(
             f"【{index}】 {reply}" for index, reply in enumerate(answers, 1)
         )
-        output: dict[str, Any] = {"messages": [AIMessage(content=answer)], "answer": answer, "citations": all_citations}
+        output: dict[str, Any] = {"messages": [AIMessage(content=answer)], "answer": answer, "citations": all_citations,
+                                  "handoff_required": any(item.get("handoff") for item in items)}
         if low_confidence:
             output["low_confidence"] = low_confidence
         return output
@@ -1343,6 +1349,7 @@ def build_support_graph():
             "direct_reply": state.get("direct_reply", ""),
             "tools": tool_results,
             "citations": state.get("citations", []),
+            "handoff": state.get("handoff_requested", False),
         }
         return {
             "request_results": [*state.get("request_results", []), result],
@@ -1350,17 +1357,18 @@ def build_support_graph():
             "allowed_tools": [],
             "direct_reply": "",
             "citations": [],
+            "handoff_requested": False,
         }
 
     def route_next_request(state: SupportState) -> str:
         return "route_intent" if state.get("request_index", 0) < len(state.get("requests", [])) else "generate"
 
-    def save_answer(state: SupportState) -> dict[str, str]:
+    def save_answer(state: SupportState) -> dict[str, Any]:
         """模型完成工具循环或澄清/兜底后，仅保存 generate 产出的最终回答。"""
         answer = state["answer"]
         if not answer:
             raise RuntimeError("模型没有生成可显示的回答。")
-        finish_assistant_message(
+        handoff_committed = finish_assistant_message(
             state["assistant_message_id"],
             state["conversation_id"],
             state["user_id"],
@@ -1368,8 +1376,9 @@ def build_support_graph():
             "complete",
             citations=state.get("citations", []),
             low_confidence=state.get("low_confidence"),
+            handoff=state.get("handoff_required", False),
         )
-        return {}
+        return {"answer": answer, "citations": state.get("citations", []), "handoff_committed": handoff_committed}
 
     graph = StateGraph(SupportState)
     graph.add_node("load_context", load_context)

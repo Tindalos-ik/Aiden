@@ -4,6 +4,7 @@ from app.api.routes.auth import router as auth_router
 from app.api.routes.conversations import router as conversations_router
 from app.api.routes.knowledge_sources import router as knowledge_sources_router
 from app.api.routes.rag_admin import router as rag_admin_router
+from app.api.routes.staff import router as staff_router
 from app.services.rag.admin_console import stop_owned_embedding_on_shutdown
 
 
@@ -13,6 +14,7 @@ app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(knowledge_sources_router)
 app.include_router(rag_admin_router)
+app.include_router(staff_router)
 
 
 @app.on_event("shutdown")

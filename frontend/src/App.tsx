@@ -49,7 +49,7 @@ function Landing() {
   if (isLoading) return <SpinnerPage />;
   if (isError) return <ConnectionError detail={error instanceof Error ? error.message : '无法连接服务'} onRetry={() => void refetch()} />;
   if (!data) return <Navigate to="/login" replace />;
-  return <Navigate to={data.role === 'staff' ? (apiMode === 'remote' ? '/staff/rag' : '/staff') : '/app'} replace />;
+  return <Navigate to={data.role === 'staff' ? '/staff' : '/app'} replace />;
 }
 
 function ConnectionError({ detail, onRetry }: { detail: string; onRetry: () => void }) {
@@ -61,7 +61,7 @@ function RoleGate({ role, children }: { role: Role; children: React.ReactNode })
   if (isLoading) return <SpinnerPage />;
   if (isError) return <ConnectionError detail={error instanceof Error ? error.message : '无法连接服务'} onRetry={() => void refetch()} />;
   if (!data) return <Navigate to="/login" replace />;
-  if (data.role !== role) return <Navigate to={data.role === 'staff' ? (apiMode === 'remote' ? '/staff/rag' : '/staff') : '/app'} replace />;
+  if (data.role !== role) return <Navigate to={data.role === 'staff' ? '/staff' : '/app'} replace />;
   return <>{children}</>;
 }
 
@@ -73,10 +73,10 @@ function AppRoutes() {
       <Route path="/" element={<Landing />} />
       <Route path="/app" element={<RoleGate role="user"><UserWorkspace /></RoleGate>} />
       <Route path="/app/:conversationId" element={<RoleGate role="user"><UserWorkspace /></RoleGate>} />
-      <Route path="/staff" element={<RoleGate role="staff">{apiMode === 'remote' ? <Navigate to="/staff/rag" replace /> : <StaffWorkspace />}</RoleGate>} />
+      <Route path="/staff" element={<RoleGate role="staff"><StaffWorkspace /></RoleGate>} />
       <Route path="/staff/rag" element={<RoleGate role="staff"><RagConsole /></RoleGate>} />
       <Route path="/staff/evals" element={<RoleGate role="staff"><RagEvals /></RoleGate>} />
-      <Route path="/staff/:conversationId" element={<RoleGate role="staff">{apiMode === 'remote' ? <Navigate to="/staff/rag" replace /> : <StaffWorkspace />}</RoleGate>} />
+      <Route path="/staff/:conversationId" element={<RoleGate role="staff"><StaffWorkspace /></RoleGate>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   </>;

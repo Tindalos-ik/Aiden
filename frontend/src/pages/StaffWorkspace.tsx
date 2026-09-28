@@ -11,6 +11,7 @@ import type { Actor, Conversation, Message as ChatMessageType } from '../types';
 function QueueList({ items, selectedId, onSelect, compact = false }: { items: Conversation[]; selectedId?: string; onSelect: (item: Conversation) => void; compact?: boolean }) {
   const waiting = items.filter((item) => item.status === 'waiting');
   const active = items.filter((item) => item.status === 'staff');
+  const closed = items.filter((item) => item.status === 'closed');
   return <div className={`queue-pane ${compact ? 'queue-pane-compact' : ''}`}>
     <div className="queue-pane-title"><span className="section-kicker">INBOX</span><h2>服务队列</h2><p>接入会话并提供及时协助</p></div>
     <div className="queue-scroll">
@@ -19,6 +20,9 @@ function QueueList({ items, selectedId, onSelect, compact = false }: { items: Co
       </div>
       <div className="queue-group queue-active-group"><div className="queue-group-heading"><span>服务中</span><Tag className="queue-count queue-count-active">{active.length}</Tag></div>
         {!active.length ? <div className="queue-group-empty queue-group-empty-quiet">接入会话后会显示在这里</div> : active.map((item) => <QueueItem key={item.id} item={item} selected={selectedId === item.id} onClick={() => onSelect(item)} />)}
+      </div>
+      <div className="queue-group"><div className="queue-group-heading"><span>已结束</span><Tag className="queue-count">{closed.length}</Tag></div>
+        {closed.map((item) => <QueueItem key={item.id} item={item} selected={selectedId === item.id} onClick={() => onSelect(item)} />)}
       </div>
     </div>
     <div className="queue-pane-footer"><span className="queue-online-dot" />客服工作台在线<span className="queue-footer-divider">·</span>{apiMode === 'mock' ? '标签页实时同步' : '自动刷新中'}</div>
@@ -49,7 +53,7 @@ export function StaffWorkspace() {
   const fromQueue = queue.find((item) => item.id === conversationId);
   const conversation = fromQueue ?? (selectedSnapshot?.id === conversationId ? selectedSnapshot : undefined);
   const messagesQuery = useQuery({
-    queryKey: ['messages', conversationId], queryFn: () => api.listMessages(conversationId!), enabled: Boolean(conversationId),
+    queryKey: ['messages', conversationId], queryFn: () => api.listStaffMessages(conversationId!), enabled: Boolean(conversationId),
     refetchInterval: apiMode === 'remote' && conversation?.status !== 'closed' ? 2_500 : false,
   });
   const messages = messagesQuery.data ?? [];
