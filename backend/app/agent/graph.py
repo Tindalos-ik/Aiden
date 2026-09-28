@@ -40,45 +40,13 @@ _SERVICE_TOOL_BY_GOAL = {
     "create_ticket": "create_ticket",
 }
 _MIN_INTENT_CONFIDENCE = 0.55
-_ORDER_TOKEN_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_-])([A-Za-z0-9][A-Za-z0-9_-]{1,62}[A-Za-z0-9])(?![A-Za-z0-9_-])"
-)
-_ORDER_MARKER_PATTERN = re.compile(
-    r"(?:订单(?:号|编号)?|单号|order(?:\s*(?:no\.?|number))?)\s*(?:是|为|[:：#])?\s*"
-    r"([A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?)",
-    re.IGNORECASE,
-)
-_SHORT_NUMERIC_CHOICE_PATTERN = re.compile(
-    r"(?<!\d)(\d{1,2})\s*(?:还是|或者|或是|或|和|与|及|、|/|[,，]|and\b|or\b)\s*"
-    r"(\d{1,2})(?!\d)",
-    re.IGNORECASE,
-)
-_ORDER_SUFFIX_PATTERN = re.compile(r"\s*(?:号(?:订单|物流|包裹)?|订单号|单号|运单号)")
-_CALENDAR_DATE_PATTERN = re.compile(r"^(?:19|20)\d{2}[-/]\d{1,2}(?:[-/]\d{1,2})?$")
 _ORDER_LIST_HEADER = "我找到您近期的订单，请回复订单号、尾号或列表序号选择要查询的订单："
 _LEGACY_ORDER_LIST_HEADER = "我找到您近期的订单，请回复订单号或序号选择要查询的订单："
 _ORDER_LIST_ENTRY_PATTERN = re.compile(r"([1-9]\d*)\. (.+)")
 _ORDER_LIST_PRODUCT_LIMIT = 3
-_ORDER_SELECTION_ORDINAL_PATTERNS = (
-    re.compile(r"第\s*([1-5一二三四五])\s*(?:个|笔|单)?"),
-    re.compile(r"(?:我选|选择|选|序号)\s*[:：]?\s*([1-5一二三四五])\s*(?:个|笔|单)?"),
-)
-_ORDER_SUFFIX_MARKER_PATTERN = re.compile(
-    r"(?:尾号|末尾|后缀|最后(?:\s*(?:[一二三四五六七八九十\d]+)?位)?)"
-    r"\s*(?:(?:是|为|[:：])\s*)?([A-Za-z0-9][A-Za-z0-9_-]{0,15})(?![A-Za-z0-9_-])"
-)
-_ORDER_SUFFIX_QUERY_PATTERN = re.compile(
-    r"(?:查询|查看|查|看)(?:一下|下)?\s*([A-Za-z0-9][A-Za-z0-9_-]{1,3})(?![A-Za-z0-9_-])"
-)
-_CHINESE_ORDINALS = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5}
-_EXPLICIT_LATEST_PATTERN = re.compile(
-    r"(?:最近\s*(?:的\s*)?(?:一笔|一单|一个订单)|"
-    r"最新\s*(?:的\s*)?(?:一笔|一单|一个订单|订单)|"
-    r"最后\s*(?:的\s*)?(?:一笔|一单))"
-)
 
 
-# 政策按生效版本查询；售后、工单状态只读查询，人工诉求和投诉可登记工单。
+# 政策按生效版本查询；售后、工单状态只读查询，投诉和办理诉求可登记工单。
 SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切、回答简洁，不用网络烂梗。
 
 可以查询当前登录用户的订单、物流、售后申请和工单进度，检索已入库商品知识及当前生效政策，并登记待人工处理的工单。对于问候、感谢或自我介绍，可以不调用工具简短回答。你不是真人客服；登记工单不等于实时接入人工，也不等于已经创建退款退货申请。查询和登记结果必须以本轮工具返回为准。
@@ -181,79 +149,23 @@ def _latest_user_text(messages: list[BaseMessage]) -> str:
     return ""
 
 
-def _contains_exact_order_no(text: str, order_no: str) -> bool:
-    """只认可用户原文中独立出现的订单号，避免把更长编号的子串当作来源。"""
-    if not text or not order_no:
+def _contains_exact_identifier(text: str, identifier: str) -> bool:
+    """核对完整业务编号的原文来源，避免把更长编号的子串当作来源。"""
+    if not text or not identifier:
         return False
-    pattern = rf"(?<![A-Za-z0-9_-]){re.escape(order_no)}(?![A-Za-z0-9_-])"
-    return re.search(pattern, text) is not None
+    def is_identifier_char(char: str) -> bool:
+        return char.isascii() and (char.isalnum() or char in "_-")
 
-
-def _order_candidates(text: str) -> set[str]:
-    """提取常见 ASCII 订单号形态，用于在服务端发现同一请求中的多个目标。"""
-    marked_values = set(_ORDER_MARKER_PATTERN.findall(text))
-    values = set(_ORDER_TOKEN_PATTERN.findall(text)) | marked_values
-    candidates: set[str] = set()
-    for value in values:
-        if not any(char.isdigit() for char in value):
-            continue
-        if _CALENDAR_DATE_PATTERN.fullmatch(value):
-            continue
-        has_letters = any(char.isalpha() for char in value)
-        # 短纯数字仅在订单标记直接指向它时作为单号候选，避免把普通数量当成订单号。
-        if has_letters or "_" in value or "-" in value or len(value) >= 3 or value in marked_values:
-            candidates.add(value.casefold())
-
-    for match in _SHORT_NUMERIC_CHOICE_PATTERN.finditer(text):
-        # 只在订单标记或订单/物流后缀能证明这是目标选项时，加入短数字两端。
-        has_order_marker = bool(_ORDER_MARKER_PATTERN.search(text))
-        has_order_suffix = bool(_ORDER_SUFFIX_PATTERN.match(text, match.end()))
-        if has_order_marker or has_order_suffix:
-            candidates.update(value.casefold() for value in match.groups())
-    return candidates
-
-
-def _explicit_order_numbers(text: str) -> list[str]:
-    """从本轮原文保留唯一完整订单号的原始大小写，不依赖分类器抄录实体。"""
-    marked_values = set(_ORDER_MARKER_PATTERN.findall(text))
-    values = set(_ORDER_TOKEN_PATTERN.findall(text)) | marked_values
-    candidates: dict[str, str] = {}
-    for value in values:
-        if not any(char.isdigit() for char in value):
-            continue
-        if _CALENDAR_DATE_PATTERN.fullmatch(value):
-            continue
-        has_letters = any(char.isalpha() for char in value)
-        if has_letters or "_" in value or "-" in value or len(value) >= 3 or value in marked_values:
-            candidates.setdefault(value.casefold(), value)
-    return list(candidates.values())
-
-
-def _order_no_source_status(order_no: str, messages: list[BaseMessage]) -> str:
-    """验证号码来自用户原文，并拒绝无法唯一确定的多订单上下文。"""
-    user_texts = [
-        _content_as_text(message.content).strip()
-        for message in messages
-        if isinstance(message, HumanMessage)
-    ]
-    if not user_texts or not order_no or len(order_no) > 64:
-        return "missing"
-
-    current_text = user_texts[-1]
-    if _contains_exact_order_no(current_text, order_no):
-        # 本轮明确写出的目标以本轮原文为准；同句出现其他订单号时必须澄清。
-        source_texts = [current_text]
-    else:
-        # 省略订单号的指代只能回溯用户自己曾写过的号码，不信任助手生成的文本。
-        source_texts = user_texts
-        if not any(_contains_exact_order_no(text, order_no) for text in source_texts):
-            return "missing"
-
-    candidates = set().union(*(_order_candidates(text) for text in source_texts))
-    candidates.add(order_no.casefold())
-    if len(candidates) > 1:
-        return "ambiguous"
-    return "valid"
+    offset = 0
+    while (start := text.find(identifier, offset)) != -1:
+        end = start + len(identifier)
+        if (
+            (start == 0 or not is_identifier_char(text[start - 1]))
+            and (end == len(text) or not is_identifier_char(text[end]))
+        ):
+            return True
+        offset = start + 1
+    return False
 
 
 def _parse_order_list(content: str) -> list[str] | None:
@@ -321,76 +233,6 @@ def _previous_order_list(messages: list[BaseMessage]) -> list[str] | None:
     return None
 
 
-def _explicit_latest_in_current_message(messages: list[BaseMessage]) -> bool:
-    """只保留用户本轮明确说最近一笔的原有语义，不从历史或助手文字推断。"""
-    return bool(_EXPLICIT_LATEST_PATTERN.search(_latest_user_text(messages)))
-
-
-def _selection_ordinal(text: str) -> set[int]:
-    """读取常见中文或阿拉伯序号；没有命中时不猜测用户想选哪一行。"""
-    ordinals: set[int] = set()
-    for pattern in _ORDER_SELECTION_ORDINAL_PATTERNS:
-        for match in pattern.finditer(text):
-            value = match.group(1)
-            ordinal = _CHINESE_ORDINALS.get(value)
-            ordinals.add(ordinal if ordinal is not None else int(value))
-    bare_ordinal = re.fullmatch(r"\s*([1-5])\s*", text)
-    if bare_ordinal:
-        ordinals.add(int(bare_ordinal.group(1)))
-    return ordinals
-
-
-def _selected_order_from_list(text: str, order_nos: list[str]) -> str | None:
-    """将用户原文中的订单号或序号绑定到上一条列表中的唯一真实候选。"""
-    ordinals = _selection_ordinal(text)
-    ordinal_targets = {
-        order_nos[ordinal - 1]
-        for ordinal in ordinals
-        if 1 <= ordinal <= len(order_nos)
-    }
-    has_order_marker = bool(_ORDER_MARKER_PATTERN.search(text))
-    if ordinals and not has_order_marker:
-        if len(ordinals) != 1:
-            return None
-        if len(ordinal_targets) != 1:
-            return None
-        ordinal_target = next(iter(ordinal_targets))
-        explicit_id_targets = {
-            order_no
-            for order_no in order_nos
-            if _contains_exact_order_no(text, order_no)
-        }
-        if explicit_id_targets and explicit_id_targets != {ordinal_target}:
-            return None
-        return ordinal_target
-
-    matched_order_nos = {
-        order_no
-        for order_no in order_nos
-        if _contains_exact_order_no(text, order_no)
-    }
-    for marked_order_no in _ORDER_MARKER_PATTERN.findall(text):
-        matched_order_nos.update(
-            order_no
-            for order_no in order_nos
-            if marked_order_no.casefold() == order_no.casefold()
-        )
-    selected = ordinal_targets | matched_order_nos
-    return next(iter(selected)) if len(selected) == 1 else None
-
-
-def _order_suffix_from_text(text: str) -> str | None:
-    """提取用户明确表达的订单尾号；简短数字查询词按尾号处理，不按列表序号猜选。"""
-    marked_suffix = _ORDER_SUFFIX_MARKER_PATTERN.search(text)
-    if marked_suffix:
-        return marked_suffix.group(1)
-    if _ORDER_MARKER_PATTERN.search(text):
-        # “订单号01”是完整订单号表达；不将其改解释为未标注的尾号。
-        return None
-    short_query = _ORDER_SUFFIX_QUERY_PATTERN.search(text)
-    return short_query.group(1) if short_query else None
-
-
 def _orders_matching_suffix(order_nos: list[str], suffix: str) -> list[str]:
     """按不区分大小写的编号末尾片段筛选候选，不从助手文字生成编号。"""
     normalized_suffix = suffix.casefold()
@@ -426,7 +268,7 @@ def _clarification_reply(result: dict[str, Any]) -> str:
 
 
 def _structured_messages(
-    messages: list[BaseMessage], prompt: str, schema: type[SupportRequests]
+    messages: list[BaseMessage], prompt: str, schema: type[SupportRequests],
 ) -> list[BaseMessage]:
     """结构化节点只接收会话历史和本阶段 schema，不接收业务工具定义。"""
     history = [message for message in messages if not isinstance(message, SystemMessage)]
@@ -447,7 +289,7 @@ def _service_route(
     goal = data["goal"]
     for key in ("order_no", "request_no", "ticket_no"):
         value = data.get(key)
-        if not isinstance(value, str) or not _contains_exact_order_no(current_text, value):
+        if not isinstance(value, str) or not _contains_exact_identifier(current_text, value):
             data[key] = None
     data["goal"] = goal
     return {
@@ -464,16 +306,9 @@ def _service_route(
 
 def _semantic_route(
     classification: IntentClassification, result: SemanticExtraction, messages: list[BaseMessage],
-    multi_request: bool = False,
-    request_text: str | None = None,
     same_turn_order_options: list[str] | None = None,
 ) -> dict[str, Any]:
-    """把结构化语义结果收敛成服务端固定的意图与工具白名单。
-
-    显式订单号须能在用户原文中逐字核验；跨轮列表选择必须精确命中旧列表并重新查单。
-    同轮前一项已查出的本人订单列表可供后续序号选择直接使用。订单归属仍由
-    InjectedState 和 SQL 的 user_id 条件验证。
-    """
+    """依模型的引用类型选工具；服务端只核对原文来源、列表归属和用户数据范围。"""
     data = result.model_dump()
     data["intent"] = classification.intent
     data["cofidence"] = classification.cofidence
@@ -481,40 +316,39 @@ def _semantic_route(
     order_no = (entities.get("order_no") or "").strip() or None
     reference = entities.get("order_reference", "none")
     current_text = _latest_user_text(messages)
-    selection_text = request_text or current_text
     recent_options = same_turn_order_options or _previous_order_list(messages)
+    reference_quote = (entities.get("reference_quote") or "").strip()
+    quote_is_current = bool(reference_quote and reference_quote in current_text)
+    list_index = entities.get("list_index")
+    suffix_fragment = (entities.get("order_suffix") or "").strip()
     if order_no:
-        source_status = _order_no_source_status(order_no, messages)
-        if source_status == "valid" or (
-            multi_request and _contains_exact_order_no(current_text, order_no)
-        ):
+        if reference == "explicit" and _contains_exact_identifier(current_text, order_no):
             entities["order_no"] = order_no
-            reference = "explicit"
-            entities["order_reference"] = reference
-        elif reference == "listed_selection" and source_status == "missing":
+        elif reference == "listed_selection" and quote_is_current:
             listed_matches = [
                 candidate
                 for candidate in (recent_options or [])
                 if candidate.casefold() == order_no.casefold()
             ]
-            if len(listed_matches) == 1 and not _order_candidates(current_text):
-                # 订单号由语义层按商品/序号从最近列表中选出；只校验候选来源并规范回原值。
+            if len(listed_matches) == 1 and (
+                list_index is None or (
+                    recent_options is not None
+                    and 1 <= list_index <= len(recent_options)
+                    and recent_options[list_index - 1] == listed_matches[0]
+                )
+            ):
                 order_no = listed_matches[0]
                 entities["order_no"] = order_no
-                entities["order_reference"] = "listed_selection"
             else:
                 entities["order_no"] = None
                 entities["order_reference"] = "ambiguous"
                 reference = "ambiguous"
         else:
-            # 未核验号码不能成为工具参数；之后只会走安全列单或澄清分支。
             entities["order_no"] = None
-            entities["order_reference"] = "ambiguous" if source_status == "ambiguous" else "none"
+            entities["order_reference"] = "none"
             reference = entities["order_reference"]
 
-    explicitly_latest = _explicit_latest_in_current_message(messages)
-    if reference == "latest" and not explicitly_latest:
-        # latest 只能由本轮用户原文授权，不能从历史或助手回复推断。
+    if reference == "latest" and not quote_is_current:
         reference = "none"
         entities["order_reference"] = reference
 
@@ -533,12 +367,6 @@ def _semantic_route(
         base["direct_reply"] = _FALLBACK_REPLY
         return base
 
-    # 此置信度门槛先于列单路由；needs_clarification 不会屏蔽高置信度的缺目标列单。
-    # 无工具的 smalltalk 不受门槛限制；置信度只决定是否进入查询流程，不参与身份或权限判断。
-    if data["cofidence"] < _MIN_INTENT_CONFIDENCE and data["intent"] != "smalltalk":
-        base["direct_reply"] = _FALLBACK_REPLY
-        return base
-
     if data["intent"] not in {"order", "logistics"}:
         if data["intent"] == "smalltalk":
             # 简单对话无需业务工具；主模型只按 System Prompt 说明身份和已接入能力。
@@ -552,137 +380,44 @@ def _semantic_route(
         base["direct_reply"] = _FALLBACK_REPLY
         return base
 
-    current_candidates = _order_candidates(current_text)
     current_order_no = entities.get("order_no")
-    if current_order_no is None:
-        explicit_order_nos = _explicit_order_numbers(current_text)
-        if len(explicit_order_nos) == 1:
-            raw_order_no = explicit_order_nos[0]
-            if _order_no_source_status(raw_order_no, messages) == "valid":
-                current_order_no = raw_order_no
-                entities["order_no"] = raw_order_no
-                entities["order_reference"] = "explicit"
-                reference = "explicit"
-
-    # 列表回复后的语义选择、完整订单号或尾号只绑定紧邻的服务器列表；随后仍会用
-    # 本人近期订单结果复核，过期选择会重新列单，歧义引用则要求用户澄清。
-    suffix_fragment = _order_suffix_from_text(selection_text)
-    # 本轮前一项已从本人订单查询生成列表时，可直接用该结果绑定后续物流目标。
-    # 序号必须同时出现在用户原文和当前子请求中，不能由模型补全凭空引入。
-    if data["intent"] == "logistics" and same_turn_order_options and not suffix_fragment:
-        requested_ordinals = _selection_ordinal(selection_text)
-        original_ordinals = _selection_ordinal(current_text)
-        if requested_ordinals or original_ordinals:
-            if len(requested_ordinals) == 1 and requested_ordinals == original_ordinals:
-                selected_order_no = _selected_order_from_list(selection_text, same_turn_order_options)
-                if selected_order_no:
-                    entities["order_no"] = selected_order_no
-                    entities["order_reference"] = "listed_selection"
-                    base["allowed_tools"] = ["query_logistics"]
-                    base["authorized_order_no"] = selected_order_no
-                    return base
+    # 模型解释引用方式；服务端只把其候选绑定到刚展示过的真实列表。
+    selected_order_no = None
+    if suffix_fragment:
+        entities["order_no"] = None
+        current_order_no = None
+        if quote_is_current and _contains_exact_identifier(reference_quote, suffix_fragment) and recent_options:
+            matches = _orders_matching_suffix(recent_options, suffix_fragment)
+            if len(matches) == 1:
+                selected_order_no = matches[0]
+            else:
+                base["direct_reply"] = "订单尾号未能唯一匹配，请提供完整订单号或列表序号。"
+                return base
+    elif reference == "listed_selection":
+        if quote_is_current and recent_options:
+            if list_index is not None and 1 <= list_index <= len(recent_options):
+                selected_order_no = recent_options[list_index - 1]
+            elif current_order_no in recent_options:
+                selected_order_no = current_order_no
+        if selected_order_no is None:
             base["direct_reply"] = "我没能从刚才的订单列表中确定您指的订单，请回复列表中的序号。"
             return base
-    if suffix_fragment:
-        # 即使当前没有可核对的上一条列表，也不能把末尾片段当作完整订单号查询。
+
+    if selected_order_no:
         entities["order_no"] = None
-        entities["order_reference"] = "ambiguous"
-        current_order_no = None
-    if recent_options and (not explicitly_latest or suffix_fragment):
-        selected_order_no = None
-        if suffix_fragment:
-            ordinals = _selection_ordinal(selection_text)
-            if ordinals:
-                entities["order_no"] = None
-                entities["order_reference"] = "ambiguous"
-                base["direct_reply"] = "请明确说明您要查询的完整订单号、订单尾号或列表序号。"
-                return base
-            suffix_matches = _orders_matching_suffix(recent_options, suffix_fragment)
-            if len(suffix_matches) != 1:
-                entities["order_no"] = None
-                entities["order_reference"] = "ambiguous"
-                if suffix_matches:
-                    base["direct_reply"] = (
-                        f"找到多个尾号为“{suffix_fragment}”的订单，请提供完整订单号或列表序号。"
-                    )
-                else:
-                    base["direct_reply"] = (
-                        f"近期订单中没有找到尾号为“{suffix_fragment}”的订单，"
-                        "请提供完整订单号或列表序号。"
-                    )
-                return base
-            selected_order_no = suffix_matches[0]
+        if same_turn_order_options and data["intent"] == "logistics":
+            # 前一项本轮查询已验证列表属于当前用户，可直接查选中的物流。
+            base["allowed_tools"] = ["query_logistics"]
+            base["authorized_order_no"] = selected_order_no
         else:
-            parsed_selection = _selected_order_from_list(selection_text, recent_options)
-            listed_selection = (
-                current_order_no
-                if reference == "listed_selection" and current_order_no in recent_options
-                else None
-            )
-            if listed_selection and parsed_selection and listed_selection != parsed_selection:
-                entities["order_no"] = None
-                entities["order_reference"] = "ambiguous"
-                base["direct_reply"] = "我无法确定您指的是列表中的哪一笔订单，请回复完整订单号、尾号或列表序号。"
-                return base
-            selected_order_no = listed_selection or parsed_selection
-        if selected_order_no:
-            entities["order_no"] = None
-            entities["order_reference"] = "explicit"
-            base.update(
-                {
-                    "allowed_tools": ["query_order"],
-                    "order_lookup_pending": True,
-                    "order_lookup_mode": (
-                        "selection_order" if data["intent"] == "order"
-                        else "selection_logistics"
-                    ),
-                    "selection_order_no": selected_order_no,
-                }
-            )
-            return base
-
-        if reference in {"listed_selection", "ambiguous"}:
-            entities["order_no"] = None
-            entities["order_reference"] = "ambiguous"
-            base["direct_reply"] = "我没能从刚才的订单列表中唯一确定您指的订单，请回复完整订单号、尾号或列表序号。"
-            return base
-
-        # 本轮重新提供了一个可核验订单号时，按原有明确订单号语义处理；其他
-        # 无法绑定到上一条列表的答复先刷新选项，不允许模型沿历史猜选。
-        current_order_is_explicit = (
-            isinstance(current_order_no, str)
-            and _contains_exact_order_no(current_text, current_order_no)
-        )
-        if not current_order_is_explicit:
-            base.update(
-                {
-                    "allowed_tools": ["query_order"],
-                    "order_lookup_pending": True,
-                    "order_lookup_mode": (
-                        "order_list" if data["intent"] == "order"
-                        else "logistics_list"
-                    ),
-                }
-            )
-            return base
-
-    if len(current_candidates) > 1 and not (
-        multi_request and isinstance(current_order_no, str)
-        and _contains_exact_order_no(current_text, current_order_no)
-    ):
-        # 多候选不能由分类器选中其一；让当前用户从真实近期订单中选择。
-        entities["order_no"] = None
-        entities["order_reference"] = "ambiguous"
-        base.update(
-            {
+            base.update({
                 "allowed_tools": ["query_order"],
                 "order_lookup_pending": True,
                 "order_lookup_mode": (
-                    "order_list" if data["intent"] == "order"
-                    else "logistics_list"
+                    "selection_order" if data["intent"] == "order" else "selection_logistics"
                 ),
-            }
-        )
+                "selection_order_no": selected_order_no,
+            })
         return base
 
     # 目标已唯一时，needs_clarification 仍然阻止直接查单；目标缺失或不唯一时，
@@ -900,48 +635,16 @@ _REQUEST_GOALS = {
     "refund_return": {"policy", "after_sale_status", "ticket_status", "create_ticket"},
     "after_sales": {"policy", "after_sale_status", "ticket_status", "create_ticket"},
     "complaint": {"ticket_status", "create_ticket"},
-    "human": {"ticket_status", "create_ticket", "other"},
+    "human": {"ticket_status", "other"},
     "smalltalk": {"smalltalk"},
     "other": {"other"},
 }
-_WRITE_REQUEST_PATTERN = re.compile(
-    r"(?:我要|我想|请|帮我|麻烦|需要|要求|给我|替我|立即|马上|现在)\s*"
-    r"(?:发起|申请|办理|处理|登记|提交|联系|转接|找|叫|投诉|退款|退货|换货|人工|真人)"
-    r"|(?:转人工|找人工|找真人)"
-    r"|(?:^|[，,；;]\s*)投诉(?:商家|客服|配送|服务)(?![^，,；;]*(?:工单|进度|状态))"
-)
-_SEQUENTIAL_REQUEST_PATTERN = re.compile(r"(?:再|然后|另外|接着)(?:帮我|查|看|告诉|解释|说|联系|问|处理|给我)")
-_COMBINED_TARGET_PATTERN = re.compile(
-    r"物流.*(?:和|与|及|、).*订单(?:金额|状态|详情|内容)"
-    r"|订单(?:金额|状态|详情|内容).*(?:和|与|及|、).*物流"
-    r"|(?:退款|退货|售后)申请.*进度.*(?:和|与|及|、).*政策"
-    r"|工单.*进度.*(?:和|与|及|、).*人工"
-)
-
-
-def _explicit_write_request(text: str) -> bool:
-    """只接受当前动作短句，避免把查询已有投诉/人工工单误当成新登记。"""
-    for segment in re.split(r"再|然后|另外|接着|并且|同时|并|[，,；;]", text):
-        match = _WRITE_REQUEST_PATTERN.search(segment.strip())
-        if not match:
-            continue
-        if re.search(r"工单|申请", segment) and re.search(r"进度|状态|到哪|怎么样", segment):
-            continue
-        if re.search(r"之前|此前|曾经|上次|已经", segment[:match.start()]):
-            continue
-        return True
-    return False
-
 
 def _route_request(
-    request: SupportRequest, messages: list[BaseMessage], multi: bool,
+    request: SupportRequest, messages: list[BaseMessage],
     same_turn_order_options: list[str] | None = None,
 ) -> dict[str, Any]:
-    """逐项复用订单校验，并按意图与目标交集计算唯一工具权限。"""
-    if request.goal not in _REQUEST_GOALS[request.intent] or (
-        request.cofidence < _MIN_INTENT_CONFIDENCE and request.intent != "smalltalk"
-    ):
-        return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
+    """将已核对的意图目标映射为唯一工具权限。"""
     if request.goal == "other":
         return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
     classification = IntentClassification(intent=request.intent, cofidence=request.cofidence)
@@ -950,15 +653,9 @@ def _route_request(
             "completed_question", "entities", "needs_clarification", "clarification_question",
         }))
         return _semantic_route(
-            classification, extraction, messages, multi_request=multi,
-            request_text=request.completed_question,
+            classification, extraction, messages,
             same_turn_order_options=same_turn_order_options,
         )
-    if request.goal == "create_ticket" and not (
-        _explicit_write_request(_latest_user_text(messages))
-        and _explicit_write_request(request.completed_question)
-    ):
-        return {"allowed_tools": [], "direct_reply": "请明确说明是否需要我登记人工处理工单。"}
     service = ServiceExtraction(
         goal=request.goal,
         completed_question=request.completed_question,
@@ -994,7 +691,7 @@ def build_support_graph():
     if thinking_body:
         kwargs["extra_body"] = thinking_body
     model = ChatOpenAI(**kwargs)
-    # 分类与补全请求均使用网关 JSON 模式，Pydantic 再校验枚举、字段和数值范围。
+    # 单次拆分与分类使用 JSON 模式，Pydantic 再校验枚举、字段和数值范围。
     json_model = model.bind(response_format={"type": "json_object"})
     # 分开的 ToolNode 让一次通过校验的调用只能到达对应工具。
     tool_nodes = {
@@ -1015,7 +712,7 @@ def build_support_graph():
         return {"messages": [SystemMessage(content=SYSTEM_PROMPT), *history]}
 
     async def recognize_intent(state: SupportState) -> dict[str, Any]:
-        """一次识别有序请求；整个列表通过 Pydantic 校验后才进入路由。"""
+        """一次模型调用拆分并分类；解析失败时关闭工具。"""
         try:
             response = await json_model.ainvoke(
                 _structured_messages(
@@ -1034,19 +731,6 @@ def build_support_graph():
                 "requests": [], "request_index": 0, "request_results": [],
                 "direct_reply": _TOO_MANY_REQUESTS if too_many else _FALLBACK_REPLY,
             }
-        original = _latest_user_text(state["messages"])
-        sequential_count = sum(
-            1 for match in _SEQUENTIAL_REQUEST_PATTERN.finditer(original)
-            if re.search(r"查|看|告诉|解释|联系|处理|申请|办理|政策|物流|订单|工单", original[:match.start()])
-        )
-        if (
-            sequential_count + 1 > len(requests.requests)
-            or (len(requests.requests) == 1 and _COMBINED_TARGET_PATTERN.search(original))
-        ):
-            return {
-                "requests": [], "request_index": 0, "request_results": [],
-                "direct_reply": "这条消息似乎包含多项请求，我没能完整拆分。请分开描述或分批发送，我会逐项处理。",
-            }
         return {
             "requests": [item.model_dump() for item in requests.requests],
             "request_index": 0, "request_results": [], "query_cache": [],
@@ -1054,7 +738,7 @@ def build_support_graph():
         }
 
     def route_intent(state: SupportState) -> dict[str, Any]:
-        """只为当前一项计算权限，上一项的工具结果不会扩大下一项白名单。"""
+        """按模型给出的目标路由；写操作只核对动作原话确实来自本轮用户。"""
         requests = state.get("requests", [])
         index = state.get("request_index", 0)
         if index >= len(requests):
@@ -1063,10 +747,36 @@ def build_support_graph():
             request = SupportRequest.model_validate(requests[index])
         except (TypeError, ValidationError):
             return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
-        if request.intent == "human" and request.goal == "other":
-            # 意图分流已经确认实时真人诉求；最终回答入库时才提交会话状态。
-            return {"allowed_tools": [], "direct_reply": "已进入人工客服队列，客服接单后会在本会话回复。",
-                    "handoff_requested": True, "request_tool_start": len(state.get("messages", [])), "citations": []}
+        if request.goal not in _REQUEST_GOALS[request.intent] or (
+            request.cofidence < _MIN_INTENT_CONFIDENCE and request.intent != "smalltalk"
+        ):
+            return {
+                "allowed_tools": [], "direct_reply": _FALLBACK_REPLY,
+                "handoff_requested": False,
+                "request_tool_start": len(state.get("messages", [])), "citations": [],
+            }
+        if request.goal == "create_ticket" or (request.intent == "human" and request.goal == "other"):
+            quote = request.action_quote.strip() if request.action_quote else ""
+            if not quote or quote not in _latest_user_text(state.get("messages", [])):
+                return {
+                    "allowed_tools": [],
+                    "direct_reply": (
+                        "请明确说明是否需要转接人工客服。" if request.intent == "human"
+                        else "请明确说明是否需要我登记人工处理工单。"
+                    ),
+                    "handoff_requested": False,
+                    "request_tool_start": len(state.get("messages", [])),
+                    "citations": [],
+                }
+            if request.intent == "human" and request.goal == "other":
+                # 真人接入只修改会话状态，事务在 save_answer 中完成。
+                return {
+                    "allowed_tools": [],
+                    "direct_reply": "已进入人工客服队列，客服接单后会在本会话回复。",
+                    "handoff_requested": True,
+                    "request_tool_start": len(state.get("messages", [])),
+                    "citations": [],
+                }
         if request.goal == "create_ticket" and any(
             cached.get("name") == "create_ticket" for cached in state.get("query_cache", [])
         ):
@@ -1082,7 +792,7 @@ def build_support_graph():
             if (options := _parse_order_list(result.get("direct_reply", ""))) is not None
         ), None)
         routed = _route_request(
-            request, state.get("messages", []), len(requests) > 1,
+            request, state.get("messages", []),
             same_turn_order_options=same_turn_order_options,
         )
         routed["request_tool_start"] = len(state.get("messages", []))
@@ -1136,7 +846,8 @@ def build_support_graph():
             if issue_type not in {"refund_return", "after_sales", "complaint", "human"}:
                 return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
             args["issue_type"] = issue_type
-            args["description"] = _latest_user_text(state.get("messages", []))
+            request_index = state.get("request_index", 0)
+            args["description"] = state["requests"][request_index]["action_quote"]
 
         call = {
             "name": name,
@@ -1242,6 +953,27 @@ def build_support_graph():
                     latest["name"] == "search_faq" and not payload.get("results")
                 ):
                     reply = str(payload.get("message") or "当前没有查到这项请求的结果。")
+            if not reply and item.get("goal") == "smalltalk":
+                # 闲聊没有工具证据；沿用近期对话语境，但只回答当前这一项。
+                conversation = [
+                    message for message in state.get("messages", [])
+                    if isinstance(message, (HumanMessage, AIMessage))
+                    and not (isinstance(message, AIMessage) and message.tool_calls)
+                ]
+                if conversation and isinstance(conversation[-1], HumanMessage):
+                    conversation.pop()  # 当前完整用户消息由下方的单项问题替代。
+                response = await model.ainvoke([
+                    SystemMessage(content=(
+                        SYSTEM_PROMPT + "\n当前只回答一项闲聊。自然、简短地回应问候、感谢、"
+                        "自我介绍或能力范围问题；无需工具证据，不要声称查到了订单、"
+                        "政策或其他业务结果，也不要编造未接入的能力。"
+                    )),
+                    *conversation[-6:],
+                    HumanMessage(content=json.dumps({
+                        "question": item["question"], "evidence": [],
+                    }, ensure_ascii=False)),
+                ])
+                reply = _content_as_text(response.content).strip()
             if not reply:
                 evidence = []
                 local_citations = item.get("citations", [])
@@ -1346,6 +1078,7 @@ def build_support_graph():
             })
         result = {
             "question": requests[index]["completed_question"],
+            "goal": requests[index]["goal"],
             "direct_reply": state.get("direct_reply", ""),
             "tools": tool_results,
             "citations": state.get("citations", []),

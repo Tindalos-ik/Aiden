@@ -31,6 +31,18 @@ class RecognizedEntities(BaseModel):
             "表示用户要求先从本人订单中确定；ambiguous 表示多个可能订单；none 表示无订单指代。"
         )
     )
+    reference_quote: str | None = Field(
+        default=None, max_length=120,
+        description="选择列表、最近一笔或尾号时，逐字摘录本轮用户表达该引用的短句。",
+    )
+    list_index: int | None = Field(
+        default=None, ge=1, le=5,
+        description="用户按列表序号选择时对应的序号；其他情况为 null。",
+    )
+    order_suffix: str | None = Field(
+        default=None, max_length=16,
+        description="用户只提供订单尾号时填写尾号原文；其他情况为 null。",
+    )
 
 
 class IntentClassification(BaseModel):
@@ -87,6 +99,10 @@ class SupportRequest(BaseModel):
     entities: RecognizedEntities
     request_no: str | None = Field(default=None, max_length=64)
     ticket_no: str | None = Field(default=None, max_length=64)
+    action_quote: str | None = Field(
+        max_length=240,
+        description="仅新建工单或转人工时，逐字摘录本轮用户要求该操作的原话；其他请求为 null。",
+    )
     needs_clarification: bool
     clarification_question: str | None = Field(default=None, max_length=240)
 
@@ -100,13 +116,19 @@ class SupportRequests(BaseModel):
 
 MULTI_REQUEST_PROMPT = """你是电商客服请求拆分器。按用户本轮表达顺序，将每个能独立回答的诉求拆成 requests 列表，最多四项。重复的同一诉求只保留一项；超过四项时不要省略，输出超过四项由服务端要求用户分批发送。
 
-每项给出九类 intent、处理目标 goal、置信度 cofidence、独立补全后的 completed_question、entities.order_no/order_reference、request_no、ticket_no、needs_clarification 和 clarification_question。只能从固定枚举选择，不能输出工具名、用户 ID 或其他字段。
+每项给出九类 intent、处理目标 goal、置信度 cofidence、独立补全后的 completed_question、entities.order_no/order_reference/reference_quote/list_index/order_suffix、request_no、ticket_no、action_quote、needs_clarification 和 clarification_question。只能从固定枚举选择，不能输出工具名、用户 ID 或其他字段。
 
-goal 对应：order 查订单；logistics 查物流；product 查商品知识；policy 查当前政策；after_sale_status 查已提交售后申请；ticket_status 查已有工单；create_ticket 登记用户明确要求的投诉处理或办理售后；smalltalk 闲聊；other 无法判断。退款退货或售后意图可对应 policy、after_sale_status、ticket_status、create_ticket；明确要求“找真人/转人工/联系人工客服”时 intent 选 human、goal 选 other，由服务端转入实时人工队列；只有明确登记处理工单时才选 create_ticket。投诉可以提供转人工选择，不能仅凭“投诉”一词自动转接。查询申请进度、政策、工单进度本身不意味着要登记工单。
+goal 对应：order 查订单；logistics 查物流；product 查商品知识；policy 查当前政策；after_sale_status 查已提交售后申请；ticket_status 查已有工单；create_ticket 登记用户明确要求的投诉处理或办理售后；smalltalk 闲聊；other 无法判断。退款退货或售后意图可对应 policy、after_sale_status、ticket_status、create_ticket；要办理尚未提交的退款、退货或换货选 create_ticket，只询问规则或条件才选 policy，查询已提交申请的进度选 after_sale_status。明确要求“找真人/转人工/联系人工客服”时 intent 选 human、goal 选 other，由服务端转入实时人工队列；只有明确登记处理工单时才选 create_ticket。投诉可以提供转人工选择，不能仅凭“投诉”一词自动转接。查询申请进度、政策、工单进度本身不意味着要登记工单。
 
-“查订单 TEST-001 的退货申请进度，再告诉我退货政策”是两项：after_sale_status 和 policy。“查订单 TEST-001 的物流和订单金额”是两项：logistics 和 order。“查我的工单进度，再帮我联系人工”是两项：ticket_status 和 human/other。若后一项通过列表序号引用前一项要展示的订单，按顺序分别输出列单和后续查询；每项的 completed_question 只保留自己的诉求，并在后续查询中保留用户说的序号，不提前猜订单号。若一项缺订单号，仍将其他可处理项独立输出。
+纯问候、感谢、告别、询问客服身份或能力归 smalltalk，goal 也填 smalltalk，needs_clarification 为 false；没有业务工具目标不等于 other。若闲聊和业务请求同时出现，分别输出，不要省略任一项。
 
-只从本轮用户原文抄录完整申请号、工单号。订单号只可来自本轮原文或最近一条服务端订单列表的唯一选择；列表序号或商品名选择用 listed_selection。latest 仅限本轮明确说最近一笔；缺失时填 null。补全问题只写该项诉求，不合并其他请求。低置信度项也必须保留并标为 other 或给低 cofidence，不可悄悄省略。只输出合法 JSON。"""
+用户已明确提出退款退货等办理方向时，create_ticket 可用用户原话作为待处理工单描述；仅缺订单号不应标记 needs_clarification。对确实不知道要办理什么的请求再要求澄清。
+
+只有用户明确要求本轮新建工单或进入人工队列时，才填写 action_quote：从本轮用户消息逐字摘录表达该操作的完整短句。查询政策、已有申请或工单进度时填 null；不能把另一项请求的操作短句借给当前项。
+
+按可独立完成的目标拆分：同一消息中的订单、物流、申请进度、政策、工单进度及人工诉求分别保留。若后一项通过列表序号引用前一项要展示的订单，按顺序分别输出列单和后续查询；该项填 listed_selection、list_index 和 reference_quote，order_no 留空。每项的 completed_question 只保留自己的诉求。若一项缺订单号，仍将其他可处理项独立输出。
+
+只从本轮用户原文抄录完整申请号、工单号。订单号只可来自本轮原文或最近一条服务端订单列表的唯一选择；列表序号或商品名选择用 listed_selection，并摘录对应的 reference_quote。latest 仅限本轮明确说最近一笔，须摘录 reference_quote。只给订单尾号时，填写 order_suffix 和 reference_quote，不要当成完整订单号或列表序号。其他情况这些辅助字段填 null。补全问题只写该项诉求，不合并其他请求。低置信度项也必须保留并标为 other 或给低 cofidence，不可悄悄省略。只输出合法 JSON。"""
 
 INTENT_CLASSIFICATION_PROMPT = """你是电商客服意图分类器。结合当前用户消息和必要的近期上下文，做一道单选题，只选一个最主要的意图：
 A. logistics：物流，包裹位置、配送、运单及签收。

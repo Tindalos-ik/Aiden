@@ -10,12 +10,13 @@ from langchain_core.messages import AIMessage, ToolMessage
 from app.agent import graph as support_graph
 
 
-def request(intent, goal, question, order_no=None, confidence=0.98, clarify=False):
+def request(intent, goal, question, order_no=None, confidence=0.98, clarify=False,
+            action_quote=None):
     return {
         "intent": intent, "goal": goal, "cofidence": confidence,
         "completed_question": question,
         "entities": {"order_no": order_no, "order_reference": "explicit" if order_no else "none"},
-        "request_no": None, "ticket_no": None,
+        "request_no": None, "ticket_no": None, "action_quote": action_quote,
         "needs_clarification": clarify, "clarification_question": None,
     }
 
@@ -109,14 +110,13 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         result, calls = await self.run_case(
             "查我的工单进度，再帮我联系人工",
             [request("human", "ticket_status", "查询已有工单进度"),
-             request("human", "create_ticket", "帮我联系人工")],
-            {"query_ticket": {"status": "error"},
-             "create_ticket": {"status": "ok", "ticket_no": "T-1", "ticket_status": "open"}},
+             request("human", "other", "帮我联系人工", action_quote="帮我联系人工")],
+            {"query_ticket": {"status": "error"}},
         )
-        self.assertEqual([name for name, _ in calls], ["query_ticket", "create_ticket"])
+        self.assertEqual([name for name, _ in calls], ["query_ticket"])
         self.assertIn("查询暂时失败", result["answer"])
-        self.assertIn("T-1", result["answer"])
-        self.assertIn("不是实时接通", result["answer"])
+        self.assertIn("人工客服队列", result["answer"])
+        self.assertTrue(result["handoff_required"])
 
     async def test_missing_target_does_not_block_policy_or_create_ticket(self):
         result, calls = await self.run_case(
@@ -148,9 +148,9 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_low_confidence_and_duplicate_write(self):
         result, calls = await self.run_case(
-            "帮我联系人工，再帮我联系人工；那个也查一下",
-            [request("human", "create_ticket", "帮我联系人工"),
-             request("human", "create_ticket", "帮我联系人工"),
+            "我要退款，再帮我登记退款处理；那个也查一下",
+            [request("refund_return", "create_ticket", "我要退款", action_quote="我要退款"),
+             request("refund_return", "create_ticket", "登记退款处理", action_quote="登记退款处理"),
              request("other", "other", "那个也查一下", confidence=0.2)],
             {"create_ticket": {"status": "ok", "ticket_no": "T-1"}},
         )
@@ -165,14 +165,6 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
             {"query_order": {"status": "ok", "orders": []}},
         )
         self.assertEqual(calls, [("query_order", {})])
-
-    async def test_incomplete_split_does_not_drop_second_request(self):
-        result, calls = await self.run_case(
-            "查订单 TEST-001 的退货申请进度，再告诉我退货政策",
-            [request("refund_return", "after_sale_status", "查询退货申请进度", "TEST-001")],
-        )
-        self.assertEqual(calls, [])
-        self.assertIn("没能完整拆分", result["answer"])
 
     async def test_request_limit_closes_tools(self):
         result, calls = await self.run_case(
@@ -202,6 +194,8 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         previous = f"【1】 已回答政策。\n【2】 {support_graph._ORDER_LIST_HEADER}\n1. TEST-001 — 猫粮 ×1"
         item = request("logistics", "logistics", "查询列表第一个订单的物流", "TEST-001")
         item["entities"]["order_reference"] = "listed_selection"
+        item["entities"]["reference_quote"] = "第一个"
+        item["entities"]["list_index"] = 1
         _, calls = await self.run_case(
             "第一个的物流", [item],
             {"query_order": {"status": "ok", "orders": [{"order_no": "TEST-001"}]},
