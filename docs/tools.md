@@ -16,7 +16,13 @@
 
 `query_order`、`query_logistics`、`query_after_sale`、`query_ticket` 的 `user_id` 从已认证的 LangGraph 状态注入，模型不能填写。`create_ticket` 还注入 `conversation_id` 和 `assistant_message_id`。`query_policy` 和 `search_faq` 读取公共内容，不按用户过滤。工具实现在 [`services/tools`](../backend/app/services/tools/)，订单、售后、政策和工单查询位于 [`queries.py`](../backend/app/persistence/mysql/queries.py)，工单写入位于 [`ticket_write.py`](../backend/app/persistence/mysql/ticket_write.py)。
 
-## 九类意图如何处理
+## 单轮多请求如何处理
+
+`recognize_intent` 一次把当前消息拆成按用户表达顺序排列的 `requests`，每项都有固定意图、处理目标、独立补全问题、业务编号、置信度和澄清状态。Pydantic 校验字段、枚举和最多四项的上限；超出上限会要求用户分批发送。不能识别的单项保留在答复中并要求补充，其他项继续处理。相同诉求即使被重复识别，相同查询参数的只读工具调用也只执行一次。
+
+图按列表顺序逐项路由和执行：订单/物流先做原有订单号来源或本人近期订单列表核验，再执行当前项获准工具；售后申请、政策、工单和商品知识可在同一轮分别查询。每项工具结束后收回权限，再处理下一项。某项缺编号、查无结果、工具报错或知识证据不足，不中止其他独立请求。最终答复按原顺序逐项给出结果或明确的澄清、空结果、失败说明；商品知识仍校验引用编号。
+
+## 九类意图与目标
 
 | 意图 | 当前处理方式 |
 | --- | --- |
@@ -30,7 +36,7 @@
 | `smalltalk` | 直接简短回答，不调用业务工具 |
 | `other` 或低置信度 | 说明支持的服务，请用户补充问题，不开放工具 |
 
-分类器只返回九类中的意图；服务请求识别器只提取受限目标和用户明确给出的业务编号。`route_intent` 根据意图和目标在服务端计算单次工具白名单，`dispatch_tool_call` 再构造调用参数。模型不能提交工具名、扩大白名单或改变查询身份。工具结果返回后才生成最终回答；只有最终回答写入助手消息。会话响应沿用 `start`、`delta`、`done`、`error` 等 SSE 事件，知识引用另由 `citations` 事件传给前端。
+拆分器只能返回固定意图和目标，不能指定工具名或用户身份。`route_intent` 对每项检查意图与目标的允许组合，在服务端计算单次工具白名单；`dispatch_tool_call` 构造参数并按工具名与参数复用本轮相同查询结果。`create_ticket` 仅在用户原文明确要求投诉处理、人工协助或办理售后时开放，同一轮至多登记一项；客户端同一消息重试由助手消息 ID 幂等重放。多个查询不会自动触发写入。只有最终回答写入助手消息；SSE 仍使用 `start`、`delta`、`done`、`error`，知识引用另用 `citations` 事件。
 
 ## 数据和操作边界
 

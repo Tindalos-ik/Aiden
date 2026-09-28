@@ -24,8 +24,15 @@ class SupportState(TypedDict, total=False):
     low_confidence: dict[str, str]
     # 已认证用户 ID，供上下文查询和写回答时做归属校验。
     user_id: str
-    # 语义识别节点的结构化字段；只保留意图、补全问题、实体、澄清标记和置信度。
+    # 当前请求的受限语义字段；完整有序列表与已完成结果分开保存。
     semantic_result: dict[str, object]
+    requests: list[dict[str, object]]
+    request_index: int
+    request_results: list[dict[str, object]]
+    request_tool_start: int
+    query_cache: list[dict[str, str]]
+    pending_cache_key: str
+    cached_tool_hit: bool
     # 服务端依据固定意图集合选出的工具名；严禁直接采用模型返回的工具名。
     allowed_tools: list[str]
     # 传给最终回答模型的补全问题，不改写数据库中的原始用户消息。

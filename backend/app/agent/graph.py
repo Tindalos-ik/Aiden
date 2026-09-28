@@ -16,13 +16,14 @@ from langgraph.prebuilt import ToolNode
 from pydantic import ValidationError
 
 from app.agent.intent import (
-    INTENT_CLASSIFICATION_PROMPT,
-    SEMANTIC_EXTRACTION_PROMPT,
+    MULTI_REQUEST_PROMPT,
     IntentClassification,
+    SupportRequest,
+    SupportRequests,
     SemanticExtraction,
 )
 from app.agent.state import SupportState
-from app.agent.service_intent import SERVICE_EXTRACTION_PROMPT, ServiceExtraction
+from app.agent.service_intent import ServiceExtraction
 from app.config.rag import rag_settings
 from app.config.settings import settings
 from app.persistence.mysql.chat import finish_assistant_message, recent_messages
@@ -98,6 +99,7 @@ SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切�
 _FALLBACK_REPLY = "我还没能确定您需要哪项服务。请说明要查询订单、物流、售后申请、政策或工单，或说明需要人工协助的具体问题。"
 _TOOL_REJECTED_REPLY = "抱歉，我暂时无法安全完成这项操作。请重新说明要查询或登记的问题。"
 _KNOWLEDGE_REFUSAL = "抱歉，现有知识库证据不足，我暂时无法核实这个问题的答案。"
+_TOO_MANY_REQUESTS = "这条消息包含超过四项请求。请分批发送，每次最多四项，我会逐项处理。"
 
 
 def model_configuration_error() -> str | None:
@@ -136,9 +138,9 @@ def _content_as_text(content: Any) -> str:
     return ""
 
 
-def _faq_tool_payload(messages: list[BaseMessage]) -> dict[str, Any] | None:
+def _faq_tool_payload(messages: list[BaseMessage], start: int = 0) -> dict[str, Any] | None:
     """只读取本轮 search_faq 的工具结果；历史消息不会加载为 ToolMessage。"""
-    for message in reversed(messages):
+    for message in reversed(messages[start:]):
         if isinstance(message, ToolMessage) and message.name == "search_faq":
             try:
                 payload = json.loads(_content_as_text(message.content))
@@ -257,6 +259,17 @@ def _order_no_source_status(order_no: str, messages: list[BaseMessage]) -> str:
 def _parse_order_list(content: str) -> list[str] | None:
     """只接受本服务端固定格式的最近订单列表，避免把任意助手文字当成选择授权。"""
     lines = content.splitlines()
+    embedded = next((
+        index for index, line in enumerate(lines)
+        if re.fullmatch(r"【[1-4]】\s*" + re.escape(_ORDER_LIST_HEADER), line)
+    ), None)
+    if embedded is not None:
+        lines = lines[embedded:]
+        lines[0] = _ORDER_LIST_HEADER
+        lines = lines[:next(
+            (index for index, line in enumerate(lines[1:], 1) if re.match(r"【[1-4]】\s*", line)),
+            len(lines),
+        )]
     if (
         not lines
         or lines[0] not in {_ORDER_LIST_HEADER, _LEGACY_ORDER_LIST_HEADER}
@@ -413,7 +426,7 @@ def _clarification_reply(result: dict[str, Any]) -> str:
 
 
 def _structured_messages(
-    messages: list[BaseMessage], prompt: str, schema: type[IntentClassification] | type[SemanticExtraction]
+    messages: list[BaseMessage], prompt: str, schema: type[SupportRequests]
 ) -> list[BaseMessage]:
     """结构化节点只接收会话历史和本阶段 schema，不接收业务工具定义。"""
     history = [message for message in messages if not isinstance(message, SystemMessage)]
@@ -432,13 +445,9 @@ def _service_route(
     current_text = _latest_user_text(messages)
     data = result.model_dump()
     goal = data["goal"]
-    if classification.intent in {"complaint", "human"} and goal not in {
-        "ticket_status", "create_ticket"
-    }:
-        goal = "create_ticket"
     for key in ("order_no", "request_no", "ticket_no"):
         value = data.get(key)
-        if not isinstance(value, str) or value.casefold() not in current_text.casefold():
+        if not isinstance(value, str) or not _contains_exact_order_no(current_text, value):
             data[key] = None
     data["goal"] = goal
     return {
@@ -454,7 +463,8 @@ def _service_route(
 
 
 def _semantic_route(
-    classification: IntentClassification, result: SemanticExtraction, messages: list[BaseMessage]
+    classification: IntentClassification, result: SemanticExtraction, messages: list[BaseMessage],
+    multi_request: bool = False,
 ) -> dict[str, Any]:
     """把结构化语义结果收敛成服务端固定的意图与工具白名单。
 
@@ -471,7 +481,9 @@ def _semantic_route(
     recent_options = _previous_order_list(messages)
     if order_no:
         source_status = _order_no_source_status(order_no, messages)
-        if source_status == "valid":
+        if source_status == "valid" or (
+            multi_request and _contains_exact_order_no(current_text, order_no)
+        ):
             entities["order_no"] = order_no
             reference = "explicit"
             entities["order_reference"] = reference
@@ -519,7 +531,7 @@ def _semantic_route(
 
     # 此置信度门槛先于列单路由；needs_clarification 不会屏蔽高置信度的缺目标列单。
     # 无工具的 smalltalk 不受门槛限制；置信度只决定是否进入查询流程，不参与身份或权限判断。
-    if data["cofidence"] < _MIN_INTENT_CONFIDENCE:
+    if data["cofidence"] < _MIN_INTENT_CONFIDENCE and data["intent"] != "smalltalk":
         base["direct_reply"] = _FALLBACK_REPLY
         return base
 
@@ -634,7 +646,10 @@ def _semantic_route(
             )
             return base
 
-    if len(current_candidates) > 1:
+    if len(current_candidates) > 1 and not (
+        multi_request and isinstance(current_order_no, str)
+        and _contains_exact_order_no(current_text, current_order_no)
+    ):
         # 多候选不能由分类器选中其一；让当前用户从真实近期订单中选择。
         entities["order_no"] = None
         entities["order_reference"] = "ambiguous"
@@ -858,6 +873,79 @@ def _order_items_summary(order: dict[str, Any]) -> str:
     return "、".join(displayed) if displayed else "商品明细暂缺"
 
 
+_REQUEST_GOALS = {
+    "order": {"order"},
+    "logistics": {"logistics"},
+    "product": {"product"},
+    "refund_return": {"policy", "after_sale_status", "ticket_status", "create_ticket"},
+    "after_sales": {"policy", "after_sale_status", "ticket_status", "create_ticket"},
+    "complaint": {"ticket_status", "create_ticket"},
+    "human": {"ticket_status", "create_ticket"},
+    "smalltalk": {"smalltalk"},
+    "other": {"other"},
+}
+_WRITE_REQUEST_PATTERN = re.compile(
+    r"(?:我要|我想|请|帮我|麻烦|需要|要求|给我|替我|立即|马上|现在)\s*"
+    r"(?:发起|申请|办理|处理|登记|提交|联系|转接|找|叫|投诉|退款|退货|换货|人工|真人)"
+    r"|(?:转人工|找人工|找真人)"
+    r"|(?:^|[，,；;]\s*)投诉(?:商家|客服|配送|服务)(?![^，,；;]*(?:工单|进度|状态))"
+)
+_SEQUENTIAL_REQUEST_PATTERN = re.compile(r"(?:再|然后|另外|接着)(?:帮我|查|看|告诉|解释|说|联系|问|处理|给我)")
+_COMBINED_TARGET_PATTERN = re.compile(
+    r"物流.*(?:和|与|及|、).*订单(?:金额|状态|详情|内容)"
+    r"|订单(?:金额|状态|详情|内容).*(?:和|与|及|、).*物流"
+    r"|(?:退款|退货|售后)申请.*进度.*(?:和|与|及|、).*政策"
+    r"|工单.*进度.*(?:和|与|及|、).*人工"
+)
+
+
+def _explicit_write_request(text: str) -> bool:
+    """只接受当前动作短句，避免把查询已有投诉/人工工单误当成新登记。"""
+    for segment in re.split(r"再|然后|另外|接着|并且|同时|并|[，,；;]", text):
+        match = _WRITE_REQUEST_PATTERN.search(segment.strip())
+        if not match:
+            continue
+        if re.search(r"工单|申请", segment) and re.search(r"进度|状态|到哪|怎么样", segment):
+            continue
+        if re.search(r"之前|此前|曾经|上次|已经", segment[:match.start()]):
+            continue
+        return True
+    return False
+
+
+def _route_request(request: SupportRequest, messages: list[BaseMessage], multi: bool) -> dict[str, Any]:
+    """逐项复用订单校验，并按意图与目标交集计算唯一工具权限。"""
+    if request.goal not in _REQUEST_GOALS[request.intent] or (
+        request.cofidence < _MIN_INTENT_CONFIDENCE and request.intent != "smalltalk"
+    ):
+        return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
+    if request.goal == "other":
+        return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
+    classification = IntentClassification(intent=request.intent, cofidence=request.cofidence)
+    if request.goal in {"order", "logistics", "product", "smalltalk"}:
+        extraction = SemanticExtraction.model_validate(request.model_dump(include={
+            "completed_question", "entities", "needs_clarification", "clarification_question",
+        }))
+        return _semantic_route(classification, extraction, messages, multi_request=multi)
+    if request.goal == "create_ticket" and not (
+        _explicit_write_request(_latest_user_text(messages))
+        and _explicit_write_request(request.completed_question)
+    ):
+        return {"allowed_tools": [], "direct_reply": "请明确说明是否需要我登记人工处理工单。"}
+    service = ServiceExtraction(
+        goal=request.goal,
+        completed_question=request.completed_question,
+        order_no=request.entities.order_no,
+        request_no=request.request_no,
+        ticket_no=request.ticket_no,
+    )
+    routed = _service_route(classification, service, messages)
+    if request.needs_clarification and request.goal in {"after_sale_status", "create_ticket"}:
+        routed["allowed_tools"] = []
+        routed["direct_reply"] = "请补充这项请求所需的完整业务编号或具体问题。"
+    return routed
+
+
 def build_support_graph():
     """构建显式识别、服务端路由、白名单工具调用和最终回答保存流程。"""
     kwargs: dict[str, Any] = {
@@ -900,117 +988,68 @@ def build_support_graph():
         return {"messages": [SystemMessage(content=SYSTEM_PROMPT), *history]}
 
     async def recognize_intent(state: SupportState) -> dict[str, Any]:
-        """先做九选一分类，再按查询类型补全订单目标或服务动作。"""
+        """一次识别有序请求；整个列表通过 Pydantic 校验后才进入路由。"""
         try:
             response = await json_model.ainvoke(
                 _structured_messages(
-                    state["messages"], INTENT_CLASSIFICATION_PROMPT, IntentClassification
+                    state["messages"], MULTI_REQUEST_PROMPT, SupportRequests
                 )
             )
-            classification = IntentClassification.model_validate_json(
-                _content_as_text(response.content)
-            )
+            requests = SupportRequests.model_validate_json(_content_as_text(response.content))
         except (TypeError, ValueError):
-            # JSON 损坏、枚举越界或字段缺失时关闭所有工具。
+            # 超限与格式错误都关闭工具；超限时明确要求分批，避免遗漏请求。
+            try:
+                raw = json.loads(_content_as_text(response.content))
+                too_many = isinstance(raw, dict) and isinstance(raw.get("requests"), list) and len(raw["requests"]) > 4
+            except (NameError, TypeError, ValueError):
+                too_many = False
             return {
-                "semantic_result": {},
-                "completed_question": _latest_user_text(state["messages"]),
-                "allowed_tools": [],
-                "direct_reply": _FALLBACK_REPLY,
+                "requests": [], "request_index": 0, "request_results": [],
+                "direct_reply": _TOO_MANY_REQUESTS if too_many else _FALLBACK_REPLY,
             }
-        if classification.intent == "other" or (
-            classification.cofidence < _MIN_INTENT_CONFIDENCE
-            and classification.intent != "smalltalk"
+        original = _latest_user_text(state["messages"])
+        sequential_count = sum(
+            1 for match in _SEQUENTIAL_REQUEST_PATTERN.finditer(original)
+            if re.search(r"查|看|告诉|解释|联系|处理|申请|办理|政策|物流|订单|工单", original[:match.start()])
+        )
+        if (
+            sequential_count + 1 > len(requests.requests)
+            or (len(requests.requests) == 1 and _COMBINED_TARGET_PATTERN.search(original))
         ):
             return {
-                "semantic_result": {"classification": classification.model_dump()},
-                "completed_question": _latest_user_text(state["messages"]),
-                "allowed_tools": [],
-                "direct_reply": _FALLBACK_REPLY,
-            }
-        if classification.intent == "smalltalk":
-            return {
-                "semantic_result": {"classification": classification.model_dump()},
-                "completed_question": _latest_user_text(state["messages"]),
-                "allowed_tools": [],
-            }
-        if classification.intent in {"refund_return", "after_sales", "complaint", "human"}:
-            try:
-                response = await json_model.ainvoke(
-                    _structured_messages(
-                        state["messages"], SERVICE_EXTRACTION_PROMPT, ServiceExtraction
-                    )
-                )
-                service = ServiceExtraction.model_validate_json(
-                    _content_as_text(response.content)
-                )
-            except (TypeError, ValueError):
-                return {
-                    "semantic_result": {},
-                    "completed_question": _latest_user_text(state["messages"]),
-                    "allowed_tools": [],
-                    "direct_reply": _FALLBACK_REPLY,
-                }
-            return {
-                "semantic_result": {
-                    "classification": classification.model_dump(),
-                    "service": service.model_dump(),
-                }
-            }
-        try:
-            response = await json_model.ainvoke(
-                _structured_messages(
-                    state["messages"], SEMANTIC_EXTRACTION_PROMPT, SemanticExtraction
-                )
-            )
-            extraction = SemanticExtraction.model_validate_json(
-                _content_as_text(response.content)
-            )
-        except (TypeError, ValueError):
-            return {
-                "semantic_result": {},
-                "completed_question": _latest_user_text(state["messages"]),
-                "allowed_tools": [],
-                "direct_reply": _FALLBACK_REPLY,
+                "requests": [], "request_index": 0, "request_results": [],
+                "direct_reply": "这条消息似乎包含多项请求，我没能完整拆分。请分开描述或分批发送，我会逐项处理。",
             }
         return {
-            "semantic_result": {
-                "classification": classification.model_dump(),
-                "extraction": extraction.model_dump(),
-            }
+            "requests": [item.model_dump() for item in requests.requests],
+            "request_index": 0, "request_results": [], "query_cache": [],
+            "direct_reply": "",
         }
 
     def route_intent(state: SupportState) -> dict[str, Any]:
-        """由服务端按有限意图集合计算白名单；模型不能提交工具名来改变路由。"""
-        if state.get("direct_reply"):
+        """只为当前一项计算权限，上一项的工具结果不会扩大下一项白名单。"""
+        requests = state.get("requests", [])
+        index = state.get("request_index", 0)
+        if index >= len(requests):
             return {"allowed_tools": []}
-        raw = state.get("semantic_result")
-        if not isinstance(raw, dict):
+        try:
+            request = SupportRequest.model_validate(requests[index])
+        except (TypeError, ValidationError):
+            return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
+        if request.goal == "create_ticket" and any(
+            cached.get("name") == "create_ticket" for cached in state.get("query_cache", [])
+        ):
             return {
                 "allowed_tools": [],
-                "completed_question": _latest_user_text(state.get("messages", [])),
-                "direct_reply": _FALLBACK_REPLY,
+                "direct_reply": "本轮已尝试登记一项处理请求；其他办理诉求请另发一条消息。",
+                "request_tool_start": len(state.get("messages", [])),
+                "citations": [],
             }
-        try:
-            classification = IntentClassification.model_validate(raw["classification"])
-        except (KeyError, TypeError, ValidationError):
-            return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
-        if classification.intent == "smalltalk":
-            return {
-                "allowed_tools": [],
-                "completed_question": _latest_user_text(state.get("messages", [])),
-            }
-        if classification.intent in {"refund_return", "after_sales", "complaint", "human"}:
-            try:
-                service = ServiceExtraction.model_validate(raw["service"])
-            except (KeyError, TypeError, ValidationError):
-                return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
-            return _service_route(classification, service, state.get("messages", []))
-        try:
-            extraction = SemanticExtraction.model_validate(raw["extraction"])
-        except (KeyError, TypeError, ValidationError):
-            return {"allowed_tools": [], "direct_reply": _FALLBACK_REPLY}
-        return _semantic_route(classification, extraction, state.get("messages", []))
+        routed = _route_request(request, state.get("messages", []), len(requests) > 1)
+        routed["request_tool_start"] = len(state.get("messages", []))
+        routed["cached_tool_hit"] = False
+        routed["citations"] = []
+        return routed
 
     async def dispatch_tool_call(state: SupportState) -> dict[str, Any]:
         """由服务端构造已批准的工具调用，避免模型漏调工具或改写订单参数。"""
@@ -1065,14 +1104,28 @@ def build_support_graph():
             "id": str(uuid4()),
             "type": "tool_call",
         }
-        return {"messages": [AIMessage(content="", tool_calls=[call])]}
+        cache_key = json.dumps([name, args], ensure_ascii=False, sort_keys=True)
+        for cached in state.get("query_cache", []):
+            if cached["key"] == cache_key:
+                return {
+                    "messages": [AIMessage(content="", tool_calls=[call]), ToolMessage(
+                        content=cached["content"], name=name, tool_call_id=call["id"],
+                    )],
+                    "cached_tool_hit": True,
+                    "pending_cache_key": cache_key,
+                }
+        return {
+            "messages": [AIMessage(content="", tool_calls=[call])],
+            "cached_tool_hit": False,
+            "pending_cache_key": cache_key,
+        }
 
     async def assess_knowledge(state: SupportState) -> dict[str, Any]:
         """生成前让模型核对召回证据是否足够，失败问法进入问题池。"""
-        payload = _faq_tool_payload(state.get("messages", []))
+        payload = _faq_tool_payload(state.get("messages", []), state.get("request_tool_start", 0))
         if payload is None:
             return {}
-        original = _latest_user_text(state.get("messages", []))
+        original = state.get("completed_question") or _latest_user_text(state.get("messages", []))
 
         def refuse(entrypoint: str, reason: str) -> dict[str, Any]:
             return {
@@ -1120,85 +1173,152 @@ def build_support_graph():
         return {"citations": _citation_rows(results)}
 
     async def generate(state: SupportState) -> dict[str, Any]:
-        """仅生成最终答复；查询工具由服务端路由并构造参数后执行。"""
+        """逐项生成并组合答复，单项失败不影响其他项；引用按全轮重新编号。"""
         direct_reply = state.get("direct_reply", "").strip()
-        if direct_reply:
+        items = state.get("request_results", [])
+        if direct_reply and not items:
             return {"messages": [AIMessage(content=direct_reply)], "answer": direct_reply}
-
-        messages = list(state["messages"])
-        payload = _faq_tool_payload(messages)
-        if payload and payload.get("status") == "ok":
-            for index in range(len(messages) - 1, -1, -1):
-                if isinstance(messages[index], ToolMessage) and messages[index].name == "search_faq":
-                    ordered = dict(payload)
-                    ordered["results"] = _edge_ordered_results(
-                        [item for item in payload.get("results", []) if isinstance(item, dict)]
+        answers: list[str] = []
+        all_citations: list[dict[str, object]] = []
+        low_confidence = state.get("low_confidence")
+        for item in items:
+            reply = item.get("direct_reply", "")
+            tools = item.get("tools", [])
+            if not reply and tools:
+                latest = tools[-1]
+                payload = latest["payload"]
+                if payload.get("status") != "ok":
+                    reply = "这项查询暂时失败，请稍后重试。" if latest["name"] != "create_ticket" else "工单登记暂时失败，请稍后重试。"
+                elif latest["name"] == "search_faq" and not item.get("citations"):
+                    reply = _KNOWLEDGE_REFUSAL
+                elif latest["name"] == "create_ticket" and not payload.get("ticket_no"):
+                    reply = "工单登记未返回工单号，请稍后核实。"
+                elif latest["name"] == "create_ticket":
+                    reply = (
+                        f"已登记待处理工单，工单号：{payload['ticket_no']}。"
+                        "这不是实时接通人工，也不代表已创建退款退货申请。"
                     )
-                    messages[index] = messages[index].model_copy(
-                        update={"content": json.dumps(ordered, ensure_ascii=False)}
-                    )
-                    break
-        completed_question = state.get("completed_question", "").strip()
-        if completed_question:
-            # 仅本次模型上下文使用补全句；数据库和消息 API 仍保留用户原始文字。
-            for index in range(len(messages) - 1, -1, -1):
-                if isinstance(messages[index], HumanMessage):
-                    messages[index] = HumanMessage(content=completed_question)
-                    break
-
-        response = None
-        async for chunk in model.astream(messages):
-            response = chunk if response is None else response + chunk
-        if response is None:
-            raise RuntimeError("模型没有生成回答。")
-
-        answer = _content_as_text(response.content).strip()
-        citations = state.get("citations", [])
-        if citations:
-            used_numbers = {int(value) for value in re.findall(r"\[(\d+)\]", answer)}
-            used = [item for item in citations if item["number"] in used_numbers]
-            if not used or used_numbers != {int(item["number"]) for item in used}:
-                return {
-                    "messages": [AIMessage(content=_KNOWLEDGE_REFUSAL)],
-                    "answer": _KNOWLEDGE_REFUSAL,
-                    "citations": [],
-                    "low_confidence": {
-                        "original_question": _latest_user_text(state.get("messages", [])),
-                        "entrypoint": "generation_missing_citation",
-                        "reason": "生成答案没有引用召回的知识块",
-                    },
-                }
-            return {"messages": [response], "answer": answer, "citations": used}
-        return {"messages": [response], "answer": answer}
+                elif payload.get("found") is False or (
+                    latest["name"] == "search_faq" and not payload.get("results")
+                ):
+                    reply = str(payload.get("message") or "当前没有查到这项请求的结果。")
+            if not reply:
+                evidence = []
+                local_citations = item.get("citations", [])
+                offset = max((int(row["number"]) for row in all_citations), default=0)
+                for tool_result in tools:
+                    payload = dict(tool_result["payload"])
+                    if tool_result["name"] == "search_faq":
+                        results = [dict(row) for row in payload.get("results", []) if isinstance(row, dict)]
+                        for index, row in enumerate(results, 1):
+                            row["citation"] = f"[{offset + index}]"
+                        payload["results"] = _edge_ordered_results(results)
+                    evidence.append({"name": tool_result["name"], "result": payload})
+                response = await model.ainvoke([
+                    SystemMessage(content=SYSTEM_PROMPT + "\n只回答这一项请求。必须以给出的本轮结果为准，简短说明查到的事实；不要输出 JSON 或工具名。商品知识每条事实必须引用给出的编号。"),
+                    HumanMessage(content=json.dumps({"question": item["question"], "evidence": evidence}, ensure_ascii=False)),
+                ])
+                reply = _content_as_text(response.content).strip()
+                if local_citations:
+                    used_numbers = {int(value) for value in re.findall(r"\[(\d+)\]", reply)}
+                    permitted = {offset + int(row["number"]) for row in local_citations}
+                    if not used_numbers or not used_numbers <= permitted:
+                        reply = _KNOWLEDGE_REFUSAL
+                        low_confidence = {
+                            "original_question": item["question"],
+                            "entrypoint": "generation_missing_citation",
+                            "reason": "生成答案没有引用召回的知识块",
+                        }
+                    else:
+                        all_citations.extend(
+                            {**row, "number": offset + int(row["number"])}
+                            for row in local_citations if offset + int(row["number"]) in used_numbers
+                        )
+            answers.append(reply or _FALLBACK_REPLY)
+        answer = answers[0] if len(answers) == 1 else "\n".join(
+            f"【{index}】 {reply}" for index, reply in enumerate(answers, 1)
+        )
+        output: dict[str, Any] = {"messages": [AIMessage(content=answer)], "answer": answer, "citations": all_citations}
+        if low_confidence:
+            output["low_confidence"] = low_confidence
+        return output
 
     def route_after_intent(state: SupportState) -> str:
-        """语义路由已批准工具时交给服务端构造调用，否则直接生成答复。"""
-        return "dispatch_tool_call" if state.get("allowed_tools") else "generate"
+        """没有可执行工具的项也进入收尾，保留它在最终答复中的位置。"""
+        return "dispatch_tool_call" if state.get("allowed_tools") else "finish_request"
 
     def route_dispatched_tool(state: SupportState) -> str:
         """只把服务端构造且位于静态映射中的工具调用交给对应 ToolNode。"""
+        if state.get("cached_tool_hit"):
+            return "after_tools"
         allowed_names = state.get("allowed_tools", [])
         if len(allowed_names) != 1:
-            return "generate"
-        return _TOOL_NODE_BY_NAME.get(allowed_names[0], "generate")
+            return "finish_request"
+        return _TOOL_NODE_BY_NAME.get(allowed_names[0], "finish_request")
 
     def after_tools(state: SupportState) -> dict[str, Any]:
         """工具返回后关闭本轮权限；物流前置查单只有唯一目标才开放物流工具。"""
+        updates: dict[str, Any] = {}
+        latest = state.get("messages", [])[-1]
+        cache_key = state.get("pending_cache_key")
+        if (
+            isinstance(latest, ToolMessage) and cache_key and not state.get("cached_tool_hit")
+        ):
+            updates["query_cache"] = [*state.get("query_cache", []), {
+                "key": cache_key, "name": latest.name, "content": _content_as_text(latest.content),
+            }]
         if (
             state.get("order_lookup_pending")
             and state.get("messages")
             and isinstance(state["messages"][-1], ToolMessage)
             and state["messages"][-1].name == "query_order"
         ):
-            return _order_lookup_result(state)
+            return {**updates, **_order_lookup_result(state)}
         # 查询工具一旦执行完毕就收回白名单，防止模型在同一意图下重复或扩展查询。
-        return {"allowed_tools": [], "order_lookup_pending": False}
+        return {**updates, "allowed_tools": [], "order_lookup_pending": False}
 
     def route_after_tools(state: SupportState) -> str:
-        """列表选择核验可能开放下一次物流查询；其余查询结果直接生成答复。"""
+        """列表选择核验可继续查询；其余结果先做知识校验再收尾当前项。"""
         if state.get("allowed_tools"):
             return "dispatch_tool_call"
-        return "assess_knowledge" if _faq_tool_payload(state.get("messages", [])) else "generate"
+        return "assess_knowledge" if _faq_tool_payload(
+            state.get("messages", []), state.get("request_tool_start", 0)
+        ) else "finish_request"
+
+    def finish_request(state: SupportState) -> dict[str, Any]:
+        """冻结当前项的事实与澄清结果，随后继续下一项。"""
+        index = state.get("request_index", 0)
+        requests = state.get("requests", [])
+        if index >= len(requests):
+            return {}
+        tool_results = []
+        for message in state.get("messages", [])[state.get("request_tool_start", 0):]:
+            if not isinstance(message, ToolMessage):
+                continue
+            try:
+                payload = json.loads(_content_as_text(message.content))
+            except (TypeError, ValueError):
+                payload = {"status": "error"}
+            tool_results.append({
+                "name": message.name,
+                "payload": payload if isinstance(payload, dict) else {"status": "error"},
+            })
+        result = {
+            "question": requests[index]["completed_question"],
+            "direct_reply": state.get("direct_reply", ""),
+            "tools": tool_results,
+            "citations": state.get("citations", []),
+        }
+        return {
+            "request_results": [*state.get("request_results", []), result],
+            "request_index": index + 1,
+            "allowed_tools": [],
+            "direct_reply": "",
+            "citations": [],
+        }
+
+    def route_next_request(state: SupportState) -> str:
+        return "route_intent" if state.get("request_index", 0) < len(state.get("requests", [])) else "generate"
 
     def save_answer(state: SupportState) -> dict[str, str]:
         """模型完成工具循环或澄清/兜底后，仅保存 generate 产出的最终回答。"""
@@ -1224,6 +1344,7 @@ def build_support_graph():
     graph.add_node("generate", generate)
     graph.add_node("assess_knowledge", assess_knowledge)
     graph.add_node("after_tools", after_tools)
+    graph.add_node("finish_request", finish_request)
     graph.add_node("save_answer", save_answer)
     for tool_name, node_name in _TOOL_NODE_BY_NAME.items():
         graph.add_node(node_name, tool_nodes[tool_name])
@@ -1234,14 +1355,15 @@ def build_support_graph():
     graph.add_conditional_edges(
         "route_intent",
         route_after_intent,
-        {"dispatch_tool_call": "dispatch_tool_call", "generate": "generate"},
+        {"dispatch_tool_call": "dispatch_tool_call", "finish_request": "finish_request"},
     )
     graph.add_conditional_edges(
         "dispatch_tool_call",
         route_dispatched_tool,
         {
             **{node_name: node_name for node_name in _TOOL_NODE_BY_NAME.values()},
-            "generate": "generate",
+            "after_tools": "after_tools",
+            "finish_request": "finish_request",
         },
     )
     for node_name in _TOOL_NODE_BY_NAME.values():
@@ -1249,9 +1371,12 @@ def build_support_graph():
     graph.add_conditional_edges(
         "after_tools",
         route_after_tools,
-        {"dispatch_tool_call": "dispatch_tool_call", "assess_knowledge": "assess_knowledge", "generate": "generate"},
+        {"dispatch_tool_call": "dispatch_tool_call", "assess_knowledge": "assess_knowledge", "finish_request": "finish_request"},
     )
-    graph.add_edge("assess_knowledge", "generate")
+    graph.add_edge("assess_knowledge", "finish_request")
+    graph.add_conditional_edges("finish_request", route_next_request, {
+        "route_intent": "route_intent", "generate": "generate",
+    })
     graph.add_edge("generate", "save_answer")
     graph.add_edge("save_answer", END)
     compiled = graph.compile(name="aiden_support")

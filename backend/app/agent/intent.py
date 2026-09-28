@@ -68,6 +68,46 @@ class SemanticExtraction(BaseModel):
         description="需要澄清时给用户的简短追问；不得索要密码、验证码或其他身份凭据。",
     )
 
+
+class SupportRequest(BaseModel):
+    """一项可独立回答的请求；目标和编号仍需服务端复核。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intent: Literal[
+        "logistics", "order", "product", "refund_return", "after_sales",
+        "complaint", "smalltalk", "human", "other",
+    ]
+    goal: Literal[
+        "order", "logistics", "product", "policy", "after_sale_status",
+        "ticket_status", "create_ticket", "smalltalk", "other",
+    ]
+    cofidence: float = Field(ge=0, le=1, strict=True)
+    completed_question: str = Field(min_length=1, max_length=1000)
+    entities: RecognizedEntities
+    request_no: str | None = Field(default=None, max_length=64)
+    ticket_no: str | None = Field(default=None, max_length=64)
+    needs_clarification: bool
+    clarification_question: str | None = Field(default=None, max_length=240)
+
+
+class SupportRequests(BaseModel):
+    """单轮最多四项，按用户表达顺序保存；超限输出直接拒绝解析。"""
+
+    model_config = ConfigDict(extra="forbid")
+    requests: list[SupportRequest] = Field(min_length=1, max_length=4)
+
+
+MULTI_REQUEST_PROMPT = """你是电商客服请求拆分器。按用户本轮表达顺序，将每个能独立回答的诉求拆成 requests 列表，最多四项。重复的同一诉求只保留一项；超过四项时不要省略，输出超过四项由服务端要求用户分批发送。
+
+每项给出九类 intent、处理目标 goal、置信度 cofidence、独立补全后的 completed_question、entities.order_no/order_reference、request_no、ticket_no、needs_clarification 和 clarification_question。只能从固定枚举选择，不能输出工具名、用户 ID 或其他字段。
+
+goal 对应：order 查订单；logistics 查物流；product 查商品知识；policy 查当前政策；after_sale_status 查已提交售后申请；ticket_status 查已有工单；create_ticket 登记用户明确要求的投诉处理、人工协助或办理售后；smalltalk 闲聊；other 无法判断。退款退货或售后意图可对应 policy、after_sale_status、ticket_status、create_ticket；投诉和人工也可分别查已有工单或登记新请求。查询申请进度、政策、工单进度本身不意味着要登记工单。用户明确说“联系人工”时可登记工单，但不能说已实时接通真人或已创建退款申请。
+
+“查订单 TEST-001 的退货申请进度，再告诉我退货政策”是两项：after_sale_status 和 policy。“查订单 TEST-001 的物流和订单金额”是两项：logistics 和 order。“查我的工单进度，再帮我联系人工”是两项：ticket_status 和 create_ticket。若一项缺订单号，仍将其他可处理项独立输出。
+
+只从本轮用户原文抄录完整申请号、工单号。订单号只可来自本轮原文或最近一条服务端订单列表的唯一选择；列表序号或商品名选择用 listed_selection。latest 仅限本轮明确说最近一笔；缺失时填 null。补全问题只写该项诉求，不合并其他请求。低置信度项也必须保留并标为 other 或给低 cofidence，不可悄悄省略。只输出合法 JSON。"""
+
 INTENT_CLASSIFICATION_PROMPT = """你是电商客服意图分类器。结合当前用户消息和必要的近期上下文，做一道单选题，只选一个最主要的意图：
 A. logistics：物流，包裹位置、配送、运单及签收。
 B. order：订单，订单状态、购买内容、金额或订单列表。
