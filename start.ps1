@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 
 # 显式启用本地对话挖掘定时进程：.\start.ps1 -EnableConversationMining
 # 默认启动不运行挖掘，不会因启动网站而调用抽取模型。
