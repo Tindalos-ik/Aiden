@@ -101,15 +101,18 @@ function OrderCardView({ order }: { order: OrderCard }) {
   </div>;
 }
 
-export function MessageBubble({ item, feedbackUserId }: { item: ChatMessageType; feedbackUserId?: string }) {
+export function MessageBubble({ item, feedbackUserId, viewerRole = 'user', userName }: { item: ChatMessageType; feedbackUserId?: string; viewerRole?: 'user' | 'staff'; userName?: string }) {
   if (item.role === 'system') return <div className="system-message"><span>{item.content}</span></div>;
   const fromUser = item.role === 'user';
   const fromStaff = item.role === 'staff';
-  return <div className={`chat-row ${fromUser ? 'chat-row-user' : 'chat-row-agent'}`}>
-    {!fromUser && <Avatar className={`chat-avatar ${fromStaff ? 'human-avatar' : ''}`} icon={fromStaff ? <CustomerServiceOutlined /> : <span className="mini-brand-mark">a</span>} />}
+  const fromSelf = item.role === viewerRole;
+  const avatar = fromUser ? <UserOutlined /> : fromStaff ? <CustomerServiceOutlined /> : <span className="mini-brand-mark">a</span>;
+  const avatarClass = `chat-avatar ${fromUser ? 'user-avatar' : fromStaff ? 'human-avatar' : ''}`;
+  return <div className={`chat-row ${fromSelf ? 'chat-row-user' : 'chat-row-agent'}`}>
+    {!fromSelf && <Avatar className={avatarClass} icon={avatar} />}
     <div className="chat-column">
-      <div className={`message-byline ${fromUser ? 'byline-user' : ''}`}>{fromUser ? '我' : fromStaff ? '人工客服' : 'Aiden'}<time>{timeLabel(item.createdAt)}</time></div>
-      <div className={`message-bubble ${fromUser ? 'bubble-user' : 'bubble-agent'} ${item.status === 'error' ? 'bubble-error' : ''}`}>
+      <div className={`message-byline ${fromSelf ? 'byline-user' : ''}`}>{fromSelf ? '我' : fromUser ? userName || '用户' : fromStaff ? '人工客服' : 'Aiden'}<time>{timeLabel(item.createdAt)}</time></div>
+      <div className={`message-bubble ${fromSelf ? 'bubble-user' : 'bubble-agent'} ${item.status === 'error' ? 'bubble-error' : ''}`}>
         {item.content && <div className="message-content"><AnswerContent item={item} /></div>}
         {!item.content && item.status === 'streaming' && <div className="typing-dots"><i /><i /><i /></div>}
         {item.orderCard && <OrderCardView order={item.orderCard} />}
@@ -120,7 +123,7 @@ export function MessageBubble({ item, feedbackUserId }: { item: ChatMessageType;
       </div>
       {item.role === 'assistant' && item.status === 'complete' && feedbackUserId && <FeedbackControls key={feedbackId(feedbackUserId, item)} item={item} userId={feedbackUserId} />}
     </div>
-    {fromUser && <Avatar className="chat-avatar user-avatar" icon={<UserOutlined />} />}
+    {fromSelf && <Avatar className={avatarClass} icon={avatar} />}
   </div>;
 }
 
