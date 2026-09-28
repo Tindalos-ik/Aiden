@@ -465,11 +465,14 @@ def _service_route(
 def _semantic_route(
     classification: IntentClassification, result: SemanticExtraction, messages: list[BaseMessage],
     multi_request: bool = False,
+    request_text: str | None = None,
+    same_turn_order_options: list[str] | None = None,
 ) -> dict[str, Any]:
     """把结构化语义结果收敛成服务端固定的意图与工具白名单。
 
-    显式订单号须能在用户原文中逐字核验；由语义层从紧邻服务端列表中解析的选择，
-    也必须精确命中该列表。订单归属仍由 InjectedState 和 SQL 的 user_id 条件验证。
+    显式订单号须能在用户原文中逐字核验；跨轮列表选择必须精确命中旧列表并重新查单。
+    同轮前一项已查出的本人订单列表可供后续序号选择直接使用。订单归属仍由
+    InjectedState 和 SQL 的 user_id 条件验证。
     """
     data = result.model_dump()
     data["intent"] = classification.intent
@@ -478,7 +481,8 @@ def _semantic_route(
     order_no = (entities.get("order_no") or "").strip() or None
     reference = entities.get("order_reference", "none")
     current_text = _latest_user_text(messages)
-    recent_options = _previous_order_list(messages)
+    selection_text = request_text or current_text
+    recent_options = same_turn_order_options or _previous_order_list(messages)
     if order_no:
         source_status = _order_no_source_status(order_no, messages)
         if source_status == "valid" or (
@@ -562,7 +566,23 @@ def _semantic_route(
 
     # 列表回复后的语义选择、完整订单号或尾号只绑定紧邻的服务器列表；随后仍会用
     # 本人近期订单结果复核，过期选择会重新列单，歧义引用则要求用户澄清。
-    suffix_fragment = _order_suffix_from_text(current_text)
+    suffix_fragment = _order_suffix_from_text(selection_text)
+    # 本轮前一项已从本人订单查询生成列表时，可直接用该结果绑定后续物流目标。
+    # 序号必须同时出现在用户原文和当前子请求中，不能由模型补全凭空引入。
+    if data["intent"] == "logistics" and same_turn_order_options and not suffix_fragment:
+        requested_ordinals = _selection_ordinal(selection_text)
+        original_ordinals = _selection_ordinal(current_text)
+        if requested_ordinals or original_ordinals:
+            if len(requested_ordinals) == 1 and requested_ordinals == original_ordinals:
+                selected_order_no = _selected_order_from_list(selection_text, same_turn_order_options)
+                if selected_order_no:
+                    entities["order_no"] = selected_order_no
+                    entities["order_reference"] = "listed_selection"
+                    base["allowed_tools"] = ["query_logistics"]
+                    base["authorized_order_no"] = selected_order_no
+                    return base
+            base["direct_reply"] = "我没能从刚才的订单列表中确定您指的订单，请回复列表中的序号。"
+            return base
     if suffix_fragment:
         # 即使当前没有可核对的上一条列表，也不能把末尾片段当作完整订单号查询。
         entities["order_no"] = None
@@ -571,7 +591,7 @@ def _semantic_route(
     if recent_options and (not explicitly_latest or suffix_fragment):
         selected_order_no = None
         if suffix_fragment:
-            ordinals = _selection_ordinal(current_text)
+            ordinals = _selection_ordinal(selection_text)
             if ordinals:
                 entities["order_no"] = None
                 entities["order_reference"] = "ambiguous"
@@ -593,7 +613,7 @@ def _semantic_route(
                 return base
             selected_order_no = suffix_matches[0]
         else:
-            parsed_selection = _selected_order_from_list(current_text, recent_options)
+            parsed_selection = _selected_order_from_list(selection_text, recent_options)
             listed_selection = (
                 current_order_no
                 if reference == "listed_selection" and current_order_no in recent_options
@@ -913,7 +933,10 @@ def _explicit_write_request(text: str) -> bool:
     return False
 
 
-def _route_request(request: SupportRequest, messages: list[BaseMessage], multi: bool) -> dict[str, Any]:
+def _route_request(
+    request: SupportRequest, messages: list[BaseMessage], multi: bool,
+    same_turn_order_options: list[str] | None = None,
+) -> dict[str, Any]:
     """逐项复用订单校验，并按意图与目标交集计算唯一工具权限。"""
     if request.goal not in _REQUEST_GOALS[request.intent] or (
         request.cofidence < _MIN_INTENT_CONFIDENCE and request.intent != "smalltalk"
@@ -926,7 +949,11 @@ def _route_request(request: SupportRequest, messages: list[BaseMessage], multi: 
         extraction = SemanticExtraction.model_validate(request.model_dump(include={
             "completed_question", "entities", "needs_clarification", "clarification_question",
         }))
-        return _semantic_route(classification, extraction, messages, multi_request=multi)
+        return _semantic_route(
+            classification, extraction, messages, multi_request=multi,
+            request_text=request.completed_question,
+            same_turn_order_options=same_turn_order_options,
+        )
     if request.goal == "create_ticket" and not (
         _explicit_write_request(_latest_user_text(messages))
         and _explicit_write_request(request.completed_question)
@@ -1045,7 +1072,15 @@ def build_support_graph():
                 "request_tool_start": len(state.get("messages", [])),
                 "citations": [],
             }
-        routed = _route_request(request, state.get("messages", []), len(requests) > 1)
+        same_turn_order_options = next((
+            options
+            for result in reversed(state.get("request_results", []))
+            if (options := _parse_order_list(result.get("direct_reply", ""))) is not None
+        ), None)
+        routed = _route_request(
+            request, state.get("messages", []), len(requests) > 1,
+            same_turn_order_options=same_turn_order_options,
+        )
         routed["request_tool_start"] = len(state.get("messages", []))
         routed["cached_tool_hit"] = False
         routed["citations"] = []
