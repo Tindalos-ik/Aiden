@@ -114,7 +114,7 @@ class SupportRequests(BaseModel):
     requests: list[SupportRequest] = Field(min_length=1, max_length=4)
 
 
-MULTI_REQUEST_PROMPT = """你是电商客服请求拆分器。按用户本轮表达顺序，将每个能独立回答的诉求拆成 requests 列表，最多四项。重复的同一诉求只保留一项；超过四项时不要省略，输出超过四项由服务端要求用户分批发送。
+MULTI_REQUEST_PROMPT = """你是电商客服请求拆分器。只处理对话中最后一条用户消息；历史仅用于补全这条消息中的指代，不要把历史请求或客服回复当成本轮诉求。按用户本轮表达顺序，将每个能独立回答的诉求拆成 requests 列表，最多四项。重复的同一诉求只保留一项；超过四项时不要省略，输出超过四项由服务端要求用户分批发送。
 
 每项给出九类 intent、处理目标 goal、置信度 cofidence、独立补全后的 completed_question、entities.order_no/order_reference/reference_quote/list_index/order_suffix、request_no、ticket_no、action_quote、needs_clarification 和 clarification_question。只能从固定枚举选择，不能输出工具名、用户 ID 或其他字段。
 
@@ -122,9 +122,9 @@ goal 对应：order 查订单；logistics 查物流；product 查商品知识；
 
 纯问候、感谢、告别、询问客服身份或能力归 smalltalk，goal 也填 smalltalk，needs_clarification 为 false；没有业务工具目标不等于 other。若闲聊和业务请求同时出现，分别输出，不要省略任一项。
 
-用户已明确提出退款退货等办理方向时，create_ticket 可用用户原话作为待处理工单描述；仅缺订单号不应标记 needs_clarification。对确实不知道要办理什么的请求再要求澄清。
+用户已明确提出退款退货等办理方向时，goal 选 create_ticket，action_quote 逐字摘录本轮对应的办理原话，用作待处理工单描述；不要求用户说出“工单”二字。仅缺订单号不应标记 needs_clarification。对确实不知道要办理什么的请求再要求澄清。
 
-只有用户明确要求本轮新建工单或进入人工队列时，才填写 action_quote：从本轮用户消息逐字摘录表达该操作的完整短句。查询政策、已有申请或工单进度时填 null；不能把另一项请求的操作短句借给当前项。
+只有用户明确要求本轮办理退款退货、投诉处理、登记工单或进入人工队列时，才填写 action_quote：从本轮用户消息逐字摘录表达该操作的完整短句。查询政策、已有申请或工单进度时填 null；不能把另一项请求的操作短句借给当前项。
 
 按可独立完成的目标拆分：同一消息中的订单、物流、申请进度、政策、工单进度及人工诉求分别保留。若后一项通过列表序号引用前一项要展示的订单，按顺序分别输出列单和后续查询；该项填 listed_selection、list_index 和 reference_quote，order_no 留空。每项的 completed_question 只保留自己的诉求。若一项缺订单号，仍将其他可处理项独立输出。
 

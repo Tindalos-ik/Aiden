@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from typing import Any
 from uuid import uuid4
@@ -29,6 +30,8 @@ from app.config.settings import settings
 from app.persistence.mysql.chat import finish_assistant_message, recent_messages
 from app.services.tools.registry import SUPPORT_TOOLS_BY_NAME
 
+
+logger = logging.getLogger(__name__)
 
 # 工具注册和意图权限由服务端静态定义；模型不能提交工具名或用户身份。
 _TOOLS_BY_NAME = SUPPORT_TOOLS_BY_NAME
@@ -65,6 +68,7 @@ SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切�
 
 
 _FALLBACK_REPLY = "我还没能确定您需要哪项服务。请说明要查询订单、物流、售后申请、政策或工单，或说明需要人工协助的具体问题。"
+_INTENT_FORMAT_REPLY = "抱歉，我刚才没能正确处理这条消息，请重试。"
 _TOOL_REJECTED_REPLY = "抱歉，我暂时无法安全完成这项操作。请重新说明要查询或登记的问题。"
 _KNOWLEDGE_REFUSAL = "抱歉，现有知识库证据不足，我暂时无法核实这个问题的答案。"
 _TOO_MANY_REQUESTS = "这条消息包含超过四项请求。请分批发送，每次最多四项，我会逐项处理。"
@@ -691,8 +695,10 @@ def build_support_graph():
     if thinking_body:
         kwargs["extra_body"] = thinking_body
     model = ChatOpenAI(**kwargs)
-    # 单次拆分与分类使用 JSON 模式，Pydantic 再校验枚举、字段和数值范围。
-    json_model = model.bind(response_format={"type": "json_object"})
+    # 结构化识别不向客户端逐字输出；非流式 JSON 请求降低兼容模型只返回空白片段的概率。
+    json_model = ChatOpenAI(**{**kwargs, "streaming": False, "stream_usage": False}).bind(
+        response_format={"type": "json_object"}
+    )
     # 分开的 ToolNode 让一次通过校验的调用只能到达对应工具。
     tool_nodes = {
         name: ToolNode([tool], handle_tool_errors=False)
@@ -712,25 +718,62 @@ def build_support_graph():
         return {"messages": [SystemMessage(content=SYSTEM_PROMPT), *history]}
 
     async def recognize_intent(state: SupportState) -> dict[str, Any]:
-        """一次模型调用拆分并分类；解析失败时关闭工具。"""
-        try:
-            response = await json_model.ainvoke(
-                _structured_messages(
-                    state["messages"], MULTI_REQUEST_PROMPT, SupportRequests
-                )
-            )
-            requests = SupportRequests.model_validate_json(_content_as_text(response.content))
-        except (TypeError, ValueError):
-            # 超限与格式错误都关闭工具；超限时明确要求分批，避免遗漏请求。
+        """先按本轮原话识别；格式异常重试一次，指代不明时再借助历史。"""
+        current_message = HumanMessage(content=_latest_user_text(state["messages"]))
+        current_only = _structured_messages([current_message], MULTI_REQUEST_PROMPT, SupportRequests)
+        requests: SupportRequests | None = None
+        for attempt in range(2):
+            messages = current_only
+            if attempt:
+                messages = [
+                    SystemMessage(content=(
+                        str(current_only[0].content)
+                        + "\n上次响应不是合法 JSON。请立即输出完整 JSON 对象，以 { 开头、以 } 结尾。"
+                    )),
+                    current_message,
+                ]
+            response = await json_model.ainvoke(messages)
+            content = _content_as_text(response.content)
             try:
-                raw = json.loads(_content_as_text(response.content))
-                too_many = isinstance(raw, dict) and isinstance(raw.get("requests"), list) and len(raw["requests"]) > 4
-            except (NameError, TypeError, ValueError):
-                too_many = False
+                requests = SupportRequests.model_validate_json(content)
+                break
+            except (TypeError, ValueError) as exc:
+                # 仅记录错误类型和字段位置，不把用户消息或模型原文写入服务日志。
+                issues = (
+                    [f"{'.'.join(map(str, issue['loc']))}:{issue['type']}"
+                     for issue in exc.errors(include_input=False)[:5]]
+                    if isinstance(exc, ValidationError) else [type(exc).__name__]
+                )
+                logger.warning("Intent result rejected (attempt %d): %s", attempt + 1, issues)
+                try:
+                    raw = json.loads(content)
+                    too_many = isinstance(raw, dict) and isinstance(raw.get("requests"), list) and len(raw["requests"]) > 4
+                except (TypeError, ValueError):
+                    too_many = False
+                if too_many:
+                    return {
+                        "requests": [], "request_index": 0, "request_results": [],
+                        "direct_reply": _TOO_MANY_REQUESTS,
+                    }
+        if requests is None:
             return {
                 "requests": [], "request_index": 0, "request_results": [],
-                "direct_reply": _TOO_MANY_REQUESTS if too_many else _FALLBACK_REPLY,
+                "direct_reply": _INTENT_FORMAT_REPLY,
             }
+
+        # 只有当前表达无法独立定位目标时才带历史重试，避免旧的政策问答覆盖本轮办理诉求。
+        if len(state["messages"]) > 2 and any(
+            item.intent == "other" or item.needs_clarification for item in requests.requests
+        ):
+            try:
+                context_response = await json_model.ainvoke(
+                    _structured_messages(state["messages"], MULTI_REQUEST_PROMPT, SupportRequests)
+                )
+                requests = SupportRequests.model_validate_json(
+                    _content_as_text(context_response.content)
+                )
+            except (TypeError, ValueError):
+                logger.warning("Contextual intent result rejected; using current-message result")
         return {
             "requests": [item.model_dump() for item in requests.requests],
             "request_index": 0, "request_results": [], "query_cache": [],
@@ -750,11 +793,17 @@ def build_support_graph():
         if request.goal not in _REQUEST_GOALS[request.intent] or (
             request.cofidence < _MIN_INTENT_CONFIDENCE and request.intent != "smalltalk"
         ):
+            logger.warning(
+                "Intent route rejected: intent=%s goal=%s confidence=%.2f",
+                request.intent, request.goal, request.cofidence,
+            )
             return {
                 "allowed_tools": [], "direct_reply": _FALLBACK_REPLY,
                 "handoff_requested": False,
                 "request_tool_start": len(state.get("messages", [])), "citations": [],
             }
+        if request.intent == "other":
+            logger.warning("Intent classified as other: goal=%s confidence=%.2f", request.goal, request.cofidence)
         if request.goal == "create_ticket" or (request.intent == "human" and request.goal == "other"):
             quote = request.action_quote.strip() if request.action_quote else ""
             if not quote or quote not in _latest_user_text(state.get("messages", [])):
