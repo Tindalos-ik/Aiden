@@ -34,7 +34,7 @@ from app.services.tools.registry import SUPPORT_TOOLS_BY_NAME
 _TOOLS_BY_NAME = SUPPORT_TOOLS_BY_NAME
 _TOOL_NODE_BY_NAME = {name: f"run_{name}" for name in _TOOLS_BY_NAME}
 _SERVICE_TOOL_BY_GOAL = {
-    "policy": "query_policy",
+    "policy": "search_faq",
     "after_sale_status": "query_after_sale",
     "ticket_status": "query_ticket",
     "create_ticket": "create_ticket",
@@ -46,15 +46,15 @@ _ORDER_LIST_ENTRY_PATTERN = re.compile(r"([1-9]\d*)\. (.+)")
 _ORDER_LIST_PRODUCT_LIMIT = 3
 
 
-# 政策按生效版本查询；售后、工单状态只读查询，投诉和办理诉求可登记工单。
+# 商品知识和政策文档均从知识库检索；售后、工单状态只读查询。
 SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切、回答简洁，不用网络烂梗。
 
-可以查询当前登录用户的订单、物流、售后申请和工单进度，检索已入库商品知识及当前生效政策，并登记待人工处理的工单。对于问候、感谢或自我介绍，可以不调用工具简短回答。你不是真人客服；登记工单不等于实时接入人工，也不等于已经创建退款退货申请。查询和登记结果必须以本轮工具返回为准。
+可以查询当前登录用户的订单、物流、售后申请和工单进度，检索已入库的商品知识和政策文档，并登记待人工处理的工单。对于问候、感谢或自我介绍，可以不调用工具简短回答。你不是真人客服；登记工单不等于实时接入人工，也不等于已经创建退款退货申请。查询和登记结果必须以本轮工具返回为准。
 
 必须遵守：
 1. 订单详情和状态只依据 query_order 的结果；物流只依据 query_logistics 的结果。订单号必须原样使用补全问题中已识别的号码，不得改写或猜测。
-2. 商品知识问题只能依据 search_faq 实际返回的结果作答。调用时把补全后的当前问题作为 question 参数；检索侧负责归一和同义词扩展。回答每个知识事实时标出对应结果的 citation 编号，如 [1]。不能引用未返回的编号。
-3. search_faq 没有返回内容，或返回内容与问题不符时，说明暂时无法核实。政策规则只能依据 query_policy 本轮返回的有效版本；说明政策名称、版本和适用的生效时间，不从模型记忆或其他用户历史补条款。
+2. 商品知识和政策规则只能依据 search_faq 本轮返回的知识块作答。调用时把补全后的当前问题作为 question 参数；检索侧负责归一和同义词扩展。每条知识事实标出对应结果的 citation 编号，如 [1]，不能引用未返回的编号。
+3. search_faq 没有返回内容，或返回内容与问题不符时，说明暂时无法核实。政策的版本、生效时间和适用条件只能按检索证据陈述；证据未说明时不要声称已核实其当前生效状态，也不能从模型记忆或其他用户历史补条款。
 4. 售后申请进度只依据 query_after_sale，工单进度只依据 query_ticket。create_ticket 成功时只说明已登记工单及工单号；不能声称退款申请已提交、人工已接入或处理结果已确定。创建失败时不得说已登记。
 5. 查询为空、报错或结果互相矛盾时如实说明；不得编造订单、金额、物流节点、日期、政策或承诺。
 6. 缺少唯一订单目标时，服务端可能先列出本人近期订单。语义识别可以结合最近一条规范订单列表中的序号或商品内容补全用户选择；只有该选择经服务端核验且属于当前用户时才能继续查询，不得自行猜选。
@@ -830,8 +830,6 @@ def build_support_graph():
             if not isinstance(order_no, str) or not order_no.strip():
                 return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
             args["order_no"] = order_no.strip()
-        elif name == "query_policy":
-            args["question"] = state.get("completed_question", "").strip()
         elif name == "query_after_sale":
             for key in ("request_no", "order_no"):
                 value = service.get(key) if isinstance(service, dict) else None
@@ -987,7 +985,7 @@ def build_support_graph():
                         payload["results"] = _edge_ordered_results(results)
                     evidence.append({"name": tool_result["name"], "result": payload})
                 response = await model.ainvoke([
-                    SystemMessage(content=SYSTEM_PROMPT + "\n只回答这一项请求。必须以给出的本轮结果为准，简短说明查到的事实；不要输出 JSON 或工具名。商品知识每条事实必须引用给出的编号。"),
+                    SystemMessage(content=SYSTEM_PROMPT + "\n只回答这一项请求。必须以给出的本轮结果为准，简短说明查到的事实；不要输出 JSON 或工具名。商品知识和政策规则的每条事实必须引用给出的编号。"),
                     HumanMessage(content=json.dumps({"question": item["question"], "evidence": evidence}, ensure_ascii=False)),
                 ])
                 reply = _content_as_text(response.content).strip()

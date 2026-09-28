@@ -36,9 +36,12 @@ class FakeModel:
         if "知识证据充分性检查器" in instruction:
             return AIMessage(content='{"sufficient":true,"reason":""}')
         data = json.loads(messages[-1].content)
-        suffix = " [1]" if self.cite_faq and any(
-            item["name"] == "search_faq" for item in data["evidence"]
-        ) else ""
+        citations = [
+            row["citation"]
+            for item in data["evidence"] if item["name"] == "search_faq"
+            for row in item["result"].get("results", []) if row.get("citation")
+        ]
+        suffix = f" {citations[0]}" if self.cite_faq and citations else ""
         return AIMessage(content=f"已回答：{data['question']}{suffix}")
 
 
@@ -52,7 +55,10 @@ class FakeToolNode:
     async def __call__(self, state):
         call = state["messages"][-1].tool_calls[0]
         self.calls.append((self.name, call["args"]))
-        payload = self.payloads.get(self.name, {"status": "ok", "found": True})
+        payload = self.payloads.get(
+            (self.name, call["args"].get("question")),
+            self.payloads.get(self.name, {"status": "ok", "found": True}),
+        )
         return {"messages": [ToolMessage(
             content=json.dumps(payload, ensure_ascii=False),
             name=self.name, tool_call_id=call["id"],
@@ -86,12 +92,16 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
             [request("refund_return", "after_sale_status", "查询订单 TEST-001 的退货申请进度", "TEST-001"),
              request("refund_return", "policy", "查询退货政策")],
             {"query_after_sale": {"status": "ok", "found": True, "requests": [{"status": "pending"}]},
-             "query_policy": {"status": "ok", "found": True, "policies": [{"name": "退货政策"}]}},
+             "search_faq": {"status": "ok", "results": [{
+                 "chunkId": "return-policy", "answer": "退货政策条款", "score": 1.0,
+             }]}},
         )
-        self.assertEqual([name for name, _ in calls], ["query_after_sale", "query_policy"])
+        self.assertEqual([name for name, _ in calls], ["query_after_sale", "search_faq"])
         self.assertEqual(calls[0][1], {"order_no": "TEST-001"})
+        self.assertEqual(calls[1][1], {"question": "查询退货政策"})
         self.assertIn("【1】", result["answer"])
         self.assertIn("【2】", result["answer"])
+        self.assertEqual([row["chunkId"] for row in result["citations"]], ["return-policy"])
 
     async def test_logistics_order_and_duplicate_query(self):
         result, calls = await self.run_case(
@@ -124,10 +134,10 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
             [request("logistics", "logistics", "查询这单物流", clarify=True),
              request("refund_return", "policy", "查询退货政策")],
             {"query_order": {"status": "ok", "orders": []},
-             "query_policy": {"status": "ok", "found": False, "policies": [], "message": "没有现行政策"}},
+             "search_faq": {"status": "ok", "results": []}},
         )
-        self.assertEqual([name for name, _ in calls], ["query_order", "query_policy"])
-        self.assertIn("没有现行政策", result["answer"])
+        self.assertEqual([name for name, _ in calls], ["query_order", "search_faq"])
+        self.assertIn("证据不足", result["answer"])
         _, calls = await self.run_case(
             "查退款申请进度和退货政策",
             [request("refund_return", "after_sale_status", "查询退款申请进度"),
@@ -209,20 +219,23 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         requests = [request("product", "product", "猫粮有哪些口味"),
                     request("refund_return", "policy", "查询退货政策")]
         payloads = {
-            "search_faq": {"status": "ok", "results": [{
+            ("search_faq", "猫粮有哪些口味"): {"status": "ok", "results": [{
                 "chunkId": "chunk-1", "answer": "鸡肉味", "score": 1.0,
             }]},
-            "query_policy": {"status": "ok", "found": False, "policies": [], "message": "没有现行政策"},
+            ("search_faq", "查询退货政策"): {"status": "ok", "results": [{
+                "chunkId": "policy-1", "answer": "七天内可申请退货", "score": 1.0,
+            }]},
         }
         result, calls = await self.run_case("猫粮有哪些口味，再告诉我退货政策", requests, payloads)
-        self.assertEqual([name for name, _ in calls], ["search_faq", "query_policy"])
+        self.assertEqual([name for name, _ in calls], ["search_faq", "search_faq"])
         self.assertIn("[1]", result["answer"])
-        self.assertEqual([row["number"] for row in result["citations"]], [1])
+        self.assertIn("[2]", result["answer"])
+        self.assertEqual([row["number"] for row in result["citations"]], [1, 2])
         refused, _ = await self.run_case(
             "猫粮有哪些口味，再告诉我退货政策", requests, payloads, cite_faq=False,
         )
         self.assertIn("证据不足", refused["answer"])
-        self.assertIn("没有现行政策", refused["answer"])
+        self.assertEqual(refused["citations"], [])
 
 
 if __name__ == "__main__":

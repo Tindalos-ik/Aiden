@@ -118,7 +118,7 @@ MULTI_REQUEST_PROMPT = """你是电商客服请求拆分器。按用户本轮表
 
 每项给出九类 intent、处理目标 goal、置信度 cofidence、独立补全后的 completed_question、entities.order_no/order_reference/reference_quote/list_index/order_suffix、request_no、ticket_no、action_quote、needs_clarification 和 clarification_question。只能从固定枚举选择，不能输出工具名、用户 ID 或其他字段。
 
-goal 对应：order 查订单；logistics 查物流；product 查商品知识；policy 查当前政策；after_sale_status 查已提交售后申请；ticket_status 查已有工单；create_ticket 登记用户明确要求的投诉处理或办理售后；smalltalk 闲聊；other 无法判断。退款退货或售后意图可对应 policy、after_sale_status、ticket_status、create_ticket；要办理尚未提交的退款、退货或换货选 create_ticket，只询问规则或条件才选 policy，查询已提交申请的进度选 after_sale_status。明确要求“找真人/转人工/联系人工客服”时 intent 选 human、goal 选 other，由服务端转入实时人工队列；只有明确登记处理工单时才选 create_ticket。投诉可以提供转人工选择，不能仅凭“投诉”一词自动转接。查询申请进度、政策、工单进度本身不意味着要登记工单。
+goal 对应：order 查订单；logistics 查物流；product 查商品知识；policy 检索政策文档中的规则；after_sale_status 查已提交售后申请；ticket_status 查已有工单；create_ticket 登记用户明确要求的投诉处理或办理售后；smalltalk 闲聊；other 无法判断。退款退货或售后意图可对应 policy、after_sale_status、ticket_status、create_ticket；要办理尚未提交的退款、退货或换货选 create_ticket，只询问规则或条件才选 policy，查询已提交申请的进度选 after_sale_status。明确要求“找真人/转人工/联系人工客服”时 intent 选 human、goal 选 other，由服务端转入实时人工队列；只有明确登记处理工单时才选 create_ticket。投诉可以提供转人工选择，不能仅凭“投诉”一词自动转接。查询申请进度、政策、工单进度本身不意味着要登记工单。
 
 纯问候、感谢、告别、询问客服身份或能力归 smalltalk，goal 也填 smalltalk，needs_clarification 为 false；没有业务工具目标不等于 other。若闲聊和业务请求同时出现，分别输出，不要省略任一项。
 
