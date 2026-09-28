@@ -51,8 +51,10 @@ if (-not (Test-Path -LiteralPath $backendEnv -PathType Leaf)) {
 
 $dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
 $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
+$nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $dockerCommand) { throw 'Docker CLI is unavailable. Install and start Docker Desktop.' }
 if (-not $npmCommand) { throw 'npm.cmd is unavailable. Install Node.js and npm.' }
+if (-not $nodeCommand) { throw 'node.exe is unavailable. Install Node.js.' }
 
 $mysqlPassword = Read-DotEnvValue $mysqlEnv 'MYSQL_PASSWORD'
 $rootPassword = Read-DotEnvValue $mysqlEnv 'MYSQL_ROOT_PASSWORD'
@@ -139,12 +141,35 @@ try {
 if (Get-NetTCPConnection -LocalPort $apiPort -State Listen -ErrorAction SilentlyContinue) {
     throw "Port $apiPort is already in use. Stop the existing service before running start.ps1."
 }
+if (Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue) {
+    throw 'Port 5173 is already in use. Stop the existing frontend before running start.ps1.'
+}
+
+function Stop-StartedProcessTree {
+    param([System.Diagnostics.Process]$Process)
+
+    if (-not $Process) { return }
+    try {
+        $Process.Refresh()
+        if ($Process.HasExited) { return }
+
+        # Uvicorn --reload 会创建子进程；只 Stop-Process 父 PID 会留下监听端口的 worker。
+        & taskkill.exe /PID $Process.Id /T /F *> $null
+        if ($LASTEXITCODE -ne 0) { throw "taskkill exited with $LASTEXITCODE" }
+        $Process.WaitForExit(5000) | Out-Null
+    } catch {
+        Write-Warning "Could not stop process tree $($Process.Id): $($_.Exception.Message)"
+    }
+}
 
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $apiStdout = Join-Path $logDir 'api.stdout.log'
 $apiStderr = Join-Path $logDir 'api.stderr.log'
+$viteStdout = Join-Path $logDir 'vite.stdout.log'
+$viteStderr = Join-Path $logDir 'vite.stderr.log'
 $apiProcess = $null
 $miningProcess = $null
+$frontendProcess = $null
 
 try {
     Write-Host 'Starting FastAPI...'
@@ -188,28 +213,36 @@ try {
     $env:VITE_API_BASE_URL = '/api'
     $env:VITE_API_PROXY_TARGET = $apiBaseUrl
     Write-Host "FastAPI: $apiBaseUrl/api/health"
-    Write-Host 'Frontend: http://127.0.0.1:5173'
     Write-Host "FastAPI logs: $apiStdout and $apiStderr"
-    Write-Host 'Press Ctrl+C to stop the frontend and backend. MySQL will keep running.'
 
-    Push-Location $frontend
-    try {
-        & $npmCommand.Source run dev -- --host 127.0.0.1 --port 5173 --strictPort
-        if ($LASTEXITCODE -ne 0) { throw 'Frontend exited with an error.' }
-    } finally {
-        Pop-Location
+    # 直接启动 Vite 的 Node 入口，避免 npm.cmd 再派生一层无法被 Ctrl+C 稳定收回的进程。
+    $frontendProcess = Start-Process -FilePath $nodeCommand.Source `
+        -ArgumentList @((Join-Path $frontend 'node_modules\vite\bin\vite.js'), '--host', '127.0.0.1', '--port', '5173', '--strictPort') `
+        -WorkingDirectory $frontend -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput $viteStdout -RedirectStandardError $viteStderr
+    $frontendReady = $false
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        Start-Sleep -Seconds 1
+        $frontendProcess.Refresh()
+        if ($frontendProcess.HasExited) { break }
+        try {
+            $response = Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -UseBasicParsing -TimeoutSec 2
+            if ($response.StatusCode -eq 200) { $frontendReady = $true; break }
+        } catch {
+            # 等待 Vite 完成启动；失败时由下方错误提示指出日志位置。
+        }
     }
+    if (-not $frontendReady) { throw "Frontend did not start. Check $viteStderr" }
+    Write-Host 'Frontend: http://127.0.0.1:5173'
+    Write-Host "Frontend logs: $viteStdout and $viteStderr"
+    Write-Host 'Press Ctrl+C to stop the frontend and backend. MySQL will keep running.'
+    while (-not $frontendProcess.HasExited) {
+        Start-Sleep -Milliseconds 500
+        $frontendProcess.Refresh()
+    }
+    if ($frontendProcess.ExitCode -ne 0) { throw 'Frontend exited with an error. Check backend/.tmp/vite.stderr.log.' }
 } finally {
-    if ($miningProcess) {
-        $miningProcess.Refresh()
-        if (-not $miningProcess.HasExited) {
-            Stop-Process -Id $miningProcess.Id -Force -ErrorAction SilentlyContinue
-        }
-    }
-    if ($apiProcess) {
-        $apiProcess.Refresh()
-        if (-not $apiProcess.HasExited) {
-            Stop-Process -Id $apiProcess.Id -Force -ErrorAction SilentlyContinue
-        }
-    }
+    Stop-StartedProcessTree $frontendProcess
+    Stop-StartedProcessTree $miningProcess
+    Stop-StartedProcessTree $apiProcess
 }
