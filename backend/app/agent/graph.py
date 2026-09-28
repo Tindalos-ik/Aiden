@@ -1143,6 +1143,14 @@ def build_support_graph():
                 elif latest["name"] == "create_ticket":
                     prefix = "已有待处理工单" if payload.get("already_exists") else "已登记待处理工单"
                     reply = f"{prefix}，工单号：{payload['ticket_no']}。可查询工单进度。"
+                elif latest["name"] == "query_ticket" and payload.get("tickets"):
+                    labels = {"open": "待接单", "in_progress": "处理中", "resolved": "已解决，待关闭", "closed": "已关闭"}
+                    reply = "\n".join(
+                        f"工单 {row['ticket_no']}：当前状态为{labels.get(row['status'], row['status'])}。"
+                        for row in payload["tickets"] if isinstance(row, dict)
+                        and isinstance(row.get("ticket_no"), str)
+                        and isinstance(row.get("status"), str)
+                    )
                 elif payload.get("found") is False or (
                     latest["name"] == "search_faq" and not payload.get("results")
                 ):

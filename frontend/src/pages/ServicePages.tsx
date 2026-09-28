@@ -26,7 +26,9 @@ function ApplicationCard({ row, action }: { row: AfterSaleApplication; action?: 
 }
 
 function TicketCard({ row, action, linkedRequestNo }: { row: ServiceTicket; action?: React.ReactNode; linkedRequestNo?: string }) {
-  return <Card size="small" style={{ marginBottom: 12 }} title={<Space><b>{row.ticketNo}</b><Tag>{ticketStatus[row.status]}</Tag></Space>} extra={action}>
+  const status = ticketStatus[row.status] ?? row.status;
+  return <Card size="small" style={{ marginBottom: 12 }} title={<span style={{ overflowWrap: 'anywhere' }}>{row.ticketNo}</span>} extra={action}>
+    <p><Typography.Text strong>当前状态：</Typography.Text><Tag color={row.status === 'closed' ? 'default' : row.status === 'open' ? 'gold' : 'blue'}>{status}</Tag></p>
     <p>{row.description}</p>
     {row.afterSaleRequestId && <p>关联售后申请：{linkedRequestNo ?? row.afterSaleRequestId}</p>}
     {row.resolutionNote && <p>处理结果：{row.resolutionNote}</p>}

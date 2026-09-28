@@ -131,6 +131,19 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("人工客服队列", result["answer"])
         self.assertTrue(result["handoff_required"])
 
+    async def test_ticket_progress_always_names_the_status(self):
+        result, calls = await self.run_case(
+            "我的工单进度怎么样了",
+            [request("complaint", "ticket_status", "查询已有工单进度")],
+            {"query_ticket": {"status": "ok", "found": True, "tickets": [
+                {"ticket_no": "TK-001", "status": "in_progress"},
+                {"ticket_no": "TK-002", "status": "open"},
+            ]}},
+        )
+        self.assertEqual([name for name, _ in calls], ["query_ticket"])
+        self.assertIn("TK-001：当前状态为处理中", result["answer"])
+        self.assertIn("TK-002：当前状态为待接单", result["answer"])
+
     async def test_missing_target_does_not_block_policy_or_create_ticket(self):
         result, calls = await self.run_case(
             "这单物流到哪了，再告诉我退货政策",
