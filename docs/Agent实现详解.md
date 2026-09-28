@@ -127,20 +127,23 @@ class Settings:
 项目当前没有独立的 Prompt 管理服务或模板目录，提示词以 Python 常量保存：
 
 1. `SYSTEM_PROMPT` 在 `backend/app/agent/graph.py`，用于主回答模型。它说明客服语气、当前可用能力和不得编造数据等约束。`load_context()` 将它放在主模型上下文开头。
-2. `INTENT_CLASSIFICATION_PROMPT` 在 `backend/app/agent/intent.py`，将九类意图列成单选题并提供边界 few-shot 样例；`SEMANTIC_EXTRACTION_PROMPT` 只为可查询意图补全指代和订单目标。
+2. 当前运行的多请求识别指令是 `MULTI_REQUEST_PROMPT`，在 `backend/app/agent/intent.py`；同文件保留的单项分类和语义补全 Prompt 当前没有独立调用。退款办理的确认、原因及订单引用由多请求结构化结果表达。
 
-分类和补全时，`_structured_messages()` 会去掉历史中所有 `SystemMessage`（包括主客服 Prompt），换成该阶段专用指令及 JSON Schema。两个请求都使用网关 JSON 模式，再由 Pydantic 校验字段、枚举和范围。分类器可以看到用户和助手的对话历史，但不会继承主 Prompt，也不会收到业务工具定义。实现见 `backend/app/agent/graph.py`。
+识别时，`_structured_messages()` 会去掉历史中所有 `SystemMessage`（包括主客服 Prompt），换成当前阶段指令及 JSON Schema。`recognize_intent()` 先只用本轮原话拆分；缺目标或有待续的订单、退款上下文时再带近期历史识别。结果由 Pydantic 校验字段、枚举和范围；识别器不接收业务工具定义。实现见 `backend/app/agent/graph.py`。
 
 ### 5.2 输出字段由 Pydantic 模型限制
 
-第一阶段 `IntentClassification` 只允许两个字段（完整约束见 `backend/app/agent/intent.py`）：
+当前运行入口解析 `SupportRequests`，最多四项。每项由 `SupportRequest` 限定意图、目标、置信度、补全问题、编号和引用来源、动作原话、退款原因原话及退款登记态度。关键字段如下（完整约束见 `backend/app/agent/intent.py`）：
 
 | 字段 | 用途 |
 | --- | --- |
 | `intent` | 九选一：`logistics`、`order`、`product`、`refund_return`、`after_sales`、`complaint`、`smalltalk`、`human`、`other`。 |
 | `cofidence` | 0 到 1 的分类置信度；按请求约定保留此字段拼写。 |
+| `goal` | 固定业务目标：订单、物流、知识或政策、已有申请、已有工单、工单登记等。模型不能提交工具名。 |
+| `action_quote` | 从本轮原文摘录写操作或人工转接请求；服务端复核其来源。 |
+| `refund_reason_quote`、`refund_consent` | 退款原因原话，以及对上一轮退款工单登记询问的同意、拒绝或未表态。 |
 
-第二阶段 `SemanticExtraction` 只为订单、物流和商品咨询输出以下补全字段：
+订单、物流和商品咨询的内部路由仍使用 `SemanticExtraction` 的以下补全字段：
 
 | 字段 | 用途 |
 | --- | --- |
@@ -150,33 +153,34 @@ class Settings:
 | `needs_clarification` | 当前请求是否仍缺少查询必要信息。 |
 | `clarification_question` | 可选的澄清文案，不得索取密码、验证码等凭据。 |
 
-这里的“结构化提取”使用 `response_format={"type":"json_object"}` 请求 JSON，再由 Pydantic 验证；当前源码没有调用 LangChain 的 `with_structured_output()`。`recognize_intent()` 先分类，只有可查询类别再补全：
+这里的“结构化提取”使用 `response_format={"type":"json_object"}` 请求 JSON，再由 Pydantic 验证；当前源码没有调用 LangChain 的 `with_structured_output()`。运行入口是：
 
 ```python
 response = await json_model.ainvoke(
-    _structured_messages(state["messages"], INTENT_CLASSIFICATION_PROMPT, IntentClassification)
+    _structured_messages(state["messages"], MULTI_REQUEST_PROMPT, SupportRequests)
 )
-classification = IntentClassification.model_validate_json(_content_as_text(response.content))
+requests = SupportRequests.model_validate_json(_content_as_text(response.content))
 ```
 
-摘录见 `backend/app/agent/graph.py` 中的 `recognize_intent()`。如果任一阶段的 JSON 无法解析或字段验证失败，节点关闭工具权限并返回固定兜底答复。
+摘录见 `backend/app/agent/graph.py` 中的 `recognize_intent()`。如果 JSON 无法解析或字段验证失败，节点关闭工具权限并返回固定兜底答复。
 
 ### 5.3 模型分类结果不会直接授予权限
 
 这是理解该 Agent 的关键边界：模型负责“理解用户想做什么”，后端负责“允许做什么”。
 
-`_semantic_route()` 会依次处理分类结果：
+`route_intent()` 先检查每项意图与目标的允许组合和最低置信度，再按目标进入 `_semantic_route()`、`_service_route()` 或退款办理专用的 `_route_refund_request()`：
 
 1. 检查 `completed_question` 是否为空；空问题走兜底。
-2. 订单、物流和商品咨询意图的 `cofidence` 低于 `0.55` 时不进入查询；`other` 走兜底，退款退货、售后、投诉和人工分别走固定答复。无工具的 `smalltalk` 不受该门槛限制。
-3. 商品咨询意图最多获得 `search_faq` 权限；退款退货政策也归入 `refund_return`，当前没有单独的政策路由。
+2. 非闲聊意图的 `cofidence` 低于 `0.55` 时不进入工具；`other` 走兜底。无工具的 `smalltalk` 不受该门槛限制。
+3. 商品咨询和退款政策目标最多获得 `search_faq` 权限；已有退款申请只可用 `query_after_sale`，已有工单只可用 `query_ticket`。
 4. `smalltalk` 用于问候、自我介绍和能力范围咨询，不分配业务工具；主回答模型只能按 System Prompt 说明身份和已接入能力。
 5. 订单号必须能从真实用户消息或会话历史中逐字验证；分类模型编造或误提取的号码不会成为查询参数。
 6. 订单或物流缺少唯一目标时，服务端可以先查询该用户近期订单并列出选项。只有用户选择的订单经过本轮本人订单结果再次核对后，才会授权后续查询。
+7. 退款办理先核对本人订单和用户原因，再用 `search_faq` 核对政策证据。证据不足则不能进入确认；证据足够时生成登记前说明和固定确认话术，同时把待确认阶段存到助手消息的 `workflow_state`。只有紧邻上一轮的可信状态存在，且用户本轮明确同意，才开放 `create_ticket`。可见文字本身没有写入权限；拒绝或仅说“我要退款”均不写入。
 
-路由逻辑见 `backend/app/agent/graph.py` 中的 `_semantic_route()`。真正执行工具前，`_arguments_are_authorized()` 再检查工具名是否在白名单、参数是否只包含允许字段、订单号或 FAQ 问题是否与服务端计算结果匹配。置信度和分类结果都不能决定登录身份或扩大数据权限。
+路由逻辑见 `backend/app/agent/graph.py`。`dispatch_tool_call()` 只按服务端白名单和已复核字段构造参数；退款写入还检查跨轮确认授权。置信度和分类结果都不能决定登录身份或扩大数据权限。
 
-补全问题只替换本轮交给最终回答模型的 HumanMessage；数据库里保存的仍是用户原文。这样模型能读懂上下文，而历史记录和消息 API 不会被改写，相关代码在 `backend/app/agent/graph.py` 中的 `generate()`。
+补全问题交给当前单项的最终回答模型；数据库里保存的用户消息仍是原文。退款跨轮状态单独保存在助手消息的 `workflow_state`，不会作为消息 API 字段返回；相关代码在 `backend/app/agent/graph.py` 的 `generate()`、`save_answer()` 和 `backend/app/persistence/mysql/chat.py`。
 
 ## 6. 登录会话、聊天会话与历史裁剪
 

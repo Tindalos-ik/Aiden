@@ -284,6 +284,7 @@ def create_message_pair(
                     raise ValueError("当前会话正在生成回答，请稍后再发送")
                 assistant.content = ""
                 assistant.citations = []
+                assistant.workflow_state = None
                 assistant.status = "streaming"
                 assistant.created_at = now + timedelta(microseconds=1)
                 conversation.updated_at = assistant.created_at
@@ -336,14 +337,14 @@ def create_message_pair(
 
 def recent_messages(
     conversation_id: str, user_id: str, excluded_message_id: str
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """按归属加载最近上下文，关闭 Session 后再交给 LangGraph/模型调用。
 
     同时限制历史条数、单条消息长度和总字符数；本轮未完成的助手占位行会被排除。
     """
     with get_session_factory()() as session:
         rows = session.execute(
-            select(Message.sender_role, Message.content)
+            select(Message.sender_role, Message.content, Message.workflow_state)
             .join(Conversation, Conversation.id == Message.conversation_id)
             .where(
                 Conversation.id == conversation_id,
@@ -355,14 +356,15 @@ def recent_messages(
             .limit(settings.max_history_messages)
         ).all()
 
-    selected: list[dict[str, str]] = []
+    selected: list[dict[str, Any]] = []
     remaining_chars = settings.max_context_chars
-    for role, content in rows:
+    for role, content, workflow_state in rows:
         if remaining_chars <= 0:
             break
         text = content[: min(settings.max_message_chars, remaining_chars)]
         if text:
-            selected.append({"role": role, "content": text})
+            selected.append({"role": role, "content": text,
+                             "workflow_state": workflow_state if role == "assistant" else None})
             remaining_chars -= len(text)
     return list(reversed(selected))
 
@@ -377,6 +379,7 @@ def finish_assistant_message(
     citations: list[dict[str, Any]] | None = None,
     low_confidence: dict[str, str] | None = None,
     handoff: bool = False,
+    workflow_state: dict[str, Any] | None = None,
 ) -> bool:
     """完成回答，并在需要时同一事务转入人工队列；返回是否本次转接。"""
     now = utc_now_naive()
@@ -403,6 +406,7 @@ def finish_assistant_message(
             return False
         message.content = content
         message.citations = citations or []
+        message.workflow_state = workflow_state
         message.status = status
         conversation.updated_at = now
         conversation.last_message_preview = content[:120]

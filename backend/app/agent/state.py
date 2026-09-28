@@ -49,3 +49,10 @@ class SupportState(TypedDict, total=False):
     selection_order_no: str
     # 只允许对本轮本人订单查询结果中确定的订单发起详情或物流查询。
     authorized_order_no: str
+    # 退款办理只在本轮查询完成后进入下一阶段；跨轮状态从已保存助手消息读取。
+    refund_phase: str
+    refund_order_no: str
+    refund_reason: str
+    refund_authorized: bool
+    refund_context: dict[str, str]
+    refund_pending: dict[str, str]

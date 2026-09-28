@@ -518,6 +518,8 @@ class Message(UUIDPrimaryKey, Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     # 保存回答所依据的 chunk 快照，历史消息仍能展示生成当时的章节和原文。
     citations: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    # 仅服务端读取的跨轮业务阶段；不会作为消息 API 字段返回给客户端。
+    workflow_state: Mapped[dict | None] = mapped_column(JSON)
     client_message_id: Mapped[str | None] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="complete", server_default=text("'complete'")
@@ -547,7 +549,7 @@ class LowConfidenceQuestion(UUIDPrimaryKey, Base):
 
 
 class Ticket(UUIDPrimaryKey, TimestampMixin, Base):
-    """由会话转人工创建的工单。
+    """用户诉求登记的待处理工单，不代表售后申请已经创建。
 
     conversation_id 与 user_id 组成复合外键，数据库会验证工单归属与会话归属一致。
     ticket_no 对外唯一；issue_type 与 description 描述问题，assigned_staff_id 可选，
