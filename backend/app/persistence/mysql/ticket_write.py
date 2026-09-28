@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.persistence.mysql.database import get_session_factory
-from app.persistence.mysql.models import Conversation, Message, Ticket, User
+from app.persistence.mysql.models import Conversation, Message, Ticket
 
 
 class TicketSummary(NamedTuple):
@@ -49,9 +49,6 @@ def _register_ticket(
     issue_type: str,
     description: str,
 ) -> TicketSummary:
-    if issue_type == "refund_return":
-        # 同一用户退款写入串行化，防止不同消息并发确认时各建一张开放工单。
-        session.execute(select(User.id).where(User.id == user_id).with_for_update()).scalar_one()
     # 注入状态也必须在写入边界核验，防止错配状态把工单登记到其他会话。
     owned_assistant = session.scalar(
         select(Message.id)
@@ -70,18 +67,6 @@ def _register_ticket(
     existing = _owned_ticket(session, ticket_no, conversation_id, user_id)
     if existing is not None:
         return TicketSummary(existing.ticket_no, existing.status, existing.issue_type, True)
-    if issue_type == "refund_return":
-        subject, separator, _ = description.rpartition("；原因：")
-        if not separator:
-            subject = description
-        existing = session.scalar(select(Ticket).where(
-            Ticket.user_id == user_id,
-            Ticket.issue_type == issue_type,
-            Ticket.description.startswith(subject + (separator or ""), autoescape=True),
-            Ticket.status == "open",
-        ).with_for_update())
-        if existing is not None:
-            return TicketSummary(existing.ticket_no, existing.status, existing.issue_type, True)
 
     ticket = Ticket(
         ticket_no=ticket_no,
@@ -106,10 +91,11 @@ def create_user_ticket(
 ) -> TicketSummary:
     """核验会话和助手消息归属后登记待处理工单。
 
-    工单号由助手消息 ID 决定。相同消息再次执行返回已有工单；退款类型还锁定
-    当前用户行，在同一事务中按订单主题复用已有开放工单。并发同消息由唯一键兜底。
-    不更新会话状态，也不创建退款退货申请或人工接单记录。
+    工单号由助手消息 ID 决定。相同消息再次执行返回已有工单，并发同消息由
+    唯一键兜底。不更新会话状态，也不创建退款退货申请或人工接单记录。
     """
+    if issue_type not in {"after_sales", "complaint", "human"}:
+        raise ValueError("该诉求应使用正式售后申请路径")
     ticket_no = _ticket_no(assistant_message_id)
     try:
         with get_session_factory().begin() as session:

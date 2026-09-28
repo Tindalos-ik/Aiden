@@ -6,6 +6,7 @@ import { api, apiMode } from './api';
 import { LoginPage } from './pages/LoginPage';
 import { UserWorkspace } from './pages/UserWorkspace';
 import { StaffWorkspace } from './pages/StaffWorkspace';
+import { UserServicePage, StaffServicePage } from './pages/ServicePages';
 import { RagConsole } from './pages/RagConsole';
 import { RagEvals } from './pages/RagEvals';
 import { mockChannelName, mockStorageKey } from './api/mock';
@@ -72,8 +73,10 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<Landing />} />
       <Route path="/app" element={<RoleGate role="user"><UserWorkspace /></RoleGate>} />
+      <Route path="/app/service" element={<RoleGate role="user"><UserServicePage /></RoleGate>} />
       <Route path="/app/:conversationId" element={<RoleGate role="user"><UserWorkspace /></RoleGate>} />
       <Route path="/staff" element={<RoleGate role="staff"><StaffWorkspace /></RoleGate>} />
+      <Route path="/staff/service" element={<RoleGate role="staff"><StaffServicePage /></RoleGate>} />
       <Route path="/staff/rag" element={<RoleGate role="staff"><RagConsole /></RoleGate>} />
       <Route path="/staff/evals" element={<RoleGate role="staff"><RagEvals /></RoleGate>} />
       <Route path="/staff/:conversationId" element={<RoleGate role="staff"><StaffWorkspace /></RoleGate>} />

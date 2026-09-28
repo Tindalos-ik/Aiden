@@ -313,14 +313,15 @@ class AfterSaleRequest(UUIDPrimaryKey, TimestampMixin, Base):
 
     两条复合外键分别保证申请用户拥有该订单、可选订单行属于该订单，避免关联错单。
     request_type 区分退货、退款和换货；reason 记录申请原因，requested_amount 为
-    可选的申请金额，status 与 resolved_at 记录处理进度和完成时间。
+    可选的申请金额。审核、推进及终结分别记录操作者和时间；退款待外部支付处理
+    与申请已完成是不同状态。
     """
 
     __tablename__ = "after_sale_requests"
     __table_args__ = (
         CheckConstraint("request_type IN ('return', 'refund', 'exchange')", name="request_type_valid"),
         CheckConstraint(
-            "status IN ('pending', 'approved', 'rejected', 'processing', 'completed', 'cancelled')",
+            "status IN ('pending', 'approved', 'rejected', 'processing', 'awaiting_external_refund', 'completed', 'cancelled')",
             name="status_valid",
         ),
         CheckConstraint(
@@ -337,6 +338,8 @@ class AfterSaleRequest(UUIDPrimaryKey, TimestampMixin, Base):
         ),
         Index("ix_after_sale_requests_user_created", "user_id", "created_at"),
         Index("ix_after_sale_requests_order", "order_id"),
+        UniqueConstraint("user_id", "submission_key", name="uq_after_sale_submission"),
+        UniqueConstraint("id", "user_id", name="uq_after_sale_id_user"),
     )
 
     request_no: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
@@ -348,6 +351,14 @@ class AfterSaleRequest(UUIDPrimaryKey, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending", server_default=text("'pending'"))
     requested_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
+    submission_key: Mapped[str | None] = mapped_column(String(100))
+    policy_reference: Mapped[str | None] = mapped_column(String(255))
+    reviewed_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    processing_at: Mapped[datetime | None] = mapped_column(DateTime)
+    processing_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    resolved_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    decision_note: Mapped[str | None] = mapped_column(Text)
 
 
 class Policy(UUIDPrimaryKey, TimestampMixin, Base):
@@ -553,7 +564,8 @@ class Ticket(UUIDPrimaryKey, TimestampMixin, Base):
 
     conversation_id 与 user_id 组成复合外键，数据库会验证工单归属与会话归属一致。
     ticket_no 对外唯一；issue_type 与 description 描述问题，assigned_staff_id 可选，
-    resolved_at 记录解决时刻。
+    resolved_at 和 closed_at 分别记录解决、关闭时刻。after_sale_request_id 可关联
+    同一用户的正式申请，不能把工单本身视为申请。
     """
 
     __tablename__ = "tickets"
@@ -565,6 +577,11 @@ class Ticket(UUIDPrimaryKey, TimestampMixin, Base):
             ondelete="RESTRICT",
         ),
         Index("ix_tickets_user_status_created", "user_id", "status", "created_at"),
+        ForeignKeyConstraint(
+            ["after_sale_request_id", "user_id"],
+            ["after_sale_requests.id", "after_sale_requests.user_id"],
+            ondelete="RESTRICT",
+        ),
     )
 
     ticket_no: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
@@ -577,6 +594,11 @@ class Ticket(UUIDPrimaryKey, TimestampMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL")
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
+    after_sale_request_id: Mapped[str | None] = mapped_column(String(36))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+    closed_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
 
 class UnansweredQuestion(UUIDPrimaryKey, Base):

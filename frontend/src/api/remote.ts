@@ -1,5 +1,5 @@
 import type { AidenApi } from './contracts';
-import type { Actor, Citation, Conversation, Message, OrderCard, StreamEvent } from '../types';
+import type { Actor, Citation, Conversation, Message, OrderCard, StreamEvent, ServiceOrder, AfterSalePreview, AfterSaleApplication, ServiceTicket } from '../types';
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
@@ -205,6 +205,26 @@ export const remoteApi: AidenApi = {
   },
   async closeConversation(conversationId) {
     return request<Conversation>(`/staff/conversations/${encodeURIComponent(conversationId)}/close`, { method: 'POST', body: JSON.stringify({}) });
+  },
+  async listServiceOrders() { return request<ServiceOrder[]>('/service/orders'); },
+  async previewAfterSale(orderNo, kind) {
+    return request<AfterSalePreview>(`/service/orders/${encodeURIComponent(orderNo)}/after-sale-preview?requestType=${kind}`);
+  },
+  async submitAfterSale(input) {
+    return request<AfterSaleApplication>('/service/after-sales', { method: 'POST', body: JSON.stringify(input) });
+  },
+  async listAfterSales() { return request<AfterSaleApplication[]>('/service/after-sales'); },
+  async cancelAfterSale(id) {
+    return request<AfterSaleApplication>(`/service/after-sales/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+  },
+  async listTickets() { return request<ServiceTicket[]>('/service/tickets'); },
+  async listStaffAfterSales() { return request<AfterSaleApplication[]>('/staff/service/after-sales'); },
+  async transitionAfterSale(id, status, note) {
+    return request<AfterSaleApplication>(`/staff/service/after-sales/${encodeURIComponent(id)}/transition`, { method: 'POST', body: JSON.stringify({ status, note }) });
+  },
+  async listStaffTickets() { return request<ServiceTicket[]>('/staff/service/tickets'); },
+  async transitionTicket(id, status, note, afterSaleRequestId) {
+    return request<ServiceTicket>(`/staff/service/tickets/${encodeURIComponent(id)}/transition`, { method: 'POST', body: JSON.stringify({ status, note, afterSaleRequestId }) });
   },
   async resetDemoData() {
     throw new Error('演示数据仅存在于 mock 模式，当前远端模式不会修改服务端数据。');

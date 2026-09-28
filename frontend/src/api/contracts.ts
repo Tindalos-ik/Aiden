@@ -1,4 +1,4 @@
-import type { Actor, Conversation, LoginInput, Message, StreamEvent } from '../types';
+import type { Actor, Conversation, LoginInput, Message, StreamEvent, ServiceOrder, AfterSalePreview, AfterSaleApplication, ServiceTicket, SubmitAfterSaleInput } from '../types';
 
 export interface AidenApi {
   login(input: LoginInput): Promise<Actor>;
@@ -23,5 +23,15 @@ export interface AidenApi {
   acceptConversation(conversationId: string): Promise<Conversation>;
   sendStaffMessage(conversationId: string, text: string): Promise<Message>;
   closeConversation(conversationId: string): Promise<Conversation>;
+  listServiceOrders(): Promise<ServiceOrder[]>;
+  previewAfterSale(orderNo: string, kind: SubmitAfterSaleInput['requestType']): Promise<AfterSalePreview>;
+  submitAfterSale(input: SubmitAfterSaleInput): Promise<AfterSaleApplication>;
+  listAfterSales(): Promise<AfterSaleApplication[]>;
+  cancelAfterSale(id: string): Promise<AfterSaleApplication>;
+  listTickets(): Promise<ServiceTicket[]>;
+  listStaffAfterSales(): Promise<AfterSaleApplication[]>;
+  transitionAfterSale(id: string, status: string, note: string): Promise<AfterSaleApplication>;
+  listStaffTickets(): Promise<ServiceTicket[]>;
+  transitionTicket(id: string, status: string, note: string, afterSaleRequestId?: string): Promise<ServiceTicket>;
   resetDemoData(): Promise<void>;
 }

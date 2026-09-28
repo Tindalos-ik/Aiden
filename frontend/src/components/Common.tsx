@@ -48,8 +48,10 @@ export function PageHeader({ actor }: { actor: Actor }) {
     navigate('/login', { replace: true });
   };
   return <header className="app-topbar">
-    <div className="topbar-left"><Brand compact /><span className="topbar-divider" /><span className="workspace-label">{actor.role === 'staff' ? location.pathname.startsWith('/staff/evals') ? 'RAG 评估' : location.pathname.startsWith('/staff/rag') ? 'RAG 建库控制台' : '人工客服工作台' : '智能订单客服'}</span></div>
+    <div className="topbar-left"><Brand compact /><span className="topbar-divider" /><span className="workspace-label">{location.pathname.includes('/service') ? '售后与工单' : actor.role === 'staff' ? location.pathname.startsWith('/staff/evals') ? 'RAG 评估' : location.pathname.startsWith('/staff/rag') ? 'RAG 建库控制台' : '人工客服工作台' : '智能订单客服'}</span></div>
     <div className="topbar-right"><ModePill />
+      <Button type="text" onClick={() => navigate(actor.role === 'staff' ? '/staff/service' : '/app/service')}>售后与工单</Button>
+      {location.pathname.includes('/service') && <Button type="text" onClick={() => navigate(actor.role === 'staff' ? '/staff' : '/app')}>返回会话</Button>}
       {actor.role === 'staff' && <Button type="text" icon={<DatabaseOutlined />} onClick={() => navigate('/staff/rag')}>RAG 建库</Button>}
       {actor.role === 'staff' && location.pathname.startsWith('/staff/rag') && <Button type="text" icon={<CustomerServiceOutlined />} onClick={() => navigate('/staff')}>客服工作台</Button>}
       {apiMode === 'mock' && <Button className="reset-button" type="text" icon={<ReloadOutlined />} loading={busy} onClick={reset}>重置演示</Button>}

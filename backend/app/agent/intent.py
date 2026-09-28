@@ -105,8 +105,10 @@ class SupportRequest(BaseModel):
     )
     refund_reason_quote: str | None = Field(default=None, max_length=160,
         description="办理退款时，逐字摘录本轮用户说明的退款原因；未说明则为 null。")
+    application_type: Literal["refund", "return", "exchange", "none"] = Field(
+        default="none", description="本轮或已确认上下文的正式申请类型；无法确定时选 none。")
     refund_consent: Literal["agree", "decline", "none"] = Field(default="none",
-        description="仅对上一轮明确提出的退款工单登记请求，识别本轮同意、拒绝或未表态。")
+        description="仅对上一轮明确提出的退款申请提交请求，识别本轮同意、拒绝或未表态。")
     needs_clarification: bool
     clarification_question: str | None = Field(default=None, max_length=240)
 
@@ -120,13 +122,13 @@ class SupportRequests(BaseModel):
 
 MULTI_REQUEST_PROMPT = """你是电商客服请求拆分器。只处理对话中最后一条用户消息；历史仅用于补全这条消息中的指代，不要把历史请求或客服回复当成本轮诉求。按用户本轮表达顺序，将每个能独立回答的诉求拆成 requests 列表，最多四项。重复的同一诉求只保留一项；超过四项时不要省略，输出超过四项由服务端要求用户分批发送。
 
-每项给出九类 intent、处理目标 goal、置信度 cofidence、独立补全后的 completed_question、entities.order_no/order_reference/reference_quote/list_index/order_suffix、request_no、ticket_no、action_quote、refund_reason_quote、refund_consent、needs_clarification 和 clarification_question。只能从固定枚举选择，不能输出工具名、用户 ID 或其他字段。
+每项给出九类 intent、处理目标 goal、置信度 cofidence、独立补全后的 completed_question、entities.order_no/order_reference/reference_quote/list_index/order_suffix、request_no、ticket_no、action_quote、refund_reason_quote、application_type、refund_consent、needs_clarification 和 clarification_question。只能从固定枚举选择，不能输出工具名、用户 ID 或其他字段。
 
 goal 对应：order 查订单；logistics 查物流；product 查商品知识；policy 检索政策文档中的规则；after_sale_status 查已提交售后申请；ticket_status 查已有工单；create_ticket 登记用户明确要求的投诉处理或办理售后；smalltalk 闲聊；other 无法判断。退款退货或售后意图可对应 policy、after_sale_status、ticket_status、create_ticket；要办理尚未提交的退款、退货或换货选 create_ticket，只询问规则或条件才选 policy，查询已提交申请的进度选 after_sale_status。明确要求“找真人/转人工/联系人工客服”时 intent 选 human、goal 选 other，由服务端转入实时人工队列；只有明确登记处理工单时才选 create_ticket。投诉可以提供转人工选择，不能仅凭“投诉”一词自动转接。查询申请进度、政策、工单进度本身不意味着要登记工单。
 
 纯问候、感谢、告别、询问客服身份或能力归 smalltalk，goal 也填 smalltalk，needs_clarification 为 false；没有业务工具目标不等于 other。若闲聊和业务请求同时出现，分别输出，不要省略任一项。
 
-用户希望办理退款时仍选 create_ticket，但这只表示进入核对流程，并不授权立即建单。先确认本人订单、退款原因和适用政策，解释只能登记待处理工单；上一轮客服明确询问是否登记该订单的退款处理工单后，本轮用户明确同意才将 refund_consent 设为 agree，明确拒绝设为 decline，其余为 none。“我要退款”“帮我登记退款处理”这类首次请求均为 none。确认或拒绝要结合最近一条客服答复理解，不能仅凭孤立词匹配。办理退款原因从本轮原话逐字摘录到 refund_reason_quote；只有订单选择、没有原因时为 null。仅缺订单号或原因不应阻止列本人订单或自然追问。
+用户希望办理退款、退货或换货时仍选 create_ticket 这个处理目标，但它只表示进入服务端核对流程，不能自行决定写入。application_type 按用户实际要办理的类型填写 refund、return 或 exchange；用户仅说“售后申请”且无法判断类型时选 none，不要默认退款。先确认本人订单、原因和适用政策；上一轮客服明确询问是否正式提交该订单的退款申请后，本轮用户明确同意才将 refund_consent 设为 agree，明确拒绝设为 decline，其余为 none。“我要退款”这类首次请求均为 none。确认或拒绝要结合最近一条客服答复理解，不能仅凭孤立词匹配。办理退款原因从本轮原话逐字摘录到 refund_reason_quote；只有订单选择、没有原因时为 null。仅缺订单号或原因不应阻止列本人订单或自然追问。
 客服刚列出退款办理订单候选后，用户回复“第一个”“尾号001”“那笔猫粮”属于继续办理退款，intent 仍为 refund_return、goal 仍为 create_ticket，并按订单列表引用字段填写选择。客服刚核对订单并追问退款原因后，用户只回复原因也属于继续办理退款。客服刚给出退款处理待确认话术后，用户回复同意或取消仍属于同一项退款办理诉求，不要归为闲聊或一般订单查询。
 
 只有用户明确要求本轮办理退款退货、投诉处理、登记工单或进入人工队列时，才填写 action_quote：从本轮用户消息逐字摘录表达该操作的完整短句。查询政策、已有申请或工单进度时填 null；不能把另一项请求的操作短句借给当前项。

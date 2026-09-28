@@ -51,20 +51,20 @@ _ORDER_LIST_PRODUCT_LIMIT = 3
 _REFUND_REASON_PROMPT = "退款处理核对：订单号 {order_no}。请说明这笔订单的退款原因，以便核对适用政策。"
 _REFUND_CONFIRM_PROMPT = (
     "退款处理待确认：订单号 {order_no}；原因 {reason}；"
-    "如同意登记这项待处理工单，请回复“确认登记”；不同意请回复“取消”。"
+    "如同意正式提交退款申请供员工审核，请回复“确认提交”；不同意请回复“取消”。"
 )
 
 
-# 商品知识和政策文档均从知识库检索；售后、工单状态只读查询。
+# 商品知识和政策文档从知识库检索；售后提交由服务端再次核验。
 SYSTEM_PROMPT = """你是「喵购商城」的智能客服 Aiden，语气亲切、回答简洁，不用网络烂梗。
 
-可以查询当前登录用户的订单、物流、售后申请和工单进度，检索已入库的商品知识和政策文档，并登记待人工处理的工单。对于问候、感谢或自我介绍，可以不调用工具简短回答。你不是真人客服；登记工单不等于实时接入人工，也不等于已经创建退款退货申请。查询和登记结果必须以本轮工具返回为准。
+可以查询当前登录用户的订单、物流、售后申请和工单进度，检索已入库的商品知识和政策文档，提交经确认的退款申请，并登记投诉或异常工单。对于问候、感谢或自我介绍，可以不调用工具简短回答。你不是真人客服；工单与正式售后申请是不同业务记录。查询和提交结果必须以本轮工具返回为准。
 
 必须遵守：
 1. 订单详情和状态只依据 query_order 的结果；物流只依据 query_logistics 的结果。订单号必须原样使用补全问题中已识别的号码，不得改写或猜测。
 2. 商品知识和政策规则只能依据 search_faq 本轮返回的知识块作答。调用时把补全后的当前问题作为 question 参数；检索侧负责归一和同义词扩展。每条知识事实标出对应结果的 citation 编号，如 [1]，不能引用未返回的编号。
 3. search_faq 没有返回内容，或返回内容与问题不符时，说明暂时无法核实。政策的版本、生效时间和适用条件只能按检索证据陈述；证据未说明时不要声称已核实其当前生效状态，也不能从模型记忆或其他用户历史补条款。
-4. 售后申请进度只依据 query_after_sale，工单进度只依据 query_ticket。退款办理先核对本人订单、用户原因及知识库政策，说明只能登记待处理工单，获得针对该订单的明确同意后才能登记。create_ticket 成功时只说明已登记工单及工单号；不能声称退款申请已提交、人工已接入或处理结果已确定。创建失败时不得说已登记。
+4. 售后申请进度只依据 query_after_sale，工单进度只依据 query_ticket。退款办理先核对本人订单、商品、原因及政策，获得明确确认后由服务端提交申请。审核通过不等于款项已退，不得声称人工已接入或处理结果已确定。
 5. 查询为空、报错或结果互相矛盾时如实说明；不得编造订单、金额、物流节点、日期、政策或承诺。
 6. 缺少唯一订单目标时，服务端可能先列出本人近期订单。语义识别可以结合最近一条规范订单列表中的序号或商品内容补全用户选择；只有该选择经服务端核验且属于当前用户时才能继续查询，不得自行猜选。
 7. 工具计划和原始工具结果都不是最终答复。工具结果返回后再回答，不要把工具参数、JSON 或内部结果原样当成答案。
@@ -627,6 +627,8 @@ def _refund_order_result(state: SupportState) -> dict[str, Any]:
                     and row.get("order_no") == requested), None)
     if not _valid_order_no(requested) or matched is None:
         return {"allowed_tools": [], "refund_phase": "", "direct_reply": "当前账号下没有核对到这笔订单，请提供本人订单号或从近期订单中选择。"}
+    if len(matched.get("items") or []) != 1:
+        return {"allowed_tools": [], "refund_phase": "", "direct_reply": "这笔订单包含多件商品或缺少商品明细。请打开“售后与工单”页面，选择具体商品并核对政策后提交申请。"}
     reason = state.get("refund_reason", "")
     if not reason:
         return {"allowed_tools": [], "refund_phase": "", "refund_order_no": requested,
@@ -705,20 +707,26 @@ def _route_refund_request(
     same_turn_order_options: list[str] | None, context: dict[str, str],
 ) -> dict[str, Any]:
     """退款办理先核单和政策；只有上一轮已给出固定确认请求才可能写入。"""
+    if request.application_type in {"return", "exchange"}:
+        return {"allowed_tools": [], "direct_reply": "请打开“售后与工单”页面，选择本人订单和具体商品，核对政策并提交正式退货或换货申请。",
+                "refund_phase": "", "refund_authorized": False}
+    if request.application_type != "refund" and context.get("stage") not in {"reason", "confirm"}:
+        return {"allowed_tools": [], "direct_reply": "请说明要申请退款、退货还是换货；也可以在“售后与工单”页面选择申请类型。",
+                "refund_phase": "", "refund_authorized": False}
     if request.refund_consent == "decline" and context.get("stage") == "confirm":
-        return {"allowed_tools": [], "direct_reply": "好的，我不会登记这项退款处理工单。",
+        return {"allowed_tools": [], "direct_reply": "好的，我不会提交这项退款申请。",
                 "refund_phase": "", "refund_authorized": False}
     if request.refund_consent == "agree":
         quote = (request.action_quote or "").strip()
         if context.get("stage") == "confirm" and quote and quote in _latest_user_text(messages):
             order_no, reason = context["order_no"], context["reason"]
             return {
-                "allowed_tools": ["create_ticket"], "direct_reply": "",
+                "allowed_tools": ["submit_after_sale"], "direct_reply": "",
                 "refund_phase": "confirm", "refund_order_no": order_no,
                 "refund_reason": reason, "refund_authorized": True,
                 "semantic_result": {"classification": {"intent": "refund_return"}},
             }
-        return {"allowed_tools": [], "direct_reply": "请先确定订单和退款原因，待我核对政策后再确认是否登记工单。",
+        return {"allowed_tools": [], "direct_reply": "请先确定订单和退款原因，待我核对政策后再确认是否提交申请。",
                 "refund_phase": "", "refund_authorized": False}
 
     reason = _verified_refund_reason(request, messages)
@@ -1020,20 +1028,18 @@ def build_support_graph():
             ticket_no = service.get("ticket_no") if isinstance(service, dict) else None
             if isinstance(ticket_no, str) and ticket_no.strip():
                 args["ticket_no"] = ticket_no.strip()
+        elif name == "submit_after_sale":
+            if not state.get("refund_authorized") or state.get("refund_phase") != "confirm":
+                return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
+            args["order_no"] = state["refund_order_no"]
+            args["reason"] = state["refund_reason"]
         elif name == "create_ticket":
             issue_type = classification.get("intent") if isinstance(classification, dict) else None
-            if issue_type not in {"refund_return", "after_sales", "complaint", "human"}:
+            if issue_type not in {"after_sales", "complaint", "human"}:
                 return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
             args["issue_type"] = issue_type
-            if issue_type == "refund_return":
-                if not state.get("refund_authorized") or state.get("refund_phase") != "confirm":
-                    return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
-                args["description"] = (
-                    f"订单 {state['refund_order_no']} 的退款处理请求；原因：{state['refund_reason']}"
-                )
-            else:
-                request_index = state.get("request_index", 0)
-                args["description"] = state["requests"][request_index]["action_quote"]
+            request_index = state.get("request_index", 0)
+            args["description"] = state["requests"][request_index]["action_quote"]
 
         call = {
             "name": name,
@@ -1126,15 +1132,17 @@ def build_support_graph():
                 latest = tools[-1]
                 payload = latest["payload"]
                 if payload.get("status") != "ok":
-                    reply = "这项查询暂时失败，请稍后重试。" if latest["name"] != "create_ticket" else "工单登记暂时失败，请稍后重试。"
+                    reply = str(payload.get("message") or ("申请提交暂时失败，请稍后重试。" if latest["name"] == "submit_after_sale" else "查询暂时失败，请稍后重试。"))
+                elif latest["name"] == "submit_after_sale":
+                    prefix = "已有待处理申请" if payload.get("already_exists") else "已提交退款申请"
+                    reply = f"{prefix}，申请号：{payload['request_no']}。当前待审核；审核通过不代表款项已退，后续进度可查询申请号。"
                 elif latest["name"] == "search_faq" and not item.get("citations"):
                     reply = _KNOWLEDGE_REFUSAL
                 elif latest["name"] == "create_ticket" and not payload.get("ticket_no"):
                     reply = "工单登记未返回工单号，请稍后核实。"
                 elif latest["name"] == "create_ticket":
                     prefix = "已有待处理工单" if payload.get("already_exists") else "已登记待处理工单"
-                    reply = (f"{prefix}，工单号：{payload['ticket_no']}。"
-                             "工单只用于后续处理，不代表退款申请已提交或退款成功。")
+                    reply = f"{prefix}，工单号：{payload['ticket_no']}。可查询工单进度。"
                 elif payload.get("found") is False or (
                     latest["name"] == "search_faq" and not payload.get("results")
                 ):
@@ -1175,7 +1183,7 @@ def build_support_graph():
                 refund_policy = item.get("goal") == "create_ticket" and item.get("refund_phase") == "policy"
                 response = await model.ainvoke([
                     SystemMessage(content=SYSTEM_PROMPT + "\n只回答这一项请求。必须以给出的本轮结果为准，简短说明查到的事实；不要输出 JSON 或工具名。商品知识和政策规则的每条事实必须引用给出的编号。"
-                                  + ("\n这是退款处理的登记前说明：指出已核对的订单事实、政策证据能确认的条件、仍缺少或无法判断的信息；只能提出登记待处理工单供后续核查，不得说退款资格、金额或时效已经确定，也不要自行要求用户确认。" if refund_policy else "")),
+                                  + ("\n这是退款申请提交前说明：指出已核对的订单事实、政策证据能确认的条件、仍缺少或无法判断的信息；提交后待员工审核，不得说退款资格、金额或时效已经确定，也不要自行要求用户确认。" if refund_policy else "")),
                     HumanMessage(content=json.dumps({"question": item["question"], "evidence": evidence}, ensure_ascii=False)),
                 ])
                 reply = _content_as_text(response.content).strip()

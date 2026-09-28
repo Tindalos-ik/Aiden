@@ -19,6 +19,7 @@ def request(intent, goal, question, order_no=None, confidence=0.98, clarify=Fals
         "entities": {"order_no": order_no, "order_reference": "explicit" if order_no else "none"},
         "request_no": None, "ticket_no": None, "action_quote": action_quote,
         "refund_reason_quote": refund_reason_quote, "refund_consent": refund_consent,
+        "application_type": "refund" if intent == "refund_return" and goal == "create_ticket" else "none",
         "needs_clarification": clarify, "clarification_question": None,
     }
 
@@ -162,10 +163,19 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         result, calls = await self.run_case(
             "我要退款",
             [request("refund_return", "create_ticket", "办理退款", action_quote="我要退款")],
-            {"query_order": {"status": "ok", "orders": [{"order_no": "TEST-001", "items": []}]}},
+            {"query_order": {"status": "ok", "orders": [{"order_no": "TEST-001", "items": [{"product_name": "商品"}]}]}},
         )
         self.assertEqual([name for name, _ in calls], ["query_order"])
         self.assertIn("TEST-001", result["answer"])
+
+    async def test_return_and_exchange_route_to_form_without_refund_write(self):
+        for kind in ("return", "exchange"):
+            with self.subTest(kind=kind):
+                item = request("refund_return", "create_ticket", "办理售后申请", action_quote="办理售后申请")
+                item["application_type"] = kind
+                result, calls = await self.run_case("办理售后申请", [item])
+                self.assertEqual(calls, [])
+                self.assertIn("售后与工单", result["answer"])
 
     async def test_refund_policy_and_existing_application_keep_read_permissions(self):
         policy, calls = await self.run_case(
@@ -193,7 +203,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         result, calls = await self.run_case(
             "第一个",
             [selected],
-            {"query_order": {"status": "ok", "orders": [{"order_no": "TEST-001", "items": []}]}},
+            {"query_order": {"status": "ok", "orders": [{"order_no": "TEST-001", "items": [{"product_name": "商品"}]}]}},
             history=[{"role": "assistant", "content": previous}],
         )
         self.assertEqual([name for name, _ in calls], ["query_order", "query_order"])
@@ -206,14 +216,14 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         result, calls = await self.run_case(
             "最近一笔订单我要退款",
             [selected],
-            {"query_order": {"status": "ok", "orders": [{"order_no": "TEST-001", "items": []}]}},
+            {"query_order": {"status": "ok", "orders": [{"order_no": "TEST-001", "items": [{"product_name": "商品"}]}]}},
         )
         self.assertEqual([name for name, _ in calls], ["query_order", "query_order"])
         self.assertEqual(calls[-1][1], {"order_no": "TEST-001"})
         self.assertIn("退款原因", result["answer"])
 
-    async def test_refund_reason_policy_and_confirmed_ticket(self):
-        order = {"status": "ok", "orders": [{"order_no": "TEST-001", "status": "delivered", "items": []}]}
+    async def test_refund_reason_policy_and_confirmed_application(self):
+        order = {"status": "ok", "orders": [{"order_no": "TEST-001", "status": "delivered", "items": [{"product_name": "商品"}]}]}
         first, calls = await self.run_case(
             "帮我登记订单 TEST-001 的退款处理",
             [request("refund_return", "create_ticket", "办理 TEST-001 退款", "TEST-001",
@@ -235,18 +245,18 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("退款处理待确认", prepared["answer"])
         self.assertIn("[1]", prepared["answer"])
         confirmed, calls = await self.run_case(
-            "确认登记",
-            [request("refund_return", "create_ticket", "确认登记订单退款工单",
-                     action_quote="确认登记", refund_consent="agree")],
-            {"create_ticket": {"status": "ok", "ticket_no": "T-1"}},
+            "确认提交",
+            [request("refund_return", "create_ticket", "确认提交订单退款申请",
+                     action_quote="确认提交", refund_consent="agree")],
+            {"submit_after_sale": {"status": "ok", "request_no": "AS-1"}},
             history=[{"role": "assistant", "content": prepared["answer"],
                       "workflow_state": {"refund": prepared["refund_pending"]}}],
         )
-        self.assertEqual([name for name, _ in calls], ["create_ticket"])
-        self.assertIn("订单 TEST-001", calls[0][1]["description"])
-        self.assertIn("质量问题", calls[0][1]["description"])
-        self.assertIn("待处理工单", confirmed["answer"])
-        self.assertIn("不代表退款申请已提交", confirmed["answer"])
+        self.assertEqual([name for name, _ in calls], ["submit_after_sale"])
+        self.assertEqual(calls[0][1]["order_no"], "TEST-001")
+        self.assertEqual(calls[0][1]["reason"], "质量问题")
+        self.assertIn("已提交退款申请", confirmed["answer"])
+        self.assertIn("审核通过不代表款项已退", confirmed["answer"])
         declined, calls = await self.run_case(
             "取消",
             [request("refund_return", "create_ticket", "取消登记退款工单",
@@ -255,17 +265,17 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
                       "workflow_state": {"refund": prepared["refund_pending"]}}],
         )
         self.assertEqual(calls, [])
-        self.assertIn("不会登记", declined["answer"])
+        self.assertIn("不会提交", declined["answer"])
         repeated, calls = await self.run_case(
-            "确认登记",
-            [request("refund_return", "create_ticket", "确认登记订单退款工单",
-                     action_quote="确认登记", refund_consent="agree")],
-            {"create_ticket": {"status": "ok", "ticket_no": "T-1", "already_exists": True}},
+            "确认提交",
+            [request("refund_return", "create_ticket", "确认提交订单退款申请",
+                     action_quote="确认提交", refund_consent="agree")],
+            {"submit_after_sale": {"status": "ok", "request_no": "AS-1", "already_exists": True}},
             history=[{"role": "assistant", "content": prepared["answer"],
                       "workflow_state": {"refund": prepared["refund_pending"]}}],
         )
-        self.assertEqual([name for name, _ in calls], ["create_ticket"])
-        self.assertIn("已有待处理工单", repeated["answer"])
+        self.assertEqual([name for name, _ in calls], ["submit_after_sale"])
+        self.assertIn("已有待处理申请", repeated["answer"])
 
     async def test_refund_consent_without_prepared_context_cannot_write(self):
         result, calls = await self.run_case(
@@ -293,12 +303,11 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual([name for name, _ in calls], ["query_order"])
 
-    def test_refund_tool_rejects_missing_confirmation(self):
+    def test_refund_ticket_tool_is_disabled(self):
         with patch("app.services.tools.ticket_create.create_user_ticket") as writer:
             payload = json.loads(create_ticket.func(
                 issue_type="refund_return", description="订单 TEST-001 的退款处理请求",
                 user_id="u", conversation_id="c", assistant_message_id="m",
-                refund_authorized=False,
             ))
         self.assertEqual(payload["status"], "invalid")
         writer.assert_not_called()
@@ -308,7 +317,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
             "订单 TEST-001 因质量问题我要退款",
             [request("refund_return", "create_ticket", "办理 TEST-001 退款", "TEST-001",
                      action_quote="我要退款", refund_reason_quote="质量问题")],
-            {"query_order": {"status": "ok", "orders": [{"order_no": "TEST-001"}]},
+            {"query_order": {"status": "ok", "orders": [{"order_no": "TEST-001", "items": [{"product_name": "商品"}]}]},
              "search_faq": {"status": "ok", "results": []}},
         )
         self.assertEqual([name for name, _ in calls], ["query_order", "search_faq"])

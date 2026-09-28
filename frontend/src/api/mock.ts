@@ -1,5 +1,5 @@
 import type { AidenApi } from './contracts';
-import type { Actor, Conversation, Message, OrderCard, StreamEvent } from '../types';
+import type { Actor, Conversation, Message, OrderCard, StreamEvent, AfterSaleApplication, ServiceTicket } from '../types';
 import { demoAccounts, demoOrdersByUser } from '../data/demoData';
 
 const DB_KEY = 'aiden-demo-db-v1';
@@ -11,6 +11,8 @@ interface DemoDatabase {
   conversations: Conversation[];
   messages: Message[];
   ordersByUser: Record<string, OrderCard[]>;
+  afterSales?: AfterSaleApplication[];
+  tickets?: ServiceTicket[];
 }
 
 const makeId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -38,6 +40,15 @@ function seedDatabase(): DemoDatabase {
     conversations,
     messages,
     ordersByUser: demoOrdersByUser,
+    afterSales: [],
+    tickets: [{
+      id: 'demo-ticket-maya', ticketNo: 'TK-DEMO-001', userId: 'user-maya',
+      conversationId: 'user-maya-history', issueType: 'complaint',
+      description: '演示工单：配送延迟，需要客服核实。', status: 'open',
+      assignedStaffId: null, afterSaleRequestId: null, acceptedAt: null,
+      resolvedAt: null, closedAt: null, closedById: null, resolutionNote: null,
+      createdAt: ago(120), updatedAt: ago(120),
+    }],
   };
 }
 
@@ -336,6 +347,101 @@ export const mockApi: AidenApi = {
     storeConversation(db, conversation);
     writeDatabase(db);
     return conversation;
+  },
+  async listServiceOrders() {
+    const actor = requireUser();
+    return (database().ordersByUser[actor.id] ?? []).map((order) => ({
+      orderNo: order.orderId, status: order.status,
+      items: [{ id: `${order.orderId}-item`, name: order.product, quantity: 1 }],
+    }));
+  },
+  async previewAfterSale(orderNo, kind) {
+    const actor = requireUser();
+    const order = (database().ordersByUser[actor.id] ?? []).find((item) => item.orderId === orderNo);
+    if (!order) throw new Error('订单不存在');
+    const name = { refund: '退款', return: '退货', exchange: '换货' }[kind];
+    return {
+      orderId: orderNo, orderNo, orderStatus: order.status, status: order.status,
+      items: [{ id: `${orderNo}-item`, name: order.product, quantity: 1, lineTotal: String(order.amount) }],
+      policies: [{ id: `mock-${kind}`, name: `${name}演示政策`, version: 'demo', content: '仅供本地流程演示；具体条件以真实商城政策为准。' }],
+    };
+  },
+  async submitAfterSale(input) {
+    const actor = requireUser();
+    if (!input.confirmed || !input.reason.trim()) throw new Error('请填写原因并确认提交');
+    const preview = await this.previewAfterSale(input.orderNo, input.requestType);
+    if (!preview.items.some((item) => item.id === input.orderItemId) || !preview.policies.some((item) => item.id === input.policyReference)) throw new Error('订单商品或政策无效');
+    const db = database();
+    const rows = db.afterSales ?? [];
+    const linkTicket = (requestId: string) => {
+      if (!input.sourceTicketNo) return;
+      const ticket = (db.tickets ?? []).find((item) => item.ticketNo === input.sourceTicketNo && item.userId === actor.id);
+      if (!ticket || (ticket.afterSaleRequestId && ticket.afterSaleRequestId !== requestId)) throw new Error('关联工单不存在或已关联其他申请');
+      ticket.afterSaleRequestId = requestId;
+      writeDatabase(db);
+    };
+    const sameKey = rows.find((item) => item.userId === actor.id && item.submissionKey === input.submissionKey);
+    if (sameKey) {
+      if (sameKey.orderNo !== input.orderNo || sameKey.orderItemId !== input.orderItemId || sameKey.requestType !== input.requestType || sameKey.reason !== input.reason.trim()) throw new Error('幂等键已用于另一项申请');
+      linkTicket(sameKey.id);
+      return { ...sameKey, alreadyExists: true };
+    }
+    const duplicate = rows.find((item) => item.userId === actor.id && item.orderNo === input.orderNo && item.orderItemId === input.orderItemId && !['cancelled', 'rejected', 'completed'].includes(item.status));
+    if (duplicate) {
+      if (duplicate.requestType !== input.requestType) throw new Error('该商品已有其他类型的未结束售后申请');
+      linkTicket(duplicate.id); return { ...duplicate, alreadyExists: true };
+    }
+    const now = new Date().toISOString();
+    const row: AfterSaleApplication = { id: makeId('as'), requestNo: makeId('AS'), userId: actor.id,
+      orderId: input.orderNo, orderNo: input.orderNo, orderItemId: input.orderItemId,
+      requestType: input.requestType, reason: input.reason.trim(), status: 'pending',
+      requestedAmount: null, policyReference: input.policyReference, submissionKey: input.submissionKey, reviewedById: null,
+      reviewedAt: null, processingAt: null, processingById: null, resolvedById: null,
+      resolvedAt: null, decisionNote: null, createdAt: now, updatedAt: now };
+    db.afterSales = [...rows, row];
+    linkTicket(row.id);
+    writeDatabase(db);
+    return row;
+  },
+  async listAfterSales() { const actor = requireUser(); return (database().afterSales ?? []).filter((item) => item.userId === actor.id); },
+  async cancelAfterSale(id) {
+    const actor = requireUser(); const db = database();
+    const row = (db.afterSales ?? []).find((item) => item.id === id && item.userId === actor.id);
+    if (!row) throw new Error('申请不存在');
+    if (!['pending', 'approved'].includes(row.status)) throw new Error('非法的申请状态转换');
+    row.status = 'cancelled'; row.resolvedAt = row.updatedAt = new Date().toISOString(); row.resolvedById = actor.id; writeDatabase(db); return row;
+  },
+  async listTickets() { const actor = requireUser(); return (database().tickets ?? []).filter((item) => item.userId === actor.id); },
+  async listStaffAfterSales() { requireStaff(); return database().afterSales ?? []; },
+  async transitionAfterSale(id, status, note) {
+    const actor = requireStaff(); const db = database();
+    const row = (db.afterSales ?? []).find((item) => item.id === id);
+    if (!row) throw new Error('申请不存在');
+    const next: Record<string, string[]> = { pending: ['approved', 'rejected'], approved: [row.requestType === 'refund' ? 'awaiting_external_refund' : 'processing'], processing: ['completed'] };
+    if (!next[row.status]?.includes(status)) throw new Error('非法的申请状态转换');
+    if (['rejected', 'processing', 'completed'].includes(status) && !note.trim()) throw new Error('请填写处理说明');
+    const now = new Date().toISOString(); row.status = status as AfterSaleApplication['status']; row.updatedAt = now; row.decisionNote = note.trim() || row.decisionNote;
+    if (['approved', 'rejected'].includes(status)) { row.reviewedAt = now; row.reviewedById = actor.id; }
+    if (['processing', 'awaiting_external_refund'].includes(status)) { row.processingAt = now; row.processingById = actor.id; }
+    if (['rejected', 'completed'].includes(status)) { row.resolvedAt = now; row.resolvedById = actor.id; }
+    writeDatabase(db); return row;
+  },
+  async listStaffTickets() { requireStaff(); return database().tickets ?? []; },
+  async transitionTicket(id, status, note, afterSaleRequestId) {
+    const actor = requireStaff(); const db = database();
+    const row = (db.tickets ?? []).find((item) => item.id === id);
+    if (!row) throw new Error('工单不存在');
+    const next: Record<string, string[]> = { open: ['in_progress'], in_progress: ['resolved', 'closed'], resolved: ['closed'] };
+    if (!next[row.status]?.includes(status)) throw new Error('非法的工单状态转换');
+    if (row.assignedStaffId && row.assignedStaffId !== actor.id) throw new Error('仅接手员工可处理工单');
+    if (afterSaleRequestId && !(db.afterSales ?? []).some((item) => item.id === afterSaleRequestId && item.userId === row.userId)) throw new Error('关联申请不存在');
+    const now = new Date().toISOString(); row.status = status as ServiceTicket['status']; row.updatedAt = now;
+    if (status === 'in_progress') { row.assignedStaffId = actor.id; row.acceptedAt = now; }
+    if (note.trim()) row.resolutionNote = note.trim();
+    if (status === 'resolved') row.resolvedAt = now;
+    if (status === 'closed') { row.closedAt = now; row.closedById = actor.id; }
+    if (afterSaleRequestId) row.afterSaleRequestId = afterSaleRequestId;
+    writeDatabase(db); return row;
   },
   async resetDemoData() {
     localStorage.removeItem(DB_KEY);

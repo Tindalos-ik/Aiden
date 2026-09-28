@@ -34,6 +34,41 @@ export interface OrderCard {
   updatedAt?: string;
 }
 
+export type AfterSaleStatus = 'pending' | 'approved' | 'rejected' | 'processing' | 'awaiting_external_refund' | 'completed' | 'cancelled';
+export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+export interface ServiceOrder { orderNo: string; status: string; items: Array<{ id: string; name: string; quantity: number }> }
+export interface AfterSalePreview extends ServiceOrder {
+  orderId: string;
+  orderStatus: string;
+  items: Array<{ id: string; name: string; quantity: number; lineTotal: string }>;
+  policies: Array<{ id: string; name: string; version: string; content: string }>;
+}
+export interface AfterSaleApplication {
+  id: string; requestNo: string; userId: string; orderId: string; orderNo: string | null;
+  orderItemId: string | null; requestType: 'refund' | 'return' | 'exchange'; reason: string;
+  status: AfterSaleStatus; requestedAmount: string | null; policyReference: string | null;
+  reviewedById: string | null; reviewedAt: string | null; processingAt: string | null;
+  processingById: string | null; resolvedById: string | null;
+  resolvedAt: string | null; decisionNote: string | null; createdAt: string; updatedAt: string;
+  alreadyExists?: boolean;
+  submissionKey?: string;
+  itemName?: string | null;
+  policyName?: string | null;
+  policyEvidence?: string | null;
+}
+export interface ServiceTicket {
+  id: string; ticketNo: string; userId: string; conversationId: string;
+  issueType: string; description: string; status: TicketStatus;
+  assignedStaffId: string | null; afterSaleRequestId: string | null;
+  acceptedAt: string | null; resolvedAt: string | null; closedAt: string | null;
+  closedById: string | null; resolutionNote: string | null; createdAt: string; updatedAt: string;
+}
+export interface SubmitAfterSaleInput {
+  orderNo: string; orderItemId: string; requestType: AfterSaleApplication['requestType'];
+  reason: string; policyReference: string; submissionKey: string; confirmed: boolean;
+  sourceTicketNo?: string;
+}
+
 /** [number] 对应回答中的引用编号；content 是被引用 chunk 的原文。 */
 export interface Citation {
   number: number;

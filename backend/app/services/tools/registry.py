@@ -7,6 +7,7 @@
 from langchain_core.tools import BaseTool
 
 from app.services.tools.after_sale import query_after_sale
+from app.services.tools.after_sale_submit import submit_after_sale
 from app.services.tools.customer import query_logistics, query_order, search_faq
 from app.services.tools.ticket_create import create_ticket
 from app.services.tools.ticket_query import query_ticket
@@ -17,6 +18,7 @@ SUPPORT_TOOLS: tuple[BaseTool, ...] = (
     query_logistics,
     search_faq,
     query_after_sale,
+    submit_after_sale,
     create_ticket,
     query_ticket,
 )

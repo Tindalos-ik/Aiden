@@ -10,7 +10,7 @@ from langgraph.prebuilt import InjectedState
 
 from app.persistence.mysql.ticket_write import create_user_ticket
 
-_ISSUE_TYPES = frozenset({"refund_return", "after_sales", "complaint", "human"})
+_ISSUE_TYPES = frozenset({"after_sales", "complaint", "human"})
 _TOOL_ERROR = "工单登记暂时无法完成，请稍后重试。"
 
 
@@ -26,17 +26,14 @@ def create_ticket(
     user_id: Annotated[str, InjectedState("user_id")],
     conversation_id: Annotated[str, InjectedState("conversation_id")],
     assistant_message_id: Annotated[str, InjectedState("assistant_message_id")],
-    refund_authorized: Annotated[bool, InjectedState("refund_authorized")],
 ) -> str:
-    """登记退款退货办理、售后、投诉或人工请求，返回工单号、状态和类型。
+    """登记无法直接办理的售后异常、投诉或人工请求，返回工单号、状态和类型。
 
-    身份、本轮助手消息和退款登记授权由已认证的图状态注入，不接受模型填写。
-    退款类型没有明确授权时拒绝写入；登记只产生待处理工单，不代表退款申请已提交。
+    身份和本轮助手消息由已认证的图状态注入，不接受模型填写。
+    登记只产生待处理工单，不代表退款、退货或换货申请已提交。
     """
     if issue_type not in _ISSUE_TYPES:
         return _json_result({"status": "invalid", "message": "不支持该工单类型。"})
-    if issue_type == "refund_return" and refund_authorized is not True:
-        return _json_result({"status": "invalid", "message": "退款处理尚未获得明确登记确认。"})
     normalized_description = description.strip()
     if not normalized_description or len(normalized_description) > 4000:
         return _json_result({"status": "invalid", "message": "请提供不超过 4000 字的诉求描述。"})
