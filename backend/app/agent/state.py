@@ -55,6 +55,10 @@ class SupportState(TypedDict, total=False):
     refund_phase: str
     refund_order_no: str
     refund_reason: str
+    # 已核验订单的事实摘要，政策不可用时的答复只引用这里的服务端事实。
+    refund_order_facts: str
+    # 正文已覆盖本次退款原因的有效商家政策 ID；只有它存在才允许给出提交确认。
+    refund_policy_id: str
     refund_authorized: bool
     refund_context: dict[str, str]
     refund_pending: dict[str, str]

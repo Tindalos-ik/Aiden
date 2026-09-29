@@ -14,10 +14,12 @@ from app.services.tools.ticket_create import create_ticket
 
 
 def request(intent, goal, question, order_no=None, confidence=0.98, clarify=False,
-            action_quote=None, refund_reason_quote=None, refund_consent="none"):
+            action_quote=None, refund_reason_quote=None, refund_consent="none", quote=None):
     return {
         "intent": intent, "goal": goal, "cofidence": confidence,
         "completed_question": question,
+        # 拆分器必须为每项给出本轮原文片段；多诉求时服务端用它核对证据归属。
+        "original_question_quote": quote,
         "entities": {"order_no": order_no, "order_reference": "explicit" if order_no else "none"},
         "request_no": None, "ticket_no": None, "action_quote": action_quote,
         "refund_reason_quote": refund_reason_quote, "refund_consent": refund_consent,
@@ -27,10 +29,13 @@ def request(intent, goal, question, order_no=None, confidence=0.98, clarify=Fals
 
 
 class FakeModel:
-    def __init__(self, requests, cite_faq=True, adequacy='{"sufficient":true,"reason":""}'):
+    def __init__(self, requests, cite_faq=True, adequacy='{"sufficient":true,"reason":""}',
+                 answer_suffix=""):
         self.requests = requests
         self.cite_faq = cite_faq
         self.adequacy = adequacy
+        # 仅用于定向用例：把额外文本（例如悬空的 [1] 标记）追加到生成回答末尾。
+        self.answer_suffix = answer_suffix
         self.configs = []
 
     def bind(self, **_kwargs):
@@ -51,7 +56,7 @@ class FakeModel:
         ]
         should_cite = self.cite_faq(data["question"]) if callable(self.cite_faq) else self.cite_faq
         suffix = f" {citations[0]}" if should_cite and citations else ""
-        return AIMessage(content=f"已回答：{data['question']}{suffix}")
+        return AIMessage(content=f"已回答：{data['question']}{suffix}{self.answer_suffix}")
 
 
 class FakeToolNode:
@@ -76,10 +81,12 @@ class FakeToolNode:
 
 class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
     async def run_case(self, text, requests, payloads=None, history=None, cite_faq=True,
-                       langfuse=False, adequacy='{"sufficient":true,"reason":""}'):
+                       langfuse=False, adequacy='{"sufficient":true,"reason":""}',
+                       answer_suffix=""):
         FakeToolNode.calls = []
         FakeToolNode.payloads = payloads or {}
-        model = FakeModel(requests, cite_faq=cite_faq, adequacy=adequacy)
+        model = FakeModel(requests, cite_faq=cite_faq, adequacy=adequacy,
+                          answer_suffix=answer_suffix)
         self.last_model = model
         self.last_trace_client = Mock()
         tools = {name: SimpleNamespace(name=name) for name in support_graph._TOOLS_BY_NAME}
@@ -106,8 +113,9 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_after_sale_and_policy_are_both_answered(self):
         result, calls = await self.run_case(
             "查订单 TEST-001 的退货申请进度，再告诉我退货政策",
-            [request("refund_return", "after_sale_status", "查询订单 TEST-001 的退货申请进度", "TEST-001"),
-             request("refund_return", "policy", "查询退货政策")],
+            [request("refund_return", "after_sale_status", "查询订单 TEST-001 的退货申请进度", "TEST-001",
+                     quote="查订单 TEST-001 的退货申请进度"),
+             request("refund_return", "policy", "查询退货政策", quote="再告诉我退货政策")],
             {"query_after_sale": {"status": "ok", "found": True, "requests": [{"status": "pending"}]},
              "search_faq": {"status": "ok", "results": [{
                  "chunkId": "return-policy", "answer": "退货政策条款", "score": 1.0,
@@ -123,9 +131,10 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_logistics_order_and_duplicate_query(self):
         result, calls = await self.run_case(
             "查订单 TEST-001 的物流和订单金额，再查一次订单金额",
-            [request("logistics", "logistics", "查询 TEST-001 的物流", "TEST-001"),
-             request("order", "order", "查询 TEST-001 的金额", "TEST-001"),
-             request("order", "order", "查询 TEST-001 的金额", "TEST-001")],
+            [request("logistics", "logistics", "查询 TEST-001 的物流", "TEST-001",
+                     quote="查订单 TEST-001 的物流和订单金额"),
+             request("order", "order", "查询 TEST-001 的金额", "TEST-001", quote="订单金额"),
+             request("order", "order", "查询 TEST-001 的金额", "TEST-001", quote="再查一次订单金额")],
             {"query_logistics": {"status": "ok", "found": True, "shipments": [{"status": "shipped"}]},
              "query_order": {"status": "ok", "found": True, "orders": [{"total_amount": "20.00"}]}},
         )
@@ -136,8 +145,9 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_partial_failure_and_write_boundary(self):
         result, calls = await self.run_case(
             "查我的工单进度，再帮我联系人工",
-            [request("human", "ticket_status", "查询已有工单进度"),
-             request("human", "other", "帮我联系人工", action_quote="帮我联系人工")],
+            [request("human", "ticket_status", "查询已有工单进度", quote="查我的工单进度"),
+             request("human", "other", "帮我联系人工", action_quote="帮我联系人工",
+                     quote="再帮我联系人工")],
             {"query_ticket": {"status": "error"}},
         )
         self.assertEqual([name for name, _ in calls], ["query_ticket"])
@@ -161,8 +171,9 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_target_does_not_block_policy_or_create_ticket(self):
         result, calls = await self.run_case(
             "这单物流到哪了，再告诉我退货政策",
-            [request("logistics", "logistics", "查询这单物流", clarify=True),
-             request("refund_return", "policy", "查询退货政策")],
+            [request("logistics", "logistics", "查询这单物流", clarify=True,
+                     quote="这单物流到哪了"),
+             request("refund_return", "policy", "查询退货政策", quote="再告诉我退货政策")],
             {"query_order": {"status": "ok", "orders": []},
              "search_faq": {"status": "ok", "results": []}},
         )
@@ -170,8 +181,11 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("证据不足", result["answer"])
         _, calls = await self.run_case(
             "查退款申请进度和退货政策",
-            [request("refund_return", "after_sale_status", "查询退款申请进度"),
-             request("refund_return", "policy", "查询退货政策"),
+            [request("refund_return", "after_sale_status", "查询退款申请进度",
+                     quote="查退款申请进度"),
+             request("refund_return", "policy", "查询退货政策", quote="退货政策"),
+             # 第三项在本轮原话里没有对应片段：用户只问了政策和进度，并未要求办理退货，
+             # 因此保留无引用，交给多诉求原文守卫判定，不为了跑通而编造原话。
              request("refund_return", "create_ticket", "办理退货")],
         )
         self.assertNotIn("create_ticket", [name for name, _ in calls])
@@ -259,18 +273,24 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual([name for name, _ in calls], ["query_order"])
         self.assertIn("请说明这笔订单的退款原因", first["answer"])
-        policy = {"status": "ok", "results": [{"chunkId": "refund-policy", "answer": "政策条件", "score": 1.0}]}
+        policy = {"status": "ok", "policies": [{
+            "id": "66666666-6666-4666-8666-000000000001", "name": "退款政策", "version": "1.0",
+            "content": "商品存在质量问题的，可在签收后 7 天内申请退款。",
+        }]}
         prepared, calls = await self.run_case(
             "质量问题",
             [request("refund_return", "create_ticket", "订单 TEST-001 因质量问题退款",
                      refund_reason_quote="质量问题")],
-            {"query_order": order, "search_faq": policy},
+            {"query_order": order, "query_refund_policy": policy},
             history=[{"role": "assistant", "content": first["answer"],
                       "workflow_state": {"refund": first["refund_pending"]}}],
         )
-        self.assertEqual([name for name, _ in calls], ["query_order", "search_faq"])
+        self.assertEqual([name for name, _ in calls], ["query_order", "query_refund_policy"])
+        self.assertEqual(calls[-1][1], {"order_no": "TEST-001"})
         self.assertIn("退款处理待确认", prepared["answer"])
-        self.assertIn("[1]", prepared["answer"])
+        self.assertEqual(prepared["citations"], [])
+        self.assertEqual(prepared["refund_pending"]["policy_id"],
+                         "66666666-6666-4666-8666-000000000001")
         confirmed, calls = await self.run_case(
             "确认提交",
             [request("refund_return", "create_ticket", "确认提交订单退款申请",
@@ -280,8 +300,10 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
                       "workflow_state": {"refund": prepared["refund_pending"]}}],
         )
         self.assertEqual([name for name, _ in calls], ["submit_after_sale"])
-        self.assertEqual(calls[0][1]["order_no"], "TEST-001")
-        self.assertEqual(calls[0][1]["reason"], "质量问题")
+        self.assertEqual(calls[0][1], {
+            "order_no": "TEST-001", "reason": "质量问题",
+            "policy_id": "66666666-6666-4666-8666-000000000001",
+        })
         self.assertIn("已提交退款申请", confirmed["answer"])
         self.assertIn("审核通过不代表款项已退", confirmed["answer"])
         declined, calls = await self.run_case(
@@ -304,6 +326,28 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([name for name, _ in calls], ["submit_after_sale"])
         self.assertIn("已有待处理申请", repeated["answer"])
 
+    async def test_refund_policy_reply_cannot_keep_dangling_citation_marker(self):
+        """商家政策路径没有编号证据；模型即使写出 [1]，保存的回答里也不能留下悬空引用。"""
+        result, calls = await self.run_case(
+            "订单 TEST-001 因质量问题我要退款",
+            [request("refund_return", "create_ticket", "办理 TEST-001 退款", "TEST-001",
+                     action_quote="我要退款", refund_reason_quote="质量问题")],
+            {"query_order": {"status": "ok", "orders": [
+                {"order_no": "TEST-001", "status": "delivered",
+                 "items": [{"product_name": "商品", "quantity": 1}]}]},
+             "query_refund_policy": {"status": "ok", "policies": [{
+                 "id": "66666666-6666-4666-8666-000000000003", "name": "退款政策", "version": "1.0",
+                 "content": "商品存在质量问题的，可在签收后 7 天内申请退款。"}]}},
+            answer_suffix=" 见政策条款 [1]",
+        )
+        self.assertEqual([name for name, _ in calls], ["query_order", "query_refund_policy"])
+        self.assertIn("退款处理待确认", result["answer"])
+        self.assertNotIn("[1]", result["answer"])
+        self.assertEqual(result["citations"], [])
+        self.assertEqual(result["refund_pending"]["policy_id"],
+                         "66666666-6666-4666-8666-000000000003")
+        self.assertEqual(self.last_finish.call_args.args[3], result["answer"])
+
     async def test_refund_consent_without_prepared_context_cannot_write(self):
         result, calls = await self.run_case(
             "确认登记",
@@ -324,8 +368,10 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_repeated_refund_request_still_cannot_write(self):
         _, calls = await self.run_case(
             "我要退款，再帮我登记退款处理",
-            [request("refund_return", "create_ticket", "我要退款", action_quote="我要退款"),
-             request("refund_return", "create_ticket", "帮我登记退款处理", action_quote="帮我登记退款处理")],
+            [request("refund_return", "create_ticket", "我要退款", action_quote="我要退款",
+                     quote="我要退款"),
+             request("refund_return", "create_ticket", "帮我登记退款处理",
+                     action_quote="帮我登记退款处理", quote="帮我登记退款处理")],
             {"query_order": {"status": "ok", "orders": []}},
         )
         self.assertEqual([name for name, _ in calls], ["query_order"])
@@ -345,11 +391,60 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
             [request("refund_return", "create_ticket", "办理 TEST-001 退款", "TEST-001",
                      action_quote="我要退款", refund_reason_quote="质量问题")],
             {"query_order": {"status": "ok", "orders": [{"order_no": "TEST-001", "items": [{"product_name": "商品"}]}]},
-             "search_faq": {"status": "ok", "results": []}},
+             "query_refund_policy": {"status": "ok", "policies": []}},
         )
-        self.assertEqual([name for name, _ in calls], ["query_order", "search_faq"])
-        self.assertIn("证据不足", result["answer"])
+        self.assertEqual([name for name, _ in calls], ["query_order", "query_refund_policy"])
+        self.assertIn("TEST-001", result["answer"])
+        self.assertIn("质量问题", result["answer"])
+        self.assertIn("售后与工单", result["answer"])
         self.assertNotIn("退款处理待确认", result["answer"])
+        self.assertFalse(result["refund_pending"])
+        self.assertEqual(result["citations"], [])
+        self.assertEqual(
+            [row["entrypoint"] for row in result["low_confidence"]],
+            ["refund_policy_unavailable"],
+        )
+
+    async def test_selected_owned_order_with_irrelevant_faq_needs_manual_guidance(self):
+        previous = support_graph._order_list_reply([
+            {"order_no": "TEST-001", "items": [{"product_name": "第一件", "quantity": 1}]},
+            {"order_no": "TEST-002", "items": [{"product_name": "第二件", "quantity": 1}]},
+        ], refund=True)
+        selected = request("refund_return", "create_ticket", "第二个订单因货不对板申请退款", "TEST-002",
+                           action_quote="我要退款第二个订单", refund_reason_quote="货不对板")
+        selected["entities"].update({"order_reference": "listed_selection",
+                                     "reference_quote": "第二个订单", "list_index": 2})
+        result, calls = await self.run_case(
+            "我要退款第二个订单，原因：货不对板", [selected],
+            {"query_order": {"status": "ok", "orders": [
+                {"order_no": "TEST-001", "items": [{"product_name": "第一件", "quantity": 1}]},
+                {"order_no": "TEST-002", "status": "paid", "items": [{"product_name": "第二件", "quantity": 1}]},
+            ]}, "query_refund_policy": {"status": "ok", "policies": [{
+                "id": "policy-generic", "name": "退款政策", "version": "1.0",
+                "content": "签收后 7 天内可申请退货，是否符合条件需审核订单与商品状态。",
+            }]}, "search_faq": {"status": "ok", "results": [
+                {"chunkId": "generic-return", "answer": "七天无理由退货条件", "score": 0.95,
+                 "category": "退货政策", "sourcePath": "退货政策.md"},
+            ]}},
+            history=[{"role": "assistant", "content": previous}],
+        )
+        # 通用政策条款和 FAQ 都不能成为提交依据：只查本人订单和本人可用的有效商家政策。
+        self.assertEqual(
+            [name for name, _ in calls],
+            ["query_order", "query_order", "query_refund_policy"],
+        )
+        self.assertEqual(calls[1][1], {"order_no": "TEST-002"})
+        self.assertEqual(calls[2][1], {"order_no": "TEST-002"})
+        self.assertIn("TEST-002", result["answer"])
+        self.assertIn("货不对板", result["answer"])
+        self.assertIn("售后与工单", result["answer"])
+        self.assertNotIn("退款处理待确认", result["answer"])
+        self.assertFalse(result["refund_pending"])
+        self.assertEqual(result["citations"], [])
+        self.assertEqual(
+            [row["entrypoint"] for row in result["low_confidence"]],
+            ["refund_policy_unavailable"],
+        )
 
     async def test_invented_order_number_is_not_queried(self):
         _, calls = await self.run_case(
@@ -399,8 +494,8 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[-1][1], {"order_no": "TEST-001"})
 
     async def test_product_citation_is_checked_per_item(self):
-        requests = [request("product", "product", "猫粮有哪些口味"),
-                    request("refund_return", "policy", "查询退货政策")]
+        requests = [request("product", "product", "猫粮有哪些口味", quote="猫粮有哪些口味"),
+                    request("refund_return", "policy", "查询退货政策", quote="再告诉我退货政策")]
         payloads = {
             ("search_faq", "猫粮有哪些口味"): {"status": "ok", "results": [{
                 "chunkId": "chunk-1", "answer": "鸡肉味", "score": 1.0,
@@ -430,8 +525,8 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         }
         result, calls = await self.run_case(
             "请问猫粮的冷藏条件，还有退货是否需要包装",
-            [request("product", "product", questions[0]),
-             request("refund_return", "policy", questions[1])],
+            [request("product", "product", questions[0], quote=questions[0]),
+             request("refund_return", "policy", questions[1], quote=questions[1])],
             payloads,
         )
         self.assertEqual([name for name, _ in calls], ["search_faq", "search_faq"])
@@ -486,8 +581,8 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         }
         result, _ = await self.run_case(
             "猫粮口味和退货时间",
-            [request("product", "product", questions[0]),
-             request("refund_return", "policy", questions[1])],
+            [request("product", "product", questions[0], quote=questions[0]),
+             request("refund_return", "policy", questions[1], quote=questions[1])],
             payloads, cite_faq=False,
         )
         self.assertEqual(result["answer"].count(support_graph._KNOWLEDGE_REFUSAL), 2)
@@ -502,8 +597,8 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         first, second = "猫粮口味", "退货时间"
         result, _ = await self.run_case(
             "猫粮口味和退货时间",
-            [request("product", "product", first),
-             request("refund_return", "policy", second)],
+            [request("product", "product", first, quote=first),
+             request("refund_return", "policy", second, quote=second)],
             {
                 ("search_faq", first): {"status": "ok", "results": [{
                     "chunkId": "flavors", "answer": "鸡肉味", "score": 1.0,
@@ -525,8 +620,9 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_langfuse_metadata_is_ordered_minimal_and_cost_is_attributed_per_item(self):
         requests = [
-            request("smalltalk", "smalltalk", "你好"),
-            request("product", "product", "查询猫粮口味 TEST-999", "TEST-999"),
+            request("smalltalk", "smalltalk", "你好", quote="你好"),
+            request("product", "product", "查询猫粮口味 TEST-999", "TEST-999",
+                    quote="再查询猫粮口味"),
         ]
         result, _ = await self.run_case(
             "你好，再查询猫粮口味，订单号 TEST-999",

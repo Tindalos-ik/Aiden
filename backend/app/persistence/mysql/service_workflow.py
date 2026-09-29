@@ -139,7 +139,7 @@ def submit_request(
     if order.status in {"pending", "cancelled"}:
         raise ValueError("当前订单状态不能提交售后申请")
     if policy_reference.startswith("rag:"):
-        # 对话入口只接受数据库中已保存、包含政策引用且明确询问确认的上一轮回答。
+        # 兼容既有知识库引用；引用和确认都必须来自本人会话的上一轮助手回答。
         previous = session.scalar(select(Message).join(Conversation).where(
             Conversation.user_id == user_id, Message.id == policy_reference[4:],
             Message.sender_role == "assistant", Message.status == "complete",
@@ -149,12 +149,28 @@ def submit_request(
             context.get("stage"), context.get("order_no"), context.get("reason")) != (
                 "confirm", order_no, reason.strip()):
             raise ValueError("缺少已核对的政策与申请确认")
-        current = session.scalar(select(Message).where(
+    elif not _valid_policy(session, policy_reference, request_type):
+        raise ValueError("政策已失效，请重新查询后确认")
+    if confirmation_message_id is not None or policy_reference.startswith("rag:"):
+        current = session.scalar(select(Message).join(Conversation).where(
+            Conversation.user_id == user_id,
             Message.id == confirmation_message_id,
-            Message.conversation_id == previous.conversation_id,
             Message.sender_role == "assistant", Message.status == "streaming",
         ))
         if current is None:
+            raise ValueError("确认消息不存在")
+        if not policy_reference.startswith("rag:"):
+            previous = session.scalar(select(Message).where(
+                Message.conversation_id == current.conversation_id,
+                Message.sender_role == "assistant", Message.status == "complete",
+                Message.created_at < current.created_at,
+            ).order_by(Message.created_at.desc()).limit(1))
+            context = (previous.workflow_state or {}).get("refund") if previous else None
+            if not isinstance(context, dict) or (
+                context.get("stage"), context.get("order_no"), context.get("reason"),
+                context.get("policy_id")) != ("confirm", order_no, reason.strip(), policy_reference):
+                raise ValueError("缺少已核对的政策与申请确认")
+        elif current.conversation_id != previous.conversation_id:
             raise ValueError("确认消息不存在")
         user_message = session.scalar(select(Message).where(
             Message.conversation_id == current.conversation_id,
@@ -162,8 +178,6 @@ def submit_request(
         ).order_by(Message.created_at.desc()).limit(1))
         if user_message is None or user_message.content.strip() != "确认提交":
             raise ValueError("请按上一轮提示明确回复“确认提交”")
-    elif not _valid_policy(session, policy_reference, request_type):
-        raise ValueError("政策已失效，请重新查询后确认")
     existing = session.scalar(select(AfterSaleRequest).where(
         AfterSaleRequest.user_id == user_id, AfterSaleRequest.order_id == order.id,
         or_(AfterSaleRequest.order_item_id == item.id, AfterSaleRequest.order_item_id.is_(None)),

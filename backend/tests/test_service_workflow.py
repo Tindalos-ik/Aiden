@@ -236,9 +236,9 @@ class ServiceWorkflowTests(unittest.TestCase):
         with get_session_factory().begin() as session:
             previous = Message(conversation_id=self.conversation_id, sender_role="assistant",
                                content="政策已核对，请确认提交", status="complete",
-                               citations=[{"number": 1, "chunkId": "policy"}],
                                workflow_state={"refund": {"stage": "confirm", "order_no": self.order_no,
-                                                          "reason": "商品故障"}}, created_at=now)
+                                                          "reason": "商品故障",
+                                                          "policy_id": self.policy_id}}, created_at=now)
             user = Message(conversation_id=self.conversation_id, sender_role="user",
                            content="先不要提交", status="complete", created_at=now + timedelta(microseconds=1))
             current = Message(conversation_id=self.conversation_id, sender_role="assistant",
@@ -248,9 +248,9 @@ class ServiceWorkflowTests(unittest.TestCase):
             current_id, user_id = current.id, user.id
         def invoke():
             return json.loads(submit_after_sale.func(
-                order_no=self.order_no, reason="商品故障", user_id=self.owner,
-                conversation_id=self.conversation_id, assistant_message_id=current_id,
-                refund_authorized=True))
+                order_no=self.order_no, reason="商品故障", policy_id=self.policy_id,
+                user_id=self.owner, conversation_id=self.conversation_id,
+                assistant_message_id=current_id, refund_authorized=True))
         self.assertEqual(invoke()["status"], "invalid")
         with get_session_factory().begin() as session:
             session.get(Message, user_id).content = "确认提交"

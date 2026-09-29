@@ -179,8 +179,8 @@ def _contains_exact_identifier(text: str, identifier: str) -> bool:
     return False
 
 
-def _valid_order_no(value: object) -> bool:
-    """退款跨轮状态沿用订单列表的长度及控制字符边界。"""
+def _valid_identifier(value: object) -> bool:
+    """退款跨轮状态中的订单号与政策 ID 沿用订单列表的长度及控制字符边界。"""
     return (isinstance(value, str) and 0 < len(value) <= 64
             and value.strip() == value
             and not any(ord(char) < 32 or char in "\u2028\u2029" for char in value))
@@ -612,7 +612,7 @@ def _order_lookup_result(state: SupportState) -> dict[str, Any]:
 
 
 def _refund_order_result(state: SupportState) -> dict[str, Any]:
-    """订单必须由本轮本人查询证实；原因齐备后才检索适用政策。"""
+    """订单必须由本轮本人查询证实；原因齐备后才查询本人订单可用的有效商家政策。"""
     latest = state.get("messages", [])[-1]
     try:
         payload = json.loads(_content_as_text(latest.content))
@@ -626,22 +626,107 @@ def _refund_order_result(state: SupportState) -> dict[str, Any]:
     orders = payload.get("orders") if isinstance(payload.get("orders"), list) else []
     matched = next((row for row in orders if isinstance(row, dict)
                     and row.get("order_no") == requested), None)
-    if not _valid_order_no(requested) or matched is None:
+    if not _valid_identifier(requested) or matched is None:
         return {"allowed_tools": [], "refund_phase": "", "direct_reply": "当前账号下没有核对到这笔订单，请提供本人订单号或从近期订单中选择。"}
     if len(matched.get("items") or []) != 1:
         return {"allowed_tools": [], "refund_phase": "", "direct_reply": "这笔订单包含多件商品或缺少商品明细。请打开“售后与工单”页面，选择具体商品并核对政策后提交申请。"}
     reason = state.get("refund_reason", "")
     if not reason:
         return {"allowed_tools": [], "refund_phase": "", "refund_order_no": requested,
+                "refund_order_facts": _refund_order_facts(matched),
                 "direct_reply": _REFUND_REASON_PROMPT.format(order_no=requested)}
+    # 是否可提交只依据本人订单可用的有效商家政策；检索到的 FAQ 只是说明材料。
     return {
-        "allowed_tools": ["search_faq"], "refund_phase": "policy",
+        "allowed_tools": ["query_refund_policy"], "refund_phase": "policy",
         "refund_order_no": requested,
-        "completed_question": (
-            f"订单状态：{matched.get('status') or '未知'}；下单时间：{matched.get('ordered_at') or '未知'}；"
-            f"退款原因：{reason}。请核对适用的退款政策、条件和所需信息。"
-        ),
+        "refund_order_facts": _refund_order_facts(matched),
         "direct_reply": "",
+    }
+
+
+def _refund_order_facts(order: dict[str, Any]) -> str:
+    """把已核验订单压缩成一行事实；无法提交时只引用这里已核实的内容。"""
+    parts = [f"订单号 {order.get('order_no')}"]
+    status = order.get("status")
+    if isinstance(status, str) and status.strip():
+        parts.append(f"状态 {status}")
+    items = order.get("items")
+    if isinstance(items, list) and items:
+        parts.append(f"商品 {_order_items_summary(order)}")
+    return "；".join(parts)
+
+
+def _refund_manual_reply(facts: str, reason: str) -> str:
+    """没有可核验政策时只陈述已核实事实与人工路径，绝不给出提交确认。"""
+    return (f"{facts}。关于退款原因“{reason}”，目前没有可核验且覆盖该原因的有效商家退款政策，"
+            f"我不会据此提交退款申请。请打开“售后与工单”页面，选择这笔订单和商品提交申请，"
+            f"由员工人工审核。")
+
+
+def _normalize_policy_text(text: str) -> str:
+    """去空白与标点后做字面比对，避免把标点差异当成条款差异。"""
+    return re.sub(r"[\s，。；：、,.!?！？()（）「」【】“”\"'·:;]", "", text)
+
+
+def _applicable_refund_policy(policies: Any, reason: str) -> dict[str, Any] | None:
+    """挑出正文明确覆盖本次退款原因的有效商家政策。
+
+    商家政策行已由持久化层按订单类型过滤出当前生效版本，这里只再判断原因适用性：
+    要求政策正文出现用户陈述的原因字样。同义表述（例如“商品与描述不符”对“货不对板”）
+    视为无法核验，宁可转人工，也不让泛化条款成为提交依据。
+    """
+    target = _normalize_policy_text(reason)
+    if not target or not isinstance(policies, list):
+        return None
+    for policy in policies:
+        if not isinstance(policy, dict):
+            continue
+        policy_id = policy.get("id")
+        content = policy.get("content")
+        if (isinstance(policy_id, str) and _valid_identifier(policy_id)
+                and isinstance(content, str)
+                and target in _normalize_policy_text(content)):
+            return policy
+    return None
+
+
+def _current_request_question(state: SupportState) -> str:
+    """取当前诉求的规范问题用于低置信记录；缺失时退回本轮用户原话。"""
+    requests = state.get("requests", [])
+    index = state.get("request_index", 0)
+    if 0 <= index < len(requests):
+        question = requests[index].get("completed_question")
+        if isinstance(question, str) and question.strip():
+            return question.strip()
+    return _latest_user_text(state.get("messages", []))
+
+
+def _refund_policy_result(state: SupportState) -> dict[str, Any]:
+    """政策正文覆盖本次原因才进入确认阶段；否则给出人工办理路径并记录低置信。"""
+    latest = state.get("messages", [])[-1]
+    try:
+        payload = json.loads(_content_as_text(latest.content))
+    except (TypeError, ValueError):
+        payload = {}
+    order_no = state.get("refund_order_no", "")
+    reason = state.get("refund_reason", "")
+    policy = _applicable_refund_policy(
+        payload.get("policies") if isinstance(payload, dict) else None, reason,
+    )
+    if policy is None:
+        facts = state.get("refund_order_facts") or f"订单号 {order_no}"
+        return {
+            "allowed_tools": [], "refund_phase": "", "refund_policy_id": "",
+            "direct_reply": _refund_manual_reply(facts, reason),
+            "request_low_confidence": {
+                "original_question": _current_request_question(state),
+                "entrypoint": "refund_policy_unavailable",
+                "reason": "没有可核验且覆盖本次退款原因的有效商家退款政策",
+            },
+        }
+    return {
+        "allowed_tools": [], "refund_phase": "confirm",
+        "refund_policy_id": str(policy["id"]), "direct_reply": "",
     }
 
 
@@ -707,28 +792,32 @@ def _route_refund_request(
     request: SupportRequest, messages: list[BaseMessage],
     same_turn_order_options: list[str] | None, context: dict[str, str],
 ) -> dict[str, Any]:
-    """退款办理先核单和政策；只有上一轮已给出固定确认请求才可能写入。"""
+    """退款办理先核单和商家政策；只有上一轮已核验政策并给出固定确认请求才可能写入。"""
     if request.application_type in {"return", "exchange"}:
         return {"allowed_tools": [], "direct_reply": "请打开“售后与工单”页面，选择本人订单和具体商品，核对政策并提交正式退货或换货申请。",
-                "refund_phase": "", "refund_authorized": False}
+                "refund_phase": "", "refund_authorized": False, "refund_policy_id": ""}
     if request.application_type != "refund" and context.get("stage") not in {"reason", "confirm"}:
         return {"allowed_tools": [], "direct_reply": "请说明要申请退款、退货还是换货；也可以在“售后与工单”页面选择申请类型。",
-                "refund_phase": "", "refund_authorized": False}
+                "refund_phase": "", "refund_authorized": False, "refund_policy_id": ""}
     if request.refund_consent == "decline" and context.get("stage") == "confirm":
         return {"allowed_tools": [], "direct_reply": "好的，我不会提交这项退款申请。",
-                "refund_phase": "", "refund_authorized": False}
+                "refund_phase": "", "refund_authorized": False, "refund_policy_id": ""}
     if request.refund_consent == "agree":
         quote = (request.action_quote or "").strip()
-        if context.get("stage") == "confirm" and quote and quote in _latest_user_text(messages):
+        policy_id = context.get("policy_id", "")
+        # 确认原话、订单、原因和上一轮核验过的政策 ID 必须同时成立才能发起写入。
+        if (context.get("stage") == "confirm" and quote
+                and quote in _latest_user_text(messages) and _valid_identifier(policy_id)):
             order_no, reason = context["order_no"], context["reason"]
             return {
                 "allowed_tools": ["submit_after_sale"], "direct_reply": "",
                 "refund_phase": "confirm", "refund_order_no": order_no,
-                "refund_reason": reason, "refund_authorized": True,
+                "refund_reason": reason, "refund_policy_id": policy_id,
+                "refund_authorized": True,
                 "semantic_result": {"classification": {"intent": "refund_return"}},
             }
         return {"allowed_tools": [], "direct_reply": "请先确定订单和退款原因，待我核对政策后再确认是否提交申请。",
-                "refund_phase": "", "refund_authorized": False}
+                "refund_phase": "", "refund_authorized": False, "refund_policy_id": ""}
 
     reason = _verified_refund_reason(request, messages)
     if context.get("stage") == "reason":
@@ -750,7 +839,8 @@ def _route_refund_request(
         extraction, messages, same_turn_order_options=same_turn_order_options,
     )
     routed.update({"refund_phase": "order", "refund_reason": reason,
-                   "refund_authorized": False, "refund_order_no": ""})
+                   "refund_authorized": False, "refund_order_no": "",
+                   "refund_policy_id": ""})
     if routed.get("order_lookup_mode") == "order_list":
         routed["order_lookup_mode"] = "refund_list"
     elif request.entities.order_reference == "latest" and routed.get("allowed_tools") == ["query_order"]:
@@ -842,11 +932,16 @@ def build_support_graph():
             if isinstance(candidate, dict) and candidate.get("stage") in {"reason", "confirm"}:
                 order_no = candidate.get("order_no")
                 reason = candidate.get("reason", "")
-                if (_valid_order_no(order_no)
+                policy_id = candidate.get("policy_id", "")
+                confirmed = candidate["stage"] == "confirm"
+                # 确认阶段必须同时带上一轮核验过的政策 ID，否则不重建可写入的上下文。
+                if (_valid_identifier(order_no)
                         and isinstance(reason, str) and len(reason) <= 160
-                        and (candidate["stage"] != "confirm" or reason)):
+                        and (not confirmed or (reason and _valid_identifier(policy_id)))):
                     context = {"stage": candidate["stage"], "order_no": order_no,
                                "reason": reason}
+                    if confirmed:
+                        context["policy_id"] = policy_id
         return {"messages": [SystemMessage(content=SYSTEM_PROMPT), *history],
                 "refund_context": context}
 
@@ -1022,6 +1117,7 @@ def build_support_graph():
             routed["refund_authorized"] = False
             routed["refund_order_no"] = ""
             routed["refund_reason"] = ""
+            routed["refund_policy_id"] = ""
         return routed
 
     async def dispatch_tool_call(state: SupportState) -> dict[str, Any]:
@@ -1039,6 +1135,12 @@ def build_support_graph():
 
         if name == "search_faq":
             args["question"] = state.get("completed_question", "").strip()
+        elif name == "query_refund_policy":
+            # 政策只查本人已核验订单当前生效的商家配置，不接受模型传入的订单号。
+            order_no = state.get("refund_order_no")
+            if state.get("refund_phase") != "policy" or not _valid_identifier(order_no):
+                return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
+            args["order_no"] = order_no
         elif name == "query_order":
             # 列候选或核验列表选择时只查当前用户的近期订单，不接受模型提供的订单号。
             if not state.get("order_lookup_pending"):
@@ -1065,8 +1167,12 @@ def build_support_graph():
         elif name == "submit_after_sale":
             if not state.get("refund_authorized") or state.get("refund_phase") != "confirm":
                 return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
+            policy_id = state.get("refund_policy_id")
+            if not _valid_identifier(policy_id):
+                return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
             args["order_no"] = state["refund_order_no"]
             args["reason"] = state["refund_reason"]
+            args["policy_id"] = policy_id
         elif name == "create_ticket":
             issue_type = classification.get("intent") if isinstance(classification, dict) else None
             if issue_type not in {"after_sales", "complaint", "human"}:
@@ -1253,10 +1359,18 @@ def build_support_graph():
                             row["citation"] = f"[{offset + index}]"
                         payload["results"] = _edge_ordered_results(results)
                     evidence.append({"name": tool_result["name"], "result": payload})
-                refund_policy = item.get("goal") == "create_ticket" and item.get("refund_phase") == "policy"
+                # 只有服务端核验到覆盖本次原因的有效商家政策时才允许给出提交确认。
+                refund_policy = (item.get("goal") == "create_ticket"
+                                 and bool(item.get("refund_policy_id")))
                 response = await model.ainvoke([
-                    SystemMessage(content=SYSTEM_PROMPT + "\n只回答这一项请求。必须以给出的本轮结果为准，简短说明查到的事实；不要输出 JSON 或工具名。商品知识和政策规则的每条事实必须引用给出的编号。"
-                                  + ("\n这是退款申请提交前说明：指出已核对的订单事实、政策证据能确认的条件、仍缺少或无法判断的信息；提交后待员工审核，不得说退款资格、金额或时效已经确定，也不要自行要求用户确认。" if refund_policy else "")),
+                    SystemMessage(content=SYSTEM_PROMPT + "\n只回答这一项请求。必须以给出的本轮结果为准，简短说明查到的事实；不要输出 JSON 或工具名。"
+                                  # 只有检索到带编号的知识块时才要求引用编号；订单/政策工具结果没有编号，
+                                  # 若继续要求编号，模型会凭空写出 [1] 这类悬空标记。
+                                  + ("商品知识和政策规则的每条事实必须引用给出的编号。"
+                                     if local_citations else
+                                     "本轮证据没有编号，禁止输出 [1] 这类引用标记，直接陈述事实。")
+                                  + ("\n这是退款申请提交前说明：指出已核对的订单事实、政策证据能确认的条件、仍缺少或无法判断的信息；提交后待员工审核，不得说退款资格、金额或时效已经确定，也不要自行要求用户确认。"
+                                     "本项的订单事实和适用政策都来自本轮工具结果（query_order、query_refund_policy），本轮按设计没有检索知识库，不得以缺少知识库检索为由拒答。" if refund_policy else "")),
                     HumanMessage(content=json.dumps({"question": item["question"], "evidence": evidence}, ensure_ascii=False)),
                 ], config=(
                     {
@@ -1282,12 +1396,17 @@ def build_support_graph():
                             {**row, "number": offset + int(row["number"])}
                             for row in local_citations if offset + int(row["number"]) in used_numbers
                         )
-                if refund_policy and reply != _KNOWLEDGE_REFUSAL and local_citations:
+                else:
+                    # 没有待引用编号时，模型写出的 [n] 没有对应来源，保存前直接去掉；
+                    # 带编号的知识问答仍走上面的子集校验，不受影响。
+                    reply = re.sub(r"[ \t]*(?:\[[0-9]+\]|［[0-9]+］)", "", reply)
+                if refund_policy and reply and reply != _KNOWLEDGE_REFUSAL:
                     reply += "\n" + _REFUND_CONFIRM_PROMPT.format(
                         order_no=item["refund_order_no"], reason=item["refund_reason"],
                     )
                     refund_pending = {"stage": "confirm", "order_no": item["refund_order_no"],
-                                      "reason": item["refund_reason"]}
+                                      "reason": item["refund_reason"],
+                                      "policy_id": item["refund_policy_id"]}
             if (item.get("goal") == "create_ticket" and item.get("refund_order_no")
                     and reply == _REFUND_REASON_PROMPT.format(order_no=item["refund_order_no"])):
                 refund_pending = {"stage": "reason", "order_no": item["refund_order_no"],
@@ -1337,6 +1456,9 @@ def build_support_graph():
         if (state.get("refund_phase") == "order" and isinstance(latest, ToolMessage)
                 and latest.name == "query_order"):
             return {**updates, **_refund_order_result(state)}
+        if (state.get("refund_phase") == "policy" and isinstance(latest, ToolMessage)
+                and latest.name == "query_refund_policy"):
+            return {**updates, **_refund_policy_result(state)}
         # 查询工具一旦执行完毕就收回白名单，防止模型在同一意图下重复或扩展查询。
         return {**updates, "allowed_tools": [], "order_lookup_pending": False}
 
@@ -1403,6 +1525,7 @@ def build_support_graph():
             "refund_phase": state.get("refund_phase", ""),
             "refund_order_no": state.get("refund_order_no", ""),
             "refund_reason": state.get("refund_reason", ""),
+            "refund_policy_id": state.get("refund_policy_id", ""),
         }
         return {
             "request_results": [*state.get("request_results", []), result],
@@ -1414,6 +1537,7 @@ def build_support_graph():
             "handoff_requested": False,
             "refund_authorized": False,
             "refund_phase": "",
+            "refund_policy_id": "",
         }
 
     def route_next_request(state: SupportState) -> str:
