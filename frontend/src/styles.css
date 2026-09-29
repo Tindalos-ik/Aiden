@@ -339,11 +339,12 @@ button { -webkit-tap-highlight-color: transparent; }
   .login-aside-inner { min-height: calc(100vh - 88px); }
   .user-workspace { grid-template-columns: 250px minmax(0,1fr); padding: 12px; gap: 11px; }
   .staff-workspace { grid-template-columns: 270px minmax(0,1fr); padding: 12px; gap: 11px; }
-  .app-topbar { padding: 0 21px; }
+  .app-topbar { height: auto; flex-wrap: wrap; gap: 8px; padding: 8px 21px; }
+  .topbar-right { width: 100%; flex-wrap: wrap; }
 }
 @media (max-width: 760px) {
   .workspace-shell { min-height: 480px; }
-  .app-topbar { height: 56px; min-height: 56px; padding: 0 13px; }
+  .app-topbar { min-height: 56px; padding: 8px 13px; }
   .topbar-left, .topbar-right { gap: 9px; }
   .topbar-divider, .workspace-label, .reset-button, .account-name, .account-chevron { display: none; }
   .mode-tag { padding: 3px 7px; font-size: 9px; }
