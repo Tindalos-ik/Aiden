@@ -1,6 +1,6 @@
 # Aiden RAG
 
-本文说明 Aiden 当前 RAG 实现：文档与 FAQ 建库、历史客服对话挖掘、`search_faq` 在线混合检索、四策略评估，以及员工建库控制台。
+本文说明 Aiden 当前 RAG 实现：文档与 FAQ 建库、历史客服对话挖掘、低置信度问题人工审核补库、`search_faq` 在线混合检索、四策略评估，以及员工建库控制台。
 
 ## 全景
 
@@ -27,7 +27,7 @@ graph TD
 - **离线和在线必须同源**。两端共用 `build_embedding_text` 的模板与同一个 `EmbeddingClient`（同一模型、同一 L2 归一化），否则相似度不可比。
 - **知识只经工具结果进入模型**。`search_faq` 的返回值作为一轮工具结果交给模型，不拼进系统提示词；提示词只约束"只能依据召回内容作答"。
 
-详细说明见「离线建库」「在线混合检索与生成质量控制」「评估体系」「历史对话挖掘」「员工建库控制台」五节；在线一节包含一次提问从入口到 SSE 的调用链。
+详细说明见「离线建库」「在线混合检索与生成质量控制」「评估体系」「历史对话挖掘」「员工建库控制台」「低置信度问题审核与补库」；在线一节包含一次提问从入口到 SSE 的调用链。
 
 `docs/Aiden.md` 的 RAG 章记录目标设计与选型过程，其中包含尚未实现的规划内容；已实现的行为以本文为准。
 
@@ -861,3 +861,21 @@ remote 模式下用员工账号登录后进入 `/staff/rag`。该页面调用员
 向量服务启动只支持后端配置的本机 `http://127.0.0.1:<端口>/v1` 地址。解释器从服务器环境变量 `AIDEN_EMBEDDING_PYTHON` 读取；Windows 默认路径为 `D:\bge-m3-env\Scripts\python.exe`。健康检查会校验模型名和维度；外部已经运行的服务可查看状态，但控制台不会接管或关闭它。关闭操作只终止当前 API 进程亲自启动的子进程。BGE 权重、Python 环境、MySQL、Milvus 与抽取 LLM 都须按部署配置准备，控制台不会自动安装它们。
 
 任务列表和 BGE 进程句柄只保存在当前 API 进程内：重启后任务历史消失，多 worker 之间也不共享列表或句柄。写任务用本机文件锁防止多个 API 进程同时执行；挖掘任务还与 CLI 共用挖掘实例锁。遇到中断，应以 MySQL `vector_status`、批次及候选状态判断续跑，再重新触发对应任务。控制台前后端做过静态检查，真实服务启停及完整建库链路尚未验收。
+
+## 低置信度问题审核与补库
+
+这条人工审核路径以 `low_confidence_questions` 为输入，不消费旧的 `unanswered_questions`，也不等同于上文的历史对话挖掘：模型只提出标准化问题及**未核实的示例答案**，正式 FAQ 必须由员工提交人工核准答案。`0010_review_queue` 增加 `review_queue`、原始问题的归并 ID 和召回证据字段，以及 `messages.retrieval_snapshots`；需要先在实际 MySQL 上执行迁移。本地数据库若仍在 `0008`，不能直接访问新增队列接口；迁移尚未在本地库验收。
+
+### 当次检索证据
+
+`graph.py` 对每个诉求冻结其原话、检索问题及当次 `search_faq` 工具返回的有序片段（`rank`、`chunk_id`、正文、来源、章节、可比较分数）；没有执行检索标为 `not_searched`，执行成功即使零结果也标为 `searched`，工具故障标为 `error`。自动入池时，`finish_assistant_message()` 在回答完成的事务内将相应诉求证据写入 `low_confidence_questions`，不以最终 `citations` 冒充全部召回。负反馈发生得更晚：回答完成时先把逐诉求快照存于员工专用的 `messages.retrieval_snapshots`，`submit_message_feedback()` 再复制到每一条负反馈原话，绝不审核时重查；普通用户消息 API 不返回该字段。旧记录没有证据时 `retrieval_snapshot = null`，已执行检索但无片段为 `[]` + `searched`，未执行检索为 `[]` + `not_searched`，失败为 `[]` + `error`。详情页逐条显示这些区别；多诉求只展示各自当次检索结果。
+
+### 整理任务与审核
+
+员工从 `/staff/reviews` 点击“整理低置信度问题”会向 `POST /api/rag/jobs/low-confidence-review` 提交任务，`GET /api/rag/jobs` 给出当前 API 进程内的进度、结果或错误。任务按 `(created_at, id)` 游标分批读取 `matched_review_id IS NULL` 的原话；先按现有脱敏规则处理个人与订单标识，再让模型返回固定 JSON 的单句标准化问题和备查示例答案。无意义、不可可靠标准化或模型错误只在原始行记 `processing_error`，保留未归并以便下一轮重试。待审候选集超过窗口时用现有 embedding 检索有限候选，模型只可返回给定候选 ID 或 `null`；实体、否定、条件、时效不一致时不得合并。模型调用不持有数据库事务；写入时用 MySQL 命名锁和原始行锁重新核对待审候选，变化则重新判断。同一原话首次关联才增加 `occurrence_count`，已通过或驳回的队列行不再参与新的归并。任务列表是进程内状态，服务重启后任务进度不保留；未归并数据仍在 MySQL，可再次启动整理。
+
+员工专用的 `GET /api/rag/review-queue?status=pending|approved|rejected&limit=20&offset=0` 返回分页列表和 `total`；`GET /api/rag/review-queue/{id}` 返回原始问题逐条详情及历史证据。两者与全部写接口均走 `current_staff`。页面默认待审，可切换状态、翻页、刷新；remote 请求失败提示重试，mock 模式不会伪造归并或审核。`POST /api/rag/review-queue/{id}/approve` 接收员工核准的 `approved_answer`、可选 `category` 和 `review_note`；`POST /api/rag/review-queue/{id}/reject` 接收 `rejection_reason`（`existing_knowledge_not_retrieved`、`not_reusable`、`outdated`、`other`）及备注。审核状态为 `pending`、`approved`、`rejected`；已驳回不会补库，已审核记录不能改为另一决定。审核人及时间由服务端记录，重复同内容请求与并发请求不会重复插入 FAQ。
+
+### FAQ 同步状态与续跑
+
+通过时在同一短事务写 `review_queue.approved_answer`、审核信息及一条启用的正式 `faq`，用唯一 `faq_id` 关联；后续同步只复用该 FAQ，不采用模型的 `example_answer`。事务之外调用 `index_faq_rows([faq])` 产生 `source_id = faq:<id>` 的 `knowledge_chunks`，再调用 `vectorize_pending()` 写入 Milvus，最后检查这条 FAQ 的有效块状态。`ingestion_status` 取值：`not_started`（未开始）、`pending`（未全部向量化）、`ready`（有效块全部 `vectorized`）、`manual_review`（存在过长块 `need_manual_review`）、`failed`（导入或同步异常，错误分类保存在 `ingestion_error`）。**只有 `ready` 才表示可检索**；审核通过本身不等于知识上线。`POST /api/rag/review-queue/{id}/retry-ingestion` 对已通过记录复用原 FAQ 继续同步；同步用短租约避免并发执行，进程中断后租约过期可重试。`manual_review` 须先人工修正超长知识内容，不能靠反复点击解决；同步失败或 pending 可重试，但仍以实际知识块状态判断结果。检索继续经过原有 Milvus 候选与 MySQL `knowledge_chunks` 状态校验，不另建索引或绕过长度约束。
