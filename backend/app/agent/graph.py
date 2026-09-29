@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import re
 from typing import Any
 from uuid import uuid4
@@ -1091,13 +1092,16 @@ def build_support_graph():
         payload = _faq_tool_payload(state.get("messages", []), state.get("request_tool_start", 0))
         if payload is None:
             return {}
-        original = state.get("completed_question") or _latest_user_text(state.get("messages", []))
+        original = (
+            state["requests"][state["request_index"]]["completed_question"].strip()
+            or _latest_user_text(state.get("messages", []))
+        )
 
         def refuse(entrypoint: str, reason: str) -> dict[str, Any]:
             return {
                 "direct_reply": _KNOWLEDGE_REFUSAL,
                 "citations": [],
-                "low_confidence": {
+                "request_low_confidence": {
                     "original_question": original,
                     "entrypoint": entrypoint,
                     "reason": reason,
@@ -1108,15 +1112,22 @@ def build_support_graph():
             return {"direct_reply": "抱歉，知识检索暂时不可用，请稍后重试。", "citations": []}
         results = [item for item in payload.get("results", []) if isinstance(item, dict)]
         if not results:
-            return refuse("retrieval_empty", "知识库没有召回可用的证据")
-        scores = [float(item["score"]) for item in results if isinstance(item.get("score"), (int, float))]
-        if scores and max(scores) < rag_settings.online_min_rerank_score:
+            return refuse("retrieval_low_confidence", "知识库没有召回可用的证据")
+        # 非重排检索的 score 为 None；只对可用的 rerank 分数应用该阈值。
+        scores = [
+            item["score"] for item in results
+            if isinstance(item.get("score"), (int, float))
+            and not isinstance(item["score"], bool)
+            and math.isfinite(item["score"])
+        ]
+        highest_score = max(scores) if scores else None
+        if highest_score is not None and highest_score < rag_settings.online_min_rerank_score:
             return refuse(
-                "retrieval_low_score",
-                f"最高重排分数 {max(scores):.3f} 低于阈值 {rag_settings.online_min_rerank_score:.2f}",
+                "retrieval_low_confidence",
+                f"最高重排分数 {highest_score:.3f} 低于阈值 {rag_settings.online_min_rerank_score:.2f}",
             )
 
-        question = state.get("completed_question") or original
+        question = original
         check_messages = [
             SystemMessage(content=(
                 "你是知识证据充分性检查器。只判断给定证据能否直接回答用户问题，不能使用常识或模型记忆补足。"
@@ -1143,9 +1154,9 @@ def build_support_graph():
             verdict = json.loads(raw)
             if not isinstance(verdict, dict) or verdict.get("sufficient") is not True:
                 reason = str(verdict.get("reason") or "模型判断证据不足") if isinstance(verdict, dict) else "模型判断证据不足"
-                return refuse("generation_self_check", reason)
+                return refuse("generation_insufficient_knowledge", reason)
         except (TypeError, ValueError):
-            return refuse("generation_self_check", "证据充分性自评结果无法解析")
+            return refuse("generation_insufficient_knowledge", "证据充分性自评结果无法解析")
         return {"citations": _citation_rows(results)}
 
     async def generate(state: SupportState) -> dict[str, Any]:
@@ -1156,9 +1167,11 @@ def build_support_graph():
             return {"messages": [AIMessage(content=direct_reply)], "answer": direct_reply}
         answers: list[str] = []
         all_citations: list[dict[str, object]] = []
-        low_confidence = state.get("low_confidence")
+        low_confidence: list[dict[str, str]] = []
         refund_pending: dict[str, str] = {}
         for item in items:
+            if item.get("low_confidence"):
+                low_confidence.append(item["low_confidence"])
             reply = item.get("direct_reply", "")
             tools = item.get("tools", [])
             if not reply and tools:
@@ -1245,11 +1258,11 @@ def build_support_graph():
                     permitted = {offset + int(row["number"]) for row in local_citations}
                     if not used_numbers or not used_numbers <= permitted:
                         reply = _KNOWLEDGE_REFUSAL
-                        low_confidence = {
-                            "original_question": item["question"],
+                        low_confidence.append({
+                            "original_question": item["question"].strip(),
                             "entrypoint": "generation_missing_citation",
                             "reason": "生成答案没有引用召回的知识块",
-                        }
+                        })
                     else:
                         all_citations.extend(
                             {**row, "number": offset + int(row["number"])}
@@ -1272,8 +1285,7 @@ def build_support_graph():
         output: dict[str, Any] = {"messages": [AIMessage(content=answer)], "answer": answer, "citations": all_citations,
                                   "handoff_required": any(item.get("handoff") for item in items),
                                   "refund_pending": refund_pending}
-        if low_confidence:
-            output["low_confidence"] = low_confidence
+        output["low_confidence"] = low_confidence
         return output
 
     def route_after_intent(state: SupportState) -> str:
@@ -1347,6 +1359,7 @@ def build_support_graph():
             "tools": tool_results,
             "citations": state.get("citations", []),
             "handoff": state.get("handoff_requested", False),
+            "low_confidence": state.get("request_low_confidence"),
             "refund_phase": state.get("refund_phase", ""),
             "refund_order_no": state.get("refund_order_no", ""),
             "refund_reason": state.get("refund_reason", ""),
@@ -1357,6 +1370,7 @@ def build_support_graph():
             "allowed_tools": [],
             "direct_reply": "",
             "citations": [],
+            "request_low_confidence": None,
             "handoff_requested": False,
             "refund_authorized": False,
             "refund_phase": "",
@@ -1377,7 +1391,7 @@ def build_support_graph():
             answer,
             "complete",
             citations=state.get("citations", []),
-            low_confidence=state.get("low_confidence"),
+            low_confidence=state.get("low_confidence", []),
             handoff=state.get("handoff_required", False),
             workflow_state=({"refund": state["refund_pending"]}
                             if state.get("refund_pending") else None),

@@ -518,6 +518,10 @@ class Message(UUIDPrimaryKey, Base):
         CheckConstraint(
             "status IN ('complete', 'streaming', 'error', 'stopped')", name="status_valid"
         ),
+        CheckConstraint(
+            "feedback IS NULL OR feedback IN ('satisfied', 'unsatisfied')",
+            name="feedback_valid",
+        ),
         UniqueConstraint("conversation_id", "sender_role", "client_message_id"),
         Index("ix_messages_conversation_created", "conversation_id", "created_at", "id"),
     )
@@ -532,6 +536,7 @@ class Message(UUIDPrimaryKey, Base):
     # 仅服务端读取的跨轮业务阶段；不会作为消息 API 字段返回给客户端。
     workflow_state: Mapped[dict | None] = mapped_column(JSON)
     client_message_id: Mapped[str | None] = mapped_column(String(100))
+    feedback: Mapped[str | None] = mapped_column(String(20))
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="complete", server_default=text("'complete'")
     )
@@ -546,10 +551,20 @@ class LowConfidenceQuestion(UUIDPrimaryKey, Base):
     """保存知识不足时的原始问法，供后续补库和人工复核。"""
 
     __tablename__ = "low_confidence_questions"
-    __table_args__ = (Index("ix_low_confidence_questions_conversation", "conversation_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_low_confidence_questions_conversation", "conversation_id", "created_at"),
+        Index("ix_low_confidence_source_assistant", "source_assistant_message_id"),
+    )
 
     conversation_id: Mapped[str] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    # 历史记录无需回填；新记录指向实际触发本轮回答的用户/助手消息。
+    source_user_message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL")
+    )
+    source_assistant_message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="SET NULL")
     )
     original_question: Mapped[str] = mapped_column(Text, nullable=False)
     entrypoint: Mapped[str] = mapped_column(String(40), nullable=False)

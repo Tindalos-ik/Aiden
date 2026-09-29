@@ -14,8 +14,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from sqlalchemy import delete, func, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy.orm import Session, selectinload
 
 from app.config.settings import settings
 
@@ -73,6 +73,7 @@ def _message_from_model(message: Message) -> dict[str, Any]:
         "content": message.content,
         "citations": message.citations or [],
         "createdAt": _iso_utc(message.created_at),
+        "feedback": message.feedback,
         "status": message.status,
     }
 
@@ -369,6 +370,86 @@ def recent_messages(
     return list(reversed(selected))
 
 
+def _preceding(message: Message, candidate: Message):
+    """比较同一会话内的微秒时间和主键，和历史消息的排序保持一致。"""
+    return or_(
+        candidate.created_at < message.created_at,
+        and_(candidate.created_at == message.created_at, candidate.id < message.id),
+    )
+
+
+def _following(message: Message, candidate: Message):
+    return or_(
+        candidate.created_at > message.created_at,
+        and_(candidate.created_at == message.created_at, candidate.id > message.id),
+    )
+
+
+def _source_user_for_assistant(session: Session, assistant: Message) -> Message | None:
+    """优先用重试键配对；无键时只认可紧挨着助手行的 user，绝不跨人工/系统行。"""
+    if assistant.client_message_id:
+        matched = session.scalar(select(Message).where(
+            Message.conversation_id == assistant.conversation_id,
+            Message.sender_role == "user",
+            Message.client_message_id == assistant.client_message_id,
+            _preceding(assistant, Message),
+        ))
+        if matched is None:
+            # 已带客户端键却找不到对应用户行时不能拿另一轮用户消息冒充。
+            return None
+        crossed = session.scalar(select(Message.id).where(
+            Message.conversation_id == assistant.conversation_id,
+            Message.sender_role.in_(("staff", "system")),
+            _following(matched, Message),
+            _preceding(assistant, Message),
+        ).limit(1))
+        return None if crossed is not None else matched
+    previous = session.scalar(select(Message).where(
+        Message.conversation_id == assistant.conversation_id,
+        _preceding(assistant, Message),
+    ).order_by(Message.created_at.desc(), Message.id.desc()).limit(1))
+    return previous if previous is not None and previous.sender_role == "user" else None
+
+
+def submit_message_feedback(
+    conversation_id: str, user_id: str, message_id: str,
+    rating: Literal["satisfied", "unsatisfied"],
+) -> dict[str, str]:
+    """锁会话和回答行，使并发重试只会提交首个评价与至多一条负反馈问题。"""
+    with get_session_factory().begin() as session:
+        conversation = session.scalar(select(Conversation).where(
+            Conversation.id == conversation_id, Conversation.user_id == user_id,
+        ).with_for_update())
+        if conversation is None:
+            raise LookupError("会话不存在")
+        message = session.scalar(select(Message).where(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+        ).with_for_update())
+        if message is None:
+            raise LookupError("消息不存在")
+        if message.sender_role != "assistant" or message.status != "complete":
+            raise ValueError("只能评价已完成的智能客服回答")
+        if message.feedback is not None:
+            if message.feedback != rating:
+                raise ValueError("这条回答已评价，不能修改")
+            return {"rating": rating}
+        source = _source_user_for_assistant(session, message)
+        if source is None:
+            raise ValueError("该回答没有可关联的用户消息")
+        message.feedback = rating
+        if rating == "unsatisfied":
+            session.add(LowConfidenceQuestion(
+                conversation_id=conversation_id,
+                source_user_message_id=source.id,
+                source_assistant_message_id=message.id,
+                original_question=source.content,
+                entrypoint="user_feedback_unresolved",
+                reason="用户反馈回答未解决问题",
+            ))
+        return {"rating": rating}
+
+
 def finish_assistant_message(
     message_id: str,
     conversation_id: str,
@@ -377,7 +458,7 @@ def finish_assistant_message(
     status: MessageStatus,
     *,
     citations: list[dict[str, Any]] | None = None,
-    low_confidence: dict[str, str] | None = None,
+    low_confidence: list[dict[str, str]] | None = None,
     handoff: bool = False,
     workflow_state: dict[str, Any] | None = None,
 ) -> bool:
@@ -418,13 +499,20 @@ def finish_assistant_message(
                                 created_at=now + timedelta(microseconds=1)))
             conversation.updated_at = now + timedelta(microseconds=1)
             conversation.last_message_preview = "已进入人工客服队列，请稍候。"
-        if low_confidence is not None:
-            session.add(LowConfidenceQuestion(
-                id=str(uuid4()),
-                conversation_id=conversation_id,
-                original_question=low_confidence["original_question"],
-                entrypoint=low_confidence["entrypoint"],
-                reason=low_confidence["reason"],
-                created_at=now,
-            ))
+        if low_confidence and status == "complete":
+            source = _source_user_for_assistant(session, message)
+            if source is None:
+                raise ValueError("该回答没有可关联的用户消息")
+            session.add_all([
+                LowConfidenceQuestion(
+                    conversation_id=conversation_id,
+                    source_user_message_id=source.id,
+                    source_assistant_message_id=message.id,
+                    original_question=item["original_question"],
+                    entrypoint=item["entrypoint"],
+                    reason=item["reason"],
+                    created_at=now,
+                )
+                for item in low_confidence
+            ])
         return changed

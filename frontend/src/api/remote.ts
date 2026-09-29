@@ -165,6 +165,11 @@ export const remoteApi: AidenApi = {
     const path = `/conversations/${encodeURIComponent(conversationId)}/messages`;
     return listOf(await request<Message[] | { items?: Message[]; messages?: Message[] }>(path));
   },
+  async submitFeedback(conversationId, messageId, rating) {
+    return request<{ rating: 'satisfied' | 'unsatisfied' }>(`/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/feedback`, {
+      method: 'POST', body: JSON.stringify({ rating }),
+    });
+  },
   async listStaffMessages(conversationId) {
     return listOf(await request<Message[]>(`/staff/conversations/${encodeURIComponent(conversationId)}/messages`));
   },

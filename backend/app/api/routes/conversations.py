@@ -8,7 +8,9 @@ from fastapi.responses import StreamingResponse
 
 from app.agent.graph import build_support_graph, model_configuration_error
 from app.api.deps import current_actor
-from app.api.schemas import CreateConversationRequest, HumanMessageRequest, StreamMessageRequest
+from app.api.schemas import (
+    CreateConversationRequest, HumanMessageRequest, MessageFeedbackRequest, StreamMessageRequest,
+)
 from app.api.sse import sse_event
 from app.persistence.mysql.chat import (
     create_conversation as create_mysql_conversation,
@@ -17,6 +19,7 @@ from app.persistence.mysql.chat import (
     get_owned_conversation,
     list_owned_messages,
     list_user_conversations,
+    submit_message_feedback,
 )
 from app.persistence.mysql.human_support import request_handoff, send_human_message
 
@@ -71,6 +74,22 @@ def messages(conversation_id: str, actor: dict = Depends(current_actor)) -> list
     if not owned:
         raise HTTPException(status_code=404, detail="会话不存在")
     return result
+
+
+@router.post("/{conversation_id}/messages/{message_id}/feedback")
+def message_feedback(
+    conversation_id: str,
+    message_id: str,
+    body: MessageFeedbackRequest,
+    actor: dict = Depends(current_actor),
+) -> dict[str, str]:
+    """反馈只绑定当前用户会话中已完成的助手回答；相同评分重试幂等。"""
+    try:
+        return submit_message_feedback(conversation_id, actor["id"], message_id, body.rating)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="会话或消息不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/{conversation_id}/messages/stream")

@@ -8,38 +8,35 @@ import { api, apiMode } from '../api';
 import { PageHeader, StatusPill } from '../components/Common';
 import type { Actor, Citation, Conversation, Message as ChatMessageType, OrderCard, StreamEvent } from '../types';
 
-const FEEDBACK_KEY = 'aiden-answer-feedback-v1';
 type AnswerFeedback = 'satisfied' | 'unsatisfied';
 
-function feedbackId(userId: string, item: ChatMessageType) {
-  return `${apiMode}:${userId}:${item.conversationId}:${item.id}`;
-}
-
-function savedFeedback(id: string): AnswerFeedback | null {
-  try {
-    const value = (JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}') as Record<string, { rating?: string }>)[id]?.rating;
-    return value === 'satisfied' || value === 'unsatisfied' ? value : null;
-  } catch { return null; }
-}
-
-function FeedbackControls({ item, userId }: { item: ChatMessageType; userId: string }) {
-  const id = feedbackId(userId, item);
-  const [rating, setRating] = useState<AnswerFeedback | null>(() => savedFeedback(id));
-  const submit = (selected: AnswerFeedback) => {
-    if (rating) return;
-    const existing = savedFeedback(id);
-    if (existing) { setRating(existing); return; }
+function FeedbackControls({ item }: { item: ChatMessageType }) {
+  const queryClient = useQueryClient();
+  const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (selected: AnswerFeedback) => {
+    if (item.feedback || pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    setError(null);
     try {
-      const all = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}') as Record<string, { rating: AnswerFeedback; createdAt: string }>;
-      all[id] = { rating: selected, createdAt: new Date().toISOString() };
-      localStorage.setItem(FEEDBACK_KEY, JSON.stringify(all));
-    } catch { /* 浏览器禁用存储时，仍锁定当前页面上的选择。 */ }
-    setRating(selected);
+      const result = await api.submitFeedback(item.conversationId, item.id, selected);
+      queryClient.setQueryData<ChatMessageType[]>(['messages', item.conversationId], (items) =>
+        items?.map((entry) => entry.id === item.id ? { ...entry, feedback: result.rating } : entry));
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '反馈提交失败，请重试');
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
   };
+  const rating = item.feedback;
   return <div className="answer-feedback" aria-label="回答反馈">
-    <button type="button" className={rating === 'satisfied' ? 'feedback-selected' : ''} disabled={Boolean(rating)} aria-label="满意" aria-pressed={rating === 'satisfied'} onClick={() => submit('satisfied')}>{rating === 'satisfied' ? <LikeFilled /> : <LikeOutlined />}<span>满意</span></button>
-    <button type="button" className={rating === 'unsatisfied' ? 'feedback-selected' : ''} disabled={Boolean(rating)} aria-label="不满意" aria-pressed={rating === 'unsatisfied'} onClick={() => submit('unsatisfied')}>{rating === 'unsatisfied' ? <DislikeFilled /> : <DislikeOutlined />}<span>不满意</span></button>
+    <button type="button" className={rating === 'satisfied' ? 'feedback-selected' : ''} disabled={Boolean(rating) || pending} aria-label="满意" aria-pressed={rating === 'satisfied'} onClick={() => submit('satisfied')}>{rating === 'satisfied' ? <LikeFilled /> : <LikeOutlined />}<span>满意</span></button>
+    <button type="button" className={rating === 'unsatisfied' ? 'feedback-selected' : ''} disabled={Boolean(rating) || pending} aria-label="不满意" aria-pressed={rating === 'unsatisfied'} onClick={() => submit('unsatisfied')}>{rating === 'unsatisfied' ? <DislikeFilled /> : <DislikeOutlined />}<span>不满意</span></button>
     {rating && <span className="feedback-confirmed">已反馈</span>}
+    {error && <span role="alert" className="message-state-error">{error}</span>}
   </div>;
 }
 
@@ -121,7 +118,7 @@ export function MessageBubble({ item, feedbackUserId, viewerRole = 'user', userN
         {item.status === 'stopped' && <div className="message-state-note"><StopOutlined /> 已停止生成</div>}
         {item.status === 'error' && <div className="message-state-note message-state-error"><span /> 这条回复没有完成</div>}
       </div>
-      {item.role === 'assistant' && item.status === 'complete' && feedbackUserId && <FeedbackControls key={feedbackId(feedbackUserId, item)} item={item} userId={feedbackUserId} />}
+      {item.role === 'assistant' && item.status === 'complete' && feedbackUserId && <FeedbackControls key={`${feedbackUserId}:${item.conversationId}:${item.id}`} item={item} />}
     </div>
     {fromSelf && <Avatar className={avatarClass} icon={avatar} />}
   </div>;

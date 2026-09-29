@@ -86,6 +86,7 @@ export interface Message {
   content: string;
   createdAt: string;
   status: MessageStatus;
+  feedback?: 'satisfied' | 'unsatisfied' | null;
   orderCard?: OrderCard;
   toolStatuses?: string[];
   citations?: Citation[];

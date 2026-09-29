@@ -24,3 +24,8 @@ class StreamMessageRequest(BaseModel):
 class HumanMessageRequest(BaseModel):
     """人工阶段的普通留言；不触发智能客服生成。"""
     text: str = Field(min_length=1, max_length=4000)
+
+
+class MessageFeedbackRequest(BaseModel):
+    """只接受评价结果，问题正文与触发入口由后端根据已保存消息决定。"""
+    rating: Literal["satisfied", "unsatisfied"]

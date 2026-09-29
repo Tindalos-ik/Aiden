@@ -187,6 +187,20 @@ export const mockApi: AidenApi = {
     if (!conversation || (actor.role === 'user' && conversation.userId !== actor.id)) throw new Error('无权查看此会话');
     return sortedMessages(conversationId, db);
   },
+  async submitFeedback(conversationId, messageId, rating) {
+    const actor = requireUser();
+    const db = database();
+    if (!db.conversations.some((item) => item.id === conversationId && item.userId === actor.id)) throw new Error('找不到当前会话');
+    const target = db.messages.find((item) => item.id === messageId && item.conversationId === conversationId);
+    if (!target || target.role !== 'assistant' || target.status !== 'complete') throw new Error('只能评价已完成的助手回复');
+    if (rating !== 'satisfied' && rating !== 'unsatisfied') throw new Error('无效的反馈选项');
+    if (target.feedback && target.feedback !== rating) throw new Error('反馈提交后不可修改');
+    if (!target.feedback) {
+      target.feedback = rating;
+      writeDatabase(db);
+    }
+    return { rating: target.feedback };
+  },
   async listStaffMessages(conversationId) {
     return this.listMessages(conversationId);
   },

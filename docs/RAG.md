@@ -529,9 +529,11 @@ Milvus 命中后按 `chunk_id` 去重，再调用 `get_vectorized_chunks_by_ids`
 
 工具返回后，`assess_knowledge` 先处理空召回；仅当结果带重排分数时，才比较最高分与 `RAG_MIN_RERANK_SCORE`（默认 0.35），这个阈值不用于纯 dense、BM25 或未重排的 RRF 原始分数。随后模型只依据给定证据判断问题能否直接回答，型号、时间、金额、条件不一致须判不足。空召回、低重排分或证据不足时给出明确拒答；检索服务故障则提示稍后重试，不当成空知识。
 
-System Prompt 要求知识事实只依据本轮 `search_faq` 结果，并逐项用 `[n]` 引用；不得从 `policies` 表、模型记忆或其他用户历史回答补造政策，也不得保证具体到账、送达或赔付结果。`generate` 把最相关证据放在上下文开头、次相关放在结尾，减少长上下文中段的信息损失。生成后检查引用编号：没有引用、引用了不存在的编号，均改为拒答。上述空召回、低分、自评不足和引用失败会记录 `low_confidence` 的原始问法、入口与原因；`finish_assistant_message` 在保存最终助手消息及 `citations` 的同一 MySQL 事务中写入 `low_confidence_questions`。工具服务故障只返回服务错误文案，不按证据不足入池。
+System Prompt 要求知识事实只依据本轮 `search_faq` 结果，并逐项用 `[n]` 引用；不得从 `policies` 表、模型记忆或其他用户历史回答补造政策，也不得保证具体到账、送达或赔付结果。`generate` 把最相关证据放在上下文开头、次相关放在结尾，减少长上下文中段的信息损失。生成后检查引用编号：没有引用、引用了不存在的编号，均改为拒答；引用失败以独立技术兜底入口 `generation_missing_citation` 入池，不混同模型自评不足。
 
-消息表的 `citations` JSON 保存生成时的来源快照；历史消息和 SSE 的 `citations` 事件使用同一结构，前端点击 `[n]` 可查看原 chunk 正文与章节。Markdown 来源还可经已认证的 `GET /api/knowledge/source/{chunk_id}` 打开原始文档。满意度反馈只存浏览器本地，不写后端。
+每个失败诉求分别记录原问法、入口及原因：空召回和最高可比较重排分低于阈值使用 `retrieval_low_confidence`（原因分别说明空召回或低分），自评判不足或结果无法解析使用 `generation_insufficient_knowledge`。工具服务故障只返回错误文案，不作为知识不足入池。`finish_assistant_message` 在保存最终助手消息及引用快照的同一 MySQL 事务中批量写入 `low_confidence_questions`，重复收尾或 SSE 重放不重复写入。
+
+用户点击已完成助手回答的满意度按钮时，带鉴权的 `POST /api/conversations/{conversation_id}/messages/{message_id}/feedback` 仅接收 `{"rating":"satisfied"}` 或 `{"rating":"unsatisfied"}`；服务端核验会话归属和目标消息，并在“不满意”时关联真实用户问题，以 `user_feedback_unresolved` 入同一问题池。满意反馈只保存到 `messages.feedback`，不入池；已记录的反馈重复提交返回原结果，不允许改选。历史消息回传 `feedback` 供刷新后回显；失败时页面提示错误，可重试。消息表的 `citations` JSON 保存生成时的来源快照；历史消息和 SSE 的 `citations` 事件使用同一结构，前端点击 `[n]` 可查看原 chunk 正文与章节。Markdown 来源还可经已认证的 `GET /api/knowledge/source/{chunk_id}` 打开原始文档。问题入池不等于人工审核或自动补库，后两项尚未实现。
 
 ### 运行配置与验证范围
 
@@ -546,7 +548,7 @@ System Prompt 要求知识事实只依据本轮 `search_faq` 结果，并逐项�
 
 DeepSeek 携带 `tools` 的思考模式请求要求回传既有 `reasoning_content`；本项目的 `dispatch_tool_call` 是服务端合成 `AIMessage(tool_calls=...)`，没有该字段，因此这类模型需设 `OPENAI_THINKING_MODE=disabled`，否则工具结果后的生成可能收到 400。开关只作用于在线 Agent 的 `ChatOpenAI`；历史对话挖掘使用单独的 `MINING_LLM_*` 客户端。
 
-已在指向 Milvus 2.5 `knowledge_bm25`、本地 `bge-reranker-v2-m3` 的进程环境中实测：询问库外型号 MH-LP999 的猫砂容量时，SSE 返回明确拒答、没有 `error` 事件，`low_confidence_questions` 新增一条原话一致的记录，`entrypoint=generation_self_check`。这是该次问法与配置下的验证，不代表所有库外问题都会落在同一拒答入口。四策略离线评估的范围和局限见下一节。
+此前在 Milvus 2.5 `knowledge_bm25`、本地 `bge-reranker-v2-m3` 的进程环境中实测：询问库外型号 MH-LP999 的猫砂容量时，SSE 返回明确拒答、没有 `error` 事件，`low_confidence_questions` 新增一条原话一致的记录；当时的入口值为 `generation_self_check`（现已改为 `generation_insufficient_knowledge`）。这是修改前该次问法与配置下的验证，不代表新入口已在同环境重新实测，也不代表所有库外问题都会落在同一拒答入口。四策略离线评估的范围和局限见下一节。
 
 另用 MH-LP50 具体型号问题走真实在线链路，SSE 依次包含 `start`、`delta`、`citations`、`done`，返回 3 个引用；MySQL 助手消息也保存了相同的 3 个引用及对应 chunk ID，来源章节路径存在，已认证的来源原文接口返回 HTTP 200。这验证了该次问法的回答、引用持久化和原文回链；不代表所有题目都有相同的引用数。
 
