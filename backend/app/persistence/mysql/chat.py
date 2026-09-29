@@ -271,6 +271,17 @@ def create_message_pair(
                     )
                 if assistant.status == "streaming":
                     raise ValueError("这条消息仍在生成回答，请稍后刷新会话")
+                # 失败回答只有仍属于最新一轮用户输入时才能重生成；否则图会把后续
+                # 用户消息当作当前问法，却把问题池记录绑定到这条旧重试键。
+                later_user = session.scalar(
+                    select(Message.id).where(
+                        Message.conversation_id == conversation_id,
+                        Message.sender_role == "user",
+                        _following(existing_user, Message),
+                    ).limit(1)
+                )
+                if later_user is not None:
+                    raise ValueError("这条消息之后已有后续消息，不能重新生成旧回答")
                 if conversation.status != "bot":
                     raise ValueError("此会话已转人工，不能重新生成智能客服回答")
                 other_stream = session.scalar(

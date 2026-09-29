@@ -27,9 +27,10 @@ def request(intent, goal, question, order_no=None, confidence=0.98, clarify=Fals
 
 
 class FakeModel:
-    def __init__(self, requests, cite_faq=True):
+    def __init__(self, requests, cite_faq=True, adequacy='{"sufficient":true,"reason":""}'):
         self.requests = requests
         self.cite_faq = cite_faq
+        self.adequacy = adequacy
         self.configs = []
 
     def bind(self, **_kwargs):
@@ -41,14 +42,15 @@ class FakeModel:
         if "请求拆分器" in instruction:
             return AIMessage(content=json.dumps({"requests": self.requests}, ensure_ascii=False))
         if "知识证据充分性检查器" in instruction:
-            return AIMessage(content='{"sufficient":true,"reason":""}')
+            return AIMessage(content=self.adequacy)
         data = json.loads(messages[-1].content)
         citations = [
             row["citation"]
             for item in data["evidence"] if item["name"] == "search_faq"
             for row in item["result"].get("results", []) if row.get("citation")
         ]
-        suffix = f" {citations[0]}" if self.cite_faq and citations else ""
+        should_cite = self.cite_faq(data["question"]) if callable(self.cite_faq) else self.cite_faq
+        suffix = f" {citations[0]}" if should_cite and citations else ""
         return AIMessage(content=f"已回答：{data['question']}{suffix}")
 
 
@@ -74,10 +76,10 @@ class FakeToolNode:
 
 class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
     async def run_case(self, text, requests, payloads=None, history=None, cite_faq=True,
-                       langfuse=False):
+                       langfuse=False, adequacy='{"sufficient":true,"reason":""}'):
         FakeToolNode.calls = []
         FakeToolNode.payloads = payloads or {}
-        model = FakeModel(requests, cite_faq=cite_faq)
+        model = FakeModel(requests, cite_faq=cite_faq, adequacy=adequacy)
         self.last_model = model
         self.last_trace_client = Mock()
         tools = {name: SimpleNamespace(name=name) for name in support_graph._TOOLS_BY_NAME}
@@ -88,13 +90,14 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
             patch.object(support_graph, "recent_messages", return_value=[
                 *(history or []), {"role": "user", "content": text},
             ]),
-            patch.object(support_graph, "finish_assistant_message"),
+            patch.object(support_graph, "finish_assistant_message") as finish,
             patch.object(support_graph.settings, "langfuse_enabled", langfuse),
             patch("langfuse.langchain.CallbackHandler", return_value=BaseCallbackHandler())
             if langfuse else nullcontext(),
             patch("langfuse.get_client", return_value=self.last_trace_client)
             if langfuse else nullcontext(),
         ):
+            self.last_finish = finish
             result = await support_graph.build_support_graph().ainvoke({
                 "conversation_id": "c", "assistant_message_id": "m", "user_id": "u",
             })
@@ -416,6 +419,109 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("证据不足", refused["answer"])
         self.assertEqual(refused["citations"], [])
+
+    async def test_retrieval_empty_and_low_score_record_each_original_question(self):
+        questions = ["猫粮的冷藏条件", "退货是否需要包装"]
+        payloads = {
+            ("search_faq", questions[0]): {"status": "ok", "results": []},
+            ("search_faq", questions[1]): {"status": "ok", "results": [{
+                "chunkId": "weak", "answer": "不相关证据", "score": -999.0,
+            }]},
+        }
+        result, calls = await self.run_case(
+            "请问猫粮的冷藏条件，还有退货是否需要包装",
+            [request("product", "product", questions[0]),
+             request("refund_return", "policy", questions[1])],
+            payloads,
+        )
+        self.assertEqual([name for name, _ in calls], ["search_faq", "search_faq"])
+        self.assertEqual(result["answer"].count(support_graph._KNOWLEDGE_REFUSAL), 2)
+        self.assertEqual(result["citations"], [])
+        records = self.last_finish.call_args.kwargs["low_confidence"]
+        self.assertEqual(
+            [(row["original_question"], row["entrypoint"]) for row in records],
+            [(question, "retrieval_low_confidence") for question in questions],
+        )
+        self.assertIn("没有召回", records[0]["reason"])
+        self.assertIn("低于阈值", records[1]["reason"])
+
+    async def test_retrieval_failure_does_not_misclassify_it_as_missing_knowledge(self):
+        result, _ = await self.run_case(
+            "查猫粮保质期",
+            [request("product", "product", "猫粮保质期")],
+            {"search_faq": {"status": "error", "message": "检索服务暂不可用"}},
+        )
+        self.assertIn("知识检索暂时不可用", result["answer"])
+        self.assertEqual(self.last_finish.call_args.kwargs["low_confidence"], [])
+
+    async def test_insufficient_and_unparseable_self_review_refuse_before_generation(self):
+        payloads = {"search_faq": {"status": "ok", "results": [{
+            "chunkId": "policy", "answer": "需要审核", "score": 1.0,
+        }]}}
+        for verdict, reason in [
+            ('{"sufficient":false,"reason":"证据与问题不符"}', "证据与问题不符"),
+            ("invalid JSON", "自评结果无法解析"),
+        ]:
+            with self.subTest(verdict=verdict):
+                result, _ = await self.run_case(
+                    "查退货政策", [request("refund_return", "policy", "查退货政策")],
+                    payloads, adequacy=verdict,
+                )
+                self.assertEqual(result["answer"], support_graph._KNOWLEDGE_REFUSAL)
+                self.assertEqual(result["citations"], [])
+                records = self.last_finish.call_args.kwargs["low_confidence"]
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0]["entrypoint"], "generation_insufficient_knowledge")
+                self.assertIn(reason, records[0]["reason"])
+
+    async def test_missing_citation_records_each_failed_item(self):
+        questions = ["猫粮口味", "退货时间"]
+        payloads = {
+            ("search_faq", questions[0]): {"status": "ok", "results": [{
+                "chunkId": "flavors", "answer": "鸡肉味", "score": 1.0,
+            }]},
+            ("search_faq", questions[1]): {"status": "ok", "results": [{
+                "chunkId": "return", "answer": "七天", "score": 1.0,
+            }]},
+        }
+        result, _ = await self.run_case(
+            "猫粮口味和退货时间",
+            [request("product", "product", questions[0]),
+             request("refund_return", "policy", questions[1])],
+            payloads, cite_faq=False,
+        )
+        self.assertEqual(result["answer"].count(support_graph._KNOWLEDGE_REFUSAL), 2)
+        self.assertEqual(result["citations"], [])
+        self.assertEqual(
+            [(row["original_question"], row["entrypoint"]) for row in
+             self.last_finish.call_args.kwargs["low_confidence"]],
+            [(question, "generation_missing_citation") for question in questions],
+        )
+
+    async def test_missing_citation_in_second_item_keeps_first_answer_and_source(self):
+        first, second = "猫粮口味", "退货时间"
+        result, _ = await self.run_case(
+            "猫粮口味和退货时间",
+            [request("product", "product", first),
+             request("refund_return", "policy", second)],
+            {
+                ("search_faq", first): {"status": "ok", "results": [{
+                    "chunkId": "flavors", "answer": "鸡肉味", "score": 1.0,
+                }]},
+                ("search_faq", second): {"status": "ok", "results": [{
+                    "chunkId": "return", "answer": "七天", "score": 1.0,
+                }]},
+            },
+            cite_faq=lambda question: question == first,
+        )
+        self.assertIn("【1】 已回答：猫粮口味 [1]", result["answer"])
+        self.assertIn(f"【2】 {support_graph._KNOWLEDGE_REFUSAL}", result["answer"])
+        self.assertEqual([row["chunkId"] for row in result["citations"]], ["flavors"])
+        self.assertEqual(
+            [(row["original_question"], row["entrypoint"]) for row in
+             self.last_finish.call_args.kwargs["low_confidence"]],
+            [(second, "generation_missing_citation")],
+        )
 
     async def test_langfuse_metadata_is_ordered_minimal_and_cost_is_attributed_per_item(self):
         requests = [
