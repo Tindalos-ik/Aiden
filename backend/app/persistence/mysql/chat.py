@@ -426,7 +426,7 @@ def submit_message_feedback(
     conversation_id: str, user_id: str, message_id: str,
     rating: Literal["satisfied", "unsatisfied"],
 ) -> dict[str, str]:
-    """锁会话和回答行，使并发重试只会提交首个评价与至多一条负反馈问题。"""
+    """锁会话和回答行，使并发重试只提交首个评价，并按诉求复制当次快照。"""
     with get_session_factory().begin() as session:
         conversation = session.scalar(select(Conversation).where(
             Conversation.id == conversation_id, Conversation.user_id == user_id,
@@ -450,14 +450,30 @@ def submit_message_feedback(
             raise ValueError("该回答没有可关联的用户消息")
         message.feedback = rating
         if rating == "unsatisfied":
-            session.add(LowConfidenceQuestion(
+            # 回答完成时已按单诉求冻结召回；负反馈只复制，不能重新检索充作历史证据。
+            snapshots = message.retrieval_snapshots
+            entries = snapshots if snapshots else ([{
+                "original_question": source.content,
+                "retrieval_query": None,
+                "retrieval_status": "not_searched",
+                "retrieval_snapshot": [],
+            }] if snapshots is not None else [{
+                "original_question": source.content,
+                "retrieval_query": None,
+                "retrieval_status": None,
+                "retrieval_snapshot": None,
+            }])
+            session.add_all(LowConfidenceQuestion(
                 conversation_id=conversation_id,
                 source_user_message_id=source.id,
                 source_assistant_message_id=message.id,
-                original_question=source.content,
+                original_question=item["original_question"],
                 entrypoint="user_feedback_unresolved",
                 reason="用户反馈回答未解决问题",
-            ))
+                retrieval_snapshot=item["retrieval_snapshot"],
+                retrieval_status=item["retrieval_status"],
+                retrieval_query=item["retrieval_query"],
+            ) for item in entries)
         return {"rating": rating}
 
 
@@ -469,7 +485,8 @@ def finish_assistant_message(
     status: MessageStatus,
     *,
     citations: list[dict[str, Any]] | None = None,
-    low_confidence: list[dict[str, str]] | None = None,
+    low_confidence: list[dict[str, Any]] | None = None,
+    retrieval_snapshots: list[dict[str, Any]] | None = None,
     handoff: bool = False,
     workflow_state: dict[str, Any] | None = None,
 ) -> bool:
@@ -498,6 +515,7 @@ def finish_assistant_message(
             return False
         message.content = content
         message.citations = citations or []
+        message.retrieval_snapshots = retrieval_snapshots
         message.workflow_state = workflow_state
         message.status = status
         conversation.updated_at = now
@@ -522,6 +540,9 @@ def finish_assistant_message(
                     original_question=item["original_question"],
                     entrypoint=item["entrypoint"],
                     reason=item["reason"],
+                    retrieval_snapshot=item.get("retrieval_snapshot"),
+                    retrieval_status=item.get("retrieval_status"),
+                    retrieval_query=item.get("retrieval_query"),
                     created_at=now,
                 )
                 for item in low_confidence

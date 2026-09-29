@@ -96,6 +96,10 @@ class SupportRequest(BaseModel):
     ]
     cofidence: float = Field(ge=0, le=1, strict=True)
     completed_question: str = Field(min_length=1, max_length=1000)
+    original_question_quote: str | None = Field(
+        default=None, max_length=1000,
+        description="仅逐字摘录本轮用户原文中属于这一诉求的连续片段，不得改写或混入其他诉求。",
+    )
     entities: RecognizedEntities
     request_no: str | None = Field(default=None, max_length=64)
     ticket_no: str | None = Field(default=None, max_length=64)
@@ -122,7 +126,7 @@ class SupportRequests(BaseModel):
 
 MULTI_REQUEST_PROMPT = """你是电商客服请求拆分器。只处理对话中最后一条用户消息；历史仅用于补全这条消息中的指代，不要把历史请求或客服回复当成本轮诉求。按用户本轮表达顺序，将每个能独立回答的诉求拆成 requests 列表，最多四项。重复的同一诉求只保留一项；超过四项时不要省略，输出超过四项由服务端要求用户分批发送。
 
-每项给出九类 intent、处理目标 goal、置信度 cofidence、独立补全后的 completed_question、entities.order_no/order_reference/reference_quote/list_index/order_suffix、request_no、ticket_no、action_quote、refund_reason_quote、application_type、refund_consent、needs_clarification 和 clarification_question。只能从固定枚举选择，不能输出工具名、用户 ID 或其他字段。
+每项给出九类 intent、处理目标 goal、置信度 cofidence、独立补全后的 completed_question、original_question_quote（从本轮用户原文逐字摘录这一诉求，不能包含其他诉求）、entities.order_no/order_reference/reference_quote/list_index/order_suffix、request_no、ticket_no、action_quote、refund_reason_quote、application_type、refund_consent、needs_clarification 和 clarification_question。只能从固定枚举选择，不能输出工具名、用户 ID 或其他字段。
 
 goal 对应：order 查订单；logistics 查物流；product 查商品知识；policy 检索政策文档中的规则；after_sale_status 查已提交售后申请；ticket_status 查已有工单；create_ticket 登记用户明确要求的投诉处理或办理售后；smalltalk 闲聊；other 无法判断。退款退货或售后意图可对应 policy、after_sale_status、ticket_status、create_ticket；要办理尚未提交的退款、退货或换货选 create_ticket，只询问规则或条件才选 policy，查询已提交申请的进度选 after_sale_status。明确要求“找真人/转人工/联系人工客服”时 intent 选 human、goal 选 other，由服务端转入实时人工队列；只有明确登记处理工单时才选 create_ticket。投诉可以提供转人工选择，不能仅凭“投诉”一词自动转接。查询申请进度、政策、工单进度本身不意味着要登记工单。
 

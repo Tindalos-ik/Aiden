@@ -7,9 +7,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
+from typing import Literal
 
 from app.api.deps import current_staff
 from app.services.rag import admin_console
+from app.persistence.mysql import review_queue as review_repo
+from app.services.rag import review_queue as review_service
 from app.services.rag.runtime_control import AlreadyRunningError
 
 router = APIRouter(prefix="/api/rag", tags=["rag-admin"], dependencies=[Depends(current_staff)])
@@ -20,6 +23,72 @@ class StartJobRequest(BaseModel):
     """文件名是知识目录内的相对路径；其余任务不接受浏览器传入运行参数。"""
 
     file: str | None = Field(default=None, max_length=500)
+
+class ApproveReviewRequest(BaseModel):
+    approved_answer: str = Field(min_length=1, max_length=10000)
+    category: str | None = Field(default=None, max_length=100)
+    review_note: str | None = Field(default=None, max_length=4000)
+
+
+class RejectReviewRequest(BaseModel):
+    rejection_reason: Literal["existing_knowledge_not_retrieved", "not_reusable", "outdated", "other"]
+    review_note: str | None = Field(default=None, max_length=4000)
+
+
+def _review_error(exc: LookupError | review_repo.ReviewConflict) -> HTTPException:
+    return HTTPException(status_code=404 if isinstance(exc, LookupError) else 409, detail=str(exc))
+
+
+@router.get("/review-queue")
+def list_review_queue(
+    status: Literal["pending", "approved", "rejected"] = "pending",
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    return review_repo.list_reviews(status, limit, offset)
+
+
+@router.get("/review-queue/{review_id}")
+def review_detail(review_id: str) -> dict:
+    try:
+        return review_repo.review_detail(review_id)
+    except LookupError as exc:
+        raise _review_error(exc) from exc
+
+
+@router.post("/review-queue/{review_id}/approve")
+def approve_review(review_id: str, body: ApproveReviewRequest,
+                   staff: dict = Depends(current_staff)) -> dict:
+    answer = body.approved_answer.strip()
+    if not answer:
+        raise HTTPException(status_code=422, detail="核准答案不能为空")
+    category = body.category.strip() or None if body.category is not None else None
+    note = body.review_note.strip() or None if body.review_note is not None else None
+    try:
+        review_repo.approve(review_id, staff["id"], answer, category, note)
+        return review_service.sync_approved(review_id)
+    except (LookupError, review_repo.ReviewConflict) as exc:
+        raise _review_error(exc) from exc
+
+
+@router.post("/review-queue/{review_id}/reject")
+def reject_review(review_id: str, body: RejectReviewRequest,
+                  staff: dict = Depends(current_staff)) -> dict:
+    note = body.review_note.strip() or None if body.review_note is not None else None
+    try:
+        review_repo.reject(review_id, staff["id"], body.rejection_reason, note)
+        return review_repo.review_detail(review_id)
+    except (LookupError, review_repo.ReviewConflict) as exc:
+        raise _review_error(exc) from exc
+
+
+@router.post("/review-queue/{review_id}/retry-ingestion")
+def retry_ingestion(review_id: str) -> dict:
+    try:
+        return review_service.sync_approved(review_id)
+    except (LookupError, review_repo.ReviewConflict) as exc:
+        raise _review_error(exc) from exc
+
 
 
 @router.get("/evals/customer-rag-v1")

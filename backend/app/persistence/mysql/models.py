@@ -533,6 +533,8 @@ class Message(UUIDPrimaryKey, Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     # 保存回答所依据的 chunk 快照，历史消息仍能展示生成当时的章节和原文。
     citations: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    # 按诉求保存生成时的受限检索证据；不经普通用户消息 API 返回。
+    retrieval_snapshots: Mapped[list[dict] | None] = mapped_column(JSON)
     # 仅服务端读取的跨轮业务阶段；不会作为消息 API 字段返回给客户端。
     workflow_state: Mapped[dict | None] = mapped_column(JSON)
     client_message_id: Mapped[str | None] = mapped_column(String(100))
@@ -546,6 +548,35 @@ class Message(UUIDPrimaryKey, Base):
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
+class ReviewQueue(UUIDPrimaryKey, TimestampMixin, Base):
+    """一条待人工核实的语义缺口；计数只随原始记录首次关联递增。"""
+
+    __tablename__ = "review_queue"
+    __table_args__ = (
+        CheckConstraint("review_status IN ('pending', 'approved', 'rejected')", name="status_valid"),
+        CheckConstraint("ingestion_status IN ('not_started', 'pending', 'ready', 'manual_review', 'failed')", name="ingestion_valid"),
+        CheckConstraint("occurrence_count >= 1", name="occurrences_positive"),
+        Index("ix_review_queue_status_created", "review_status", "created_at", "id"),
+        UniqueConstraint("faq_id"),
+    )
+
+    normalized_question: Mapped[str] = mapped_column(Text, nullable=False)
+    example_answer: Mapped[str] = mapped_column(Text, nullable=False)
+    occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    review_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", server_default=text("'pending'"))
+    approved_answer: Mapped[str | None] = mapped_column(Text)
+    category: Mapped[str | None] = mapped_column(String(100))
+    review_note: Mapped[str | None] = mapped_column(Text)
+    rejection_reason: Mapped[str | None] = mapped_column(String(50))
+    reviewed_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    faq_id: Mapped[str | None] = mapped_column(ForeignKey("faq.id", ondelete="RESTRICT"))
+    ingestion_status: Mapped[str] = mapped_column(String(24), nullable=False, default="not_started", server_default=text("'not_started'"))
+    ingestion_error: Mapped[str | None] = mapped_column(String(255))
+    sync_token: Mapped[str | None] = mapped_column(String(36))
+    sync_started_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 
 class LowConfidenceQuestion(UUIDPrimaryKey, Base):
     """保存知识不足时的原始问法，供后续补库和人工复核。"""
@@ -554,6 +585,7 @@ class LowConfidenceQuestion(UUIDPrimaryKey, Base):
     __table_args__ = (
         Index("ix_low_confidence_questions_conversation", "conversation_id", "created_at"),
         Index("ix_low_confidence_source_assistant", "source_assistant_message_id"),
+        Index("ix_low_confidence_unmatched", "matched_review_id", "created_at", "id"),
     )
 
     conversation_id: Mapped[str] = mapped_column(
@@ -566,6 +598,12 @@ class LowConfidenceQuestion(UUIDPrimaryKey, Base):
     source_assistant_message_id: Mapped[str | None] = mapped_column(
         ForeignKey("messages.id", ondelete="SET NULL")
     )
+    matched_review_id: Mapped[str | None] = mapped_column(ForeignKey("review_queue.id", ondelete="RESTRICT"))
+    # NULL 表示旧数据无历史证据；空列表可由检索状态区分“没搜”和“搜了但无结果”。
+    retrieval_snapshot: Mapped[list[dict] | None] = mapped_column(JSON)
+    retrieval_status: Mapped[str | None] = mapped_column(String(24))
+    retrieval_query: Mapped[str | None] = mapped_column(String(500))
+    processing_error: Mapped[str | None] = mapped_column(String(255))
     original_question: Mapped[str] = mapped_column(Text, nullable=False)
     entrypoint: Mapped[str] = mapped_column(String(40), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)

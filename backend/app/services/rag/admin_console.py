@@ -6,6 +6,7 @@ API 进程生效，但任务历史只保存在当前 API 进程内，重启后�
 
 from __future__ import annotations
 
+import asyncio
 import os
 import socket
 import subprocess
@@ -26,7 +27,7 @@ from app.persistence.mysql import knowledge as knowledge_repo
 from app.services.rag import indexing
 from app.services.rag.runtime_control import AlreadyRunningError, MiningRuntimeControl, default_lock_path
 
-_JOB_TYPES = {"import-markdown", "import-markdown-all", "import-faq", "mine", "vectorize", "cleanup", "evaluate"}
+_JOB_TYPES = {"import-markdown", "import-markdown-all", "import-faq", "mine", "vectorize", "cleanup", "evaluate", "low-confidence-review"}
 _lock = Lock()
 _jobs: list[dict[str, Any]] = []
 _process: subprocess.Popen[bytes] | None = None
@@ -396,6 +397,10 @@ def _execute_job(kind: str, job: dict[str, Any], control: MiningRuntimeControl, 
                                       on_progress=lambda note: _set_progress(job, note))
             finally:
                 mining_control.release()
+        elif kind == "low-confidence-review":
+            from app.services.rag.review_queue import organize
+
+            result = asyncio.run(organize(on_progress=lambda note: _set_progress(job, note)))
         elif kind == "vectorize":
             result = indexing.vectorize_pending()
         elif kind == "evaluate":
@@ -415,10 +420,12 @@ def _execute_job(kind: str, job: dict[str, Any], control: MiningRuntimeControl, 
         else:
             result = {"removed": indexing.cleanup_superseded_vectors()}
         with _lock:
-            job["status"] = "completed"
+            job["status"] = "failed" if kind == "low-confidence-review" and result["failed"] else "completed"
             job["result"] = [asdict(item) for item in result] if isinstance(result, list) else (
                 asdict(result) if hasattr(result, "__dataclass_fields__") else result
             )
+            if kind == "low-confidence-review" and result["failed"]:
+                job["error"] = f"{result['failed']} 条原话未能归并；保留在原始队列，修复后可重跑。"
     except Exception as exc:
         with _lock:
             job["status"] = "failed"

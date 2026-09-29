@@ -21,8 +21,9 @@ class SupportState(TypedDict, total=False):
     # 本轮已检索证据的编号映射；仅最终回答实际引用的项会落到消息行。
     citations: list[dict[str, object]]
     # 各诉求的知识不足信息在收尾节点冻结，最终与回答同事务写入问题池。
-    low_confidence: list[dict[str, str]]
-    request_low_confidence: dict[str, str] | None
+    low_confidence: list[dict[str, object]]
+    request_low_confidence: dict[str, object] | None
+    retrieval_snapshots: list[dict[str, object]]
     # 已认证用户 ID，供上下文查询和写回答时做归属校验。
     user_id: str
     # 当前请求的受限语义字段；完整有序列表与已完成结果分开保存。

@@ -925,6 +925,16 @@ def build_support_graph():
                 )
             except (TypeError, ValueError):
                 logger.warning("Contextual intent result rejected; using current-message result")
+        current_text = _latest_user_text(state["messages"])
+        if len(requests.requests) > 1 and any(
+            not item.original_question_quote or item.original_question_quote.strip() not in current_text
+            for item in requests.requests
+        ):
+            # 多诉求没有可信的原话片段时不能把某项证据错误地挂在整轮话或另一项原话上。
+            return {
+                "requests": [], "request_index": 0, "request_results": [],
+                "direct_reply": _INTENT_FORMAT_REPLY,
+            }
         recognized_intents = [
             {"intent": item.intent, "goal": item.goal} for item in requests.requests
         ]
@@ -1167,11 +1177,14 @@ def build_support_graph():
             return {"messages": [AIMessage(content=direct_reply)], "answer": direct_reply}
         answers: list[str] = []
         all_citations: list[dict[str, object]] = []
-        low_confidence: list[dict[str, str]] = []
+        low_confidence: list[dict[str, object]] = []
         refund_pending: dict[str, str] = {}
+        retrieval_snapshots: list[dict[str, object]] = []
         for item in items:
+            snapshot = item["retrieval"]
+            retrieval_snapshots.append(snapshot)
             if item.get("low_confidence"):
-                low_confidence.append(item["low_confidence"])
+                low_confidence.append({**item["low_confidence"], **snapshot})
             reply = item.get("direct_reply", "")
             tools = item.get("tools", [])
             if not reply and tools:
@@ -1262,6 +1275,7 @@ def build_support_graph():
                             "original_question": item["question"].strip(),
                             "entrypoint": "generation_missing_citation",
                             "reason": "生成答案没有引用召回的知识块",
+                            **snapshot,
                         })
                     else:
                         all_citations.extend(
@@ -1286,6 +1300,7 @@ def build_support_graph():
                                   "handoff_required": any(item.get("handoff") for item in items),
                                   "refund_pending": refund_pending}
         output["low_confidence"] = low_confidence
+        output["retrieval_snapshots"] = retrieval_snapshots
         return output
 
     def route_after_intent(state: SupportState) -> str:
@@ -1351,12 +1366,37 @@ def build_support_graph():
                 "name": message.name,
                 "payload": payload if isinstance(payload, dict) else {"status": "error"},
             })
+        faq_payload = next((
+            tool["payload"] for tool in reversed(tool_results) if tool["name"] == "search_faq"
+        ), None)
+        source_text = _latest_user_text(state.get("messages", []))
+        quote = requests[index].get("original_question_quote")
+        raw_question = (quote.strip() if isinstance(quote, str) and quote.strip()
+                        and quote.strip() in source_text else
+                        source_text if len(requests) == 1 else requests[index]["completed_question"].strip())
+        retrieval = {
+            "original_question": raw_question,
+            "retrieval_query": requests[index]["completed_question"].strip()[:500] if faq_payload is not None else None,
+            "retrieval_status": ("not_searched" if faq_payload is None else
+                                 "searched" if faq_payload.get("status") == "ok" else "error"),
+            "retrieval_snapshot": [
+                {"rank": rank, "chunk_id": str(row.get("chunkId") or ""),
+                 "content": str(row.get("answer") or ""),
+                 "source": row.get("sourcePath") or row.get("sourceUrl") or "FAQ",
+                 "section": str(row.get("sectionPath") or ""),
+                 "score": row.get("score") if isinstance(row.get("score"), (int, float))
+                 and not isinstance(row.get("score"), bool) and math.isfinite(row["score"]) else None}
+                for rank, row in enumerate(faq_payload.get("results", []), 1)
+                if isinstance(row, dict)
+            ] if faq_payload is not None else [],
+        }
         result = {
             "question": requests[index]["completed_question"],
             "intent": requests[index]["intent"],
             "goal": requests[index]["goal"],
             "direct_reply": state.get("direct_reply", ""),
             "tools": tool_results,
+            "retrieval": retrieval,
             "citations": state.get("citations", []),
             "handoff": state.get("handoff_requested", False),
             "low_confidence": state.get("request_low_confidence"),
@@ -1391,6 +1431,7 @@ def build_support_graph():
             answer,
             "complete",
             citations=state.get("citations", []),
+            retrieval_snapshots=state.get("retrieval_snapshots", []),
             low_confidence=state.get("low_confidence", []),
             handoff=state.get("handoff_required", False),
             workflow_state=({"refund": state["refund_pending"]}
