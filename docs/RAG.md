@@ -864,7 +864,7 @@ remote 模式下用员工账号登录后进入 `/staff/rag`。该页面调用员
 
 ## 低置信度问题审核与补库
 
-这条人工审核路径以 `low_confidence_questions` 为输入，不消费旧的 `unanswered_questions`，也不等同于上文的历史对话挖掘：模型只提出标准化问题及**未核实的示例答案**，正式 FAQ 必须由员工提交人工核准答案。`0010_review_queue` 增加 `review_queue`、原始问题的归并 ID 和召回证据字段，以及 `messages.retrieval_snapshots`；需要先在实际 MySQL 上执行迁移。本地数据库若仍在 `0008`，不能直接访问新增队列接口；迁移尚未在本地库验收。
+这条人工审核路径以 `low_confidence_questions` 为输入，不消费旧的 `unanswered_questions`，也不等同于上文的历史对话挖掘：模型只提出标准化问题及**未核实的示例答案**，正式 FAQ 必须由员工提交人工核准答案。`0010_review_queue` 增加 `review_queue`、原始问题的归并 ID 和召回证据字段，以及 `messages.retrieval_snapshots`；使用新增队列接口前，须在实际 MySQL 上依次执行 `0009_low_confidence_feedback` 与 `0010_review_queue` 迁移。
 
 ### 当次检索证据
 
