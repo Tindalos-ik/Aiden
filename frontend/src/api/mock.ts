@@ -2,7 +2,9 @@ import type { AidenApi } from './contracts';
 import type { Actor, Conversation, Message, OrderCard, StreamEvent, AfterSaleApplication, ServiceTicket } from '../types';
 import { demoAccounts, demoOrdersByUser } from '../data/demoData';
 
+const TICKET_RESOLUTION_REMINDER = '您好，您提交的工单已处理完成，请查看处理结果。';
 const DB_KEY = 'aiden-demo-db-v1';
+
 const ACTOR_KEY = 'aiden-demo-actor-v1';
 const CHANNEL_NAME = 'aiden-demo-sync-v1';
 
@@ -452,8 +454,16 @@ export const mockApi: AidenApi = {
     const now = new Date().toISOString(); row.status = status as ServiceTicket['status']; row.updatedAt = now;
     if (status === 'in_progress') { row.assignedStaffId = actor.id; row.acceptedAt = now; }
     if (note.trim()) row.resolutionNote = note.trim();
-    if (status === 'resolved') row.resolvedAt = now;
-    if (status === 'closed') { row.closedAt = now; row.closedById = actor.id; }
+    if (status === 'resolved') {
+      const conversation = db.conversations.find((item) => item.id === row.conversationId && item.userId === row.userId);
+      if (conversation) {
+        const createdAt = new Date(Date.now() + 1).toISOString();
+        updateMessage(db, { id: makeId('ticket-reminder'), conversationId: row.conversationId,
+          role: 'assistant', content: TICKET_RESOLUTION_REMINDER, createdAt, status: 'complete' });
+        conversation.updatedAt = createdAt;
+        conversation.lastMessagePreview = TICKET_RESOLUTION_REMINDER;
+      }
+    }
     if (afterSaleRequestId) row.afterSaleRequestId = afterSaleRequestId;
     writeDatabase(db); return row;
   },

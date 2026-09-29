@@ -14,6 +14,8 @@ from app.persistence.mysql.models import (
 )
 
 REQUEST_TYPES = {"refund": "退款", "return": "退货", "exchange": "换货"}
+
+TICKET_RESOLUTION_REMINDER = "您好，您提交的工单已处理完成，请查看处理结果。"
 REQUEST_TRANSITIONS = {
     "pending": {"approved", "rejected", "cancelled"},
     "approved": {"processing", "awaiting_external_refund", "cancelled"},
@@ -255,7 +257,15 @@ def change_ticket(session: Session, ticket_id: str, actor_id: str, status: str,
     row.status = status
     row.resolution_note = note.strip() or row.resolution_note
     if status == "resolved":
-        row.resolved_at = utc_now_naive()
+        now = utc_now_naive()
+        row.resolved_at = now
+        conversation = session.get(Conversation, row.conversation_id)
+        if conversation is not None and conversation.user_id == row.user_id:
+            reminder = Message(conversation_id=row.conversation_id, sender_role="assistant",
+                               content=TICKET_RESOLUTION_REMINDER, status="complete", created_at=now)
+            session.add(reminder)
+            conversation.last_message_preview = TICKET_RESOLUTION_REMINDER[:120]
+            conversation.updated_at = now
     if status == "closed":
         row.closed_at, row.closed_by_id = utc_now_naive(), actor_id
     return row
