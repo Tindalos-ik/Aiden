@@ -117,6 +117,19 @@ VALUES ('66666666-6666-4666-8666-000000000002', 'test_shipping_insurance', '测�
         '2026-01-01 00:00:00', 1, '2026-01-01 00:00:00', '2026-01-01 00:00:00')
 ON DUPLICATE KEY UPDATE id = id;
 
+-- Demo refund policy: name and key carry the refund kind, and the content repeats the four reason
+-- phrases the chat matcher looks for, so the chat refund confirmation path is reachable locally.
+-- Prototype wording only: no approval is implied, no day counts are promised, and 无理由退货 stays
+-- a separate case. Same fixed id and ON DUPLICATE KEY guard as the rows above keep re-runs no-ops.
+INSERT INTO policies (id, policy_key, name, version, content, effective_from, is_active, created_at, updated_at)
+VALUES ('66666666-6666-4666-8666-000000000003', 'demo_refund_policy', '喵购退款政策（演示）', '1.0',
+        '【演示政策】喵购商城原型演示口径，不是已生效的正式承诺。质量问题、货不对板、商品与描述不符或发错货的退款、退货退款申请均先受理，'
+        '再转员工审核：申请时请提供订单信息、收到商品及标签的清晰照片、包裹面单或物流记录；开箱视频等材料可选，不作为受理前提。'
+        '运费由谁承担、退款金额与到账时间均以人工审核结论为准；本政策不自动通过任何申请，也不承诺固定处理天数或到账时限。'
+        '无理由退货另行按商品保持完好、不影响二次销售的条件判断。',
+        '2026-01-01 00:00:00', 1, '2026-01-01 00:00:00', '2026-01-01 00:00:00')
+ON DUPLICATE KEY UPDATE id = id;
+
 INSERT INTO faq (id, category, question, answer, is_active, created_at, updated_at)
 VALUES ('77777777-7777-4777-8777-000000000001', '物流', '发货后在哪里查看物流？',
         '【测试 FAQ】可通过订单详情查看包裹和物流节点。', 1,
