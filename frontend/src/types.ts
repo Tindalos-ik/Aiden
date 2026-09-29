@@ -148,6 +148,49 @@ export interface RagJob {
   result: unknown;
 }
 
+export type ReviewStatus = 'pending' | 'approved' | 'rejected';
+export type RejectionReason = 'existing_knowledge_not_retrieved' | 'not_reusable' | 'outdated' | 'other';
+
+export interface ReviewQueueItem {
+  id: string;
+  normalized_question: string;
+  example_answer: string | null;
+  occurrence_count: number;
+  review_status: ReviewStatus;
+  approved_answer: string | null;
+  category: string | null;
+  review_note: string | null;
+  rejection_reason: RejectionReason | null;
+  ingestion_status: 'not_started' | 'pending' | 'ready' | 'manual_review' | 'failed';
+  ingestion_error: string | null;
+  faq_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReviewOriginal {
+  id: string;
+  raw_question: string;
+  created_at: string;
+  source: string;
+  reason: string;
+  retrieval_query: string | null;
+  retrieval_status: 'searched' | 'not_searched' | 'error' | null;
+  /** null = 旧记录未保存；[] = 当次无片段，必须结合 retrieval_status 判断是否检索。 */
+  retrieval_snapshot: null | Array<{
+    rank: number;
+    chunk_id: string;
+    content: string;
+    source: string | null;
+    section: string | null;
+    score: number | null;
+  }>;
+}
+
+export interface ReviewDetail extends ReviewQueueItem {
+  originals: ReviewOriginal[];
+}
+
 export interface RagOverview {
   embedding: {
     healthy: boolean;

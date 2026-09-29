@@ -9,6 +9,7 @@ import { StaffWorkspace } from './pages/StaffWorkspace';
 import { UserServicePage, StaffServicePage } from './pages/ServicePages';
 import { RagConsole } from './pages/RagConsole';
 import { RagEvals } from './pages/RagEvals';
+import { ReviewQueue } from './pages/ReviewQueue';
 import { mockChannelName, mockStorageKey } from './api/mock';
 import type { Role } from './types';
 import { Brand, SpinnerPage } from './components/Common';
@@ -78,6 +79,7 @@ function AppRoutes() {
       <Route path="/staff" element={<RoleGate role="staff"><StaffWorkspace /></RoleGate>} />
       <Route path="/staff/service" element={<RoleGate role="staff"><StaffServicePage /></RoleGate>} />
       <Route path="/staff/rag" element={<RoleGate role="staff"><RagConsole /></RoleGate>} />
+      <Route path="/staff/reviews" element={<RoleGate role="staff"><ReviewQueue /></RoleGate>} />
       <Route path="/staff/evals" element={<RoleGate role="staff"><RagEvals /></RoleGate>} />
       <Route path="/staff/:conversationId" element={<RoleGate role="staff"><StaffWorkspace /></RoleGate>} />
       <Route path="*" element={<Navigate to="/" replace />} />

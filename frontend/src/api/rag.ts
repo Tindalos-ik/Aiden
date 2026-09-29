@@ -1,4 +1,4 @@
-import type { RagChunk, RagEvalReport, RagJob, RagMilvusSnapshot, RagMiningSnapshot, RagOverview } from '../types';
+import type { RagChunk, RagEvalReport, RagJob, RagMilvusSnapshot, RagMiningSnapshot, RagOverview, RejectionReason, ReviewDetail, ReviewQueueItem, ReviewStatus } from '../types';
 import { apiMode } from './index';
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
@@ -33,4 +33,12 @@ export const ragApi = {
   }),
   startEmbedding: () => request<{ state: string; managed: boolean }>('/embedding/start', { method: 'POST' }),
   stopEmbedding: () => request<{ state: string; managed: boolean }>('/embedding/stop', { method: 'POST' }),
+  reviewQueue: (status: ReviewStatus, offset: number, limit = 20) =>
+    request<{ items: ReviewQueueItem[]; total: number }>(`/review-queue?status=${status}&limit=${limit}&offset=${offset}`, { cache: 'no-store' }),
+  reviewDetail: (id: string) => request<ReviewDetail>(`/review-queue/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+  approveReview: (id: string, body: { approved_answer: string; category: string; review_note: string }) =>
+    request<ReviewDetail>(`/review-queue/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify(body) }),
+  rejectReview: (id: string, body: { rejection_reason: RejectionReason; review_note: string }) =>
+    request<ReviewDetail>(`/review-queue/${encodeURIComponent(id)}/reject`, { method: 'POST', body: JSON.stringify(body) }),
+  retryReviewIngestion: (id: string) => request<ReviewDetail>(`/review-queue/${encodeURIComponent(id)}/retry-ingestion`, { method: 'POST' }),
 };
