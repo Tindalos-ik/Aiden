@@ -16,7 +16,7 @@ from app.api.deps import current_identity
 from app.main import app
 from app.persistence.mysql import chat
 from app.persistence.mysql.models import (
-    Base, Conversation, LowConfidenceQuestion, Message, User, utc_now_naive,
+    Base, Conversation, LowConfidenceQuestion, Message, ReviewQueue, User, utc_now_naive,
 )
 
 
@@ -41,8 +41,12 @@ class LowConfidencePersistenceTests(unittest.TestCase):
         def enable_foreign_keys(connection, _record):
             connection.execute("PRAGMA foreign_keys=ON")
 
+        # 显式列出的表必须覆盖这些测试会真正触碰到的外键父表：PRAGMA foreign_keys=ON 后，
+        # SQLite 在写入 low_confidence_questions 时会去解析 matched_review_id 指向的 review_queue，
+        # 父表缺失就直接报 “no such table”。这里只建夹具用到的表，不引入其余业务表。
         Base.metadata.create_all(self.engine, tables=[
-            User.__table__, Conversation.__table__, Message.__table__, LowConfidenceQuestion.__table__,
+            User.__table__, Conversation.__table__, Message.__table__,
+            ReviewQueue.__table__, LowConfidenceQuestion.__table__,
         ])
         self.factory = sessionmaker(bind=self.engine, autoflush=False, expire_on_commit=False)
         self.db_patch = patch.object(chat, "get_session_factory", return_value=self.factory)
