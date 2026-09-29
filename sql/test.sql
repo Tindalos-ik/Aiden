@@ -1,6 +1,6 @@
 -- Aiden local demo data for MySQL 8.4, after Alembic upgrade head.
 -- Run against the disposable local aiden database. Re-running leaves these fixed rows unchanged.
--- This covers all 15 application tables; alembic_version is migration metadata and is untouched.
+-- Seeds core business tables plus one low-confidence question; alembic_version is untouched.
 SET NAMES utf8mb4;
 USE aiden;
 START TRANSACTION;
@@ -166,9 +166,9 @@ VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-000000000001', 'TEST-TICKET-001',
         '11111111-1111-4111-8111-000000000002', '2026-09-21 09:05:00', '2026-09-21 09:05:00')
 ON DUPLICATE KEY UPDATE id = id;
 
-INSERT INTO unanswered_questions (id, conversation_id, question, confidence, review_status, created_at)
+INSERT INTO low_confidence_questions (id, conversation_id, original_question, entrypoint, reason, created_at)
 VALUES ('bbbbbbbb-bbbb-4bbb-8bbb-000000000001', '88888888-8888-4888-8888-000000000001',
-        '退款到账能否加急？', 0.1500, 'pending', '2026-09-24 09:02:00')
+        '退款到账能否加急？', 'sql_seed', '【预置测试问题】缺少退款到账加急的可核实依据。', '2026-09-24 09:02:00')
 ON DUPLICATE KEY UPDATE id = id;
 
 COMMIT;

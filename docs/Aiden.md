@@ -256,7 +256,8 @@ def query_order(
 | `conversations` | 会话：用户、开始时间、处理状态、接管客服 | 对话服务、人工接管 |
 | `messages` | 消息流水：关联会话、角色、内容、发送时间 | 对话服务、上下文加载 |
 | `tickets` | 人工工单：工单号、关联会话、问题描述、类型、处理状态、创建时间 | `create_ticket` |
-| `unanswered_questions` | 低置信度或未解决的问题、关联会话、审核状态 | 问题池、人工审核补库 |
+| `low_confidence_questions` | 证据不足或负反馈产生的原始问法、关联会话及当次检索证据 | 问题池、归并来源 |
+| `review_queue` | 规范化问题、出现次数、审核结论与关联 FAQ | 人工审核补库 |
 
 
 

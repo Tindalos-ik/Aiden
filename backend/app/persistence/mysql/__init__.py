@@ -20,7 +20,6 @@ from .models import (
     Shipment,
     Ticket,
     TrackingEvent,
-    UnansweredQuestion,
     User,
 )
 from .queries import (
@@ -47,7 +46,6 @@ __all__ = [
     "Shipment",
     "Ticket",
     "TrackingEvent",
-    "UnansweredQuestion",
     "User",
     # 便捷导出：查询函数需传入 Session，不会隐式打开事务；连接工具按需读取配置。
     "get_effective_policy",

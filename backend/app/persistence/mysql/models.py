@@ -654,42 +654,6 @@ class Ticket(UUIDPrimaryKey, TimestampMixin, Base):
     closed_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
 
-class UnansweredQuestion(UUIDPrimaryKey, Base):
-    """等待人工审核的低置信度或未解决问题。
-
-    confidence 使用 0 到 1 的 Decimal 分值；review_status 表示待审、已审、已补入 FAQ
-    或忽略，reviewer_id、review_note 和 reviewed_at 记录人工审核信息。
-    """
-
-    __tablename__ = "unanswered_questions"
-    __table_args__ = (
-        CheckConstraint("confidence IS NULL OR (confidence >= 0 AND confidence <= 1)", name="confidence_range"),
-        CheckConstraint(
-            "review_status IN ('pending', 'reviewed', 'added_to_faq', 'dismissed')",
-            name="review_status_valid",
-        ),
-        Index("ix_unanswered_questions_status_created", "review_status", "created_at"),
-        Index("ix_unanswered_questions_conversation", "conversation_id"),
-    )
-
-    conversation_id: Mapped[str] = mapped_column(
-        ForeignKey("conversations.id", ondelete="RESTRICT"), nullable=False
-    )
-    question: Mapped[str] = mapped_column(Text, nullable=False)
-    confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
-    review_status: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="pending", server_default=text("'pending'")
-    )
-    reviewer_id: Mapped[str | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL")
-    )
-    review_note: Mapped[str | None] = mapped_column(Text)
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utc_now_naive, server_default=func.current_timestamp()
-    )
-
-
 class ConversationMiningBatch(UUIDPrimaryKey, TimestampMixin, Base):
     """历史对话挖掘的抽取批次与进度记录。
 
