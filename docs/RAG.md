@@ -406,6 +406,23 @@ CPU 推理下换模型只改配置，服务启动命令不需要额外参数：
 
 `get_collection_stats` 返回的 `row_count` 统计的是物理存储版本数，upsert 覆盖后旧版本仍在，直到后台压缩完成才收敛。判断集合里有没有重复向量必须按主键去重计数，不能用这个值。
 
+#### 如何把知识写进 Milvus
+
+写入入口是 `backend/scripts/build_knowledge_base.py` 的 `vectorize` 命令，员工建库控制台中的「向量化 pending 并双写」按钮调用同一个 `indexing.vectorize_pending()`。Markdown、FAQ 和历史对话挖掘生成的知识都先落到 MySQL `knowledge_chunks`；Markdown/FAQ 导入命令与控制台挖掘任务只写 MySQL。独立的对话挖掘脚本默认在正式知识入库后自动补向量，受 `MINING_VECTORIZE_AFTER_PROMOTE` 控制。准备好 MySQL、向量服务与 Milvus，并在 `backend/.env` 配置 `DATABASE_URL`、`EMBEDDING_*` 和 `MILVUS_*` 后，从 `backend` 目录执行：
+
+```powershell
+# 按知识来源导入；已有 pending 块可跳过导入，直接执行 vectorize
+.\.venv\Scripts\python.exe -m scripts.build_knowledge_base import-markdown
+.\.venv\Scripts\python.exe -m scripts.build_knowledge_base import-faq
+.\.venv\Scripts\python.exe -m scripts.build_knowledge_base vectorize
+```
+
+`vectorize_pending()` 只读取 `vector_status = 'pending'` 的块，先由 `KnowledgeVectorStore.ensure_collection()` 创建集合或校验现有集合的维度，再按 `EMBEDDING_BATCH_SIZE` 将 MySQL 保存的 `embedding_text`（分类、问法、答案）送给 `EmbeddingClient.embed_documents()` 生成 dense 向量。模型实际返回的维度会与 `EMBEDDING_DIMENSION` 校验，匹配后才写入 Milvus。
+
+每条 Milvus 记录以 MySQL `knowledge_chunks.id` 作为 `chunk_id` 主键，`embedding` 存向量，`content` 存答案副本；来源、分类、章节等写入标量字段，问法、前后块 id 与模板指纹写入 `metadata`。`KnowledgeVectorStore.upsert()` 按 `MILVUS_INSERT_BATCH_SIZE` 分批调用 `MilvusClient.upsert()`，每批后执行 `flush()`，返回已写入的 `chunk_id`。随后 `mark_chunks_vectorized()` 才把这些块在 MySQL 中标为 `vectorized`，并将同一个 id 回填到 `vector_id`。两库之间没有跨库事务；若 Milvus 写入后、MySQL 回填前中断，重跑 `vectorize` 会按相同主键覆盖，而不会新增一个逻辑知识块。
+
+写完可运行下方的 `stats` 或 `scan-pending` 查看 MySQL 状态；员工控制台的「Milvus 实际数据（只读）」可查看集合中的主键和元数据，并与 MySQL 状态对照。`need_manual_review` 不参与向量化；内容更新产生的 `superseded` 旧向量需另运行 `cleanup-vectors`，或在 `vectorize` 后加 `--cleanup`。
+
 ### 命令
 
 命令都在 `backend` 目录下执行，连接与凭据来自 `backend/.env`。
@@ -532,6 +549,8 @@ Milvus 命中后按 `chunk_id` 去重，再调用 `get_vectorized_chunks_by_ids`
 System Prompt 要求知识事实只依据本轮 `search_faq` 结果，并逐项用 `[n]` 引用；不得从 `policies` 表、模型记忆或其他用户历史回答补造政策，也不得保证具体到账、送达或赔付结果。`generate` 把最相关证据放在上下文开头、次相关放在结尾，减少长上下文中段的信息损失。生成后检查引用编号：没有引用、引用了不存在的编号，均改为拒答；引用失败以独立技术兜底入口 `generation_missing_citation` 入池，不混同模型自评不足。
 
 每个失败诉求分别记录原问法、入口及原因：空召回和最高可比较重排分低于阈值使用 `retrieval_low_confidence`（原因分别说明空召回或低分），自评判不足或结果无法解析使用 `generation_insufficient_knowledge`。工具服务故障只返回错误文案，不作为知识不足入池。`finish_assistant_message` 在保存最终助手消息及引用快照的同一 MySQL 事务中批量写入 `low_confidence_questions`，重复收尾或 SSE 重放不重复写入。
+
+退款办理另有一个入口：本人订单没有正文覆盖用户陈述原因的现行商家政策时，`graph.py` 的 `_refund_policy_result()` 生成 `entrypoint = refund_policy_unavailable`（原因「没有可核验且覆盖本次退款原因的有效商家退款政策」）。它和上面的检索类入口写同一张表，但指向的是需要业务补录或核准商家政策，而不是知识库缺条目；知识库检索结果不能作为退款提交依据。
 
 用户点击已完成助手回答的满意度按钮时，带鉴权的 `POST /api/conversations/{conversation_id}/messages/{message_id}/feedback` 仅接收 `{"rating":"satisfied"}` 或 `{"rating":"unsatisfied"}`；服务端核验会话归属和目标消息，并在“不满意”时关联真实用户问题，以 `user_feedback_unresolved` 入同一问题池。满意反馈只保存到 `messages.feedback`，不入池；已记录的反馈重复提交返回原结果，不允许改选。历史消息回传 `feedback` 供刷新后回显；失败时页面提示错误，可重试。消息表的 `citations` JSON 保存生成时的来源快照；历史消息和 SSE 的 `citations` 事件使用同一结构，前端点击 `[n]` 可查看原 chunk 正文与章节。Markdown 来源还可经已认证的 `GET /api/knowledge/source/{chunk_id}` 打开原始文档。问题入池不等于人工审核或自动补库，后两项尚未实现。
 

@@ -128,7 +128,7 @@ npm run dev
 
 每次模型调用最多加载最近 16 条消息，单条最多 2,000 字符，并将总历史上下文限制在 12,000 字符；模型回答上限为 800 tokens。
 
-普通用户对话 API 与员工建库 `/api/rag/*` 已有后端实现。下方契约中 `/handoff` 与 `/staff/*` 是 mock 接待工作台使用的预留接口，当前后端没有实现；remote 模式不会发起转人工请求。
+普通用户对话 API、转人工 `/handoff` 与员工工作台 `/api/staff/*`、员工建库 `/api/rag/*` 都已有后端实现。用户侧 `POST /api/conversations/{id}/handoff` 由 `backend/app/api/routes/conversations.py` 中的 `handoff()` 转交 `request_handoff()`，把会话从 `bot` 转入 `waiting` 队列；员工侧 `backend/app/api/routes/staff.py` 提供队列、接管、回复与结单接口。remote 模式会真实调用它们：`frontend/src/api/remote.ts` 的 `requestHandoff()`、`listQueue()`、`acceptConversation()`、`sendStaffMessage()`、`closeConversation()` 打到上述路由，`frontend/src/pages/StaffWorkspace.tsx` 每 3 秒轮询一次队列。转人工仍然是队列与会话状态，没有实时推送。
 
 前端使用下列 JSON 形状作为契约。后端字段如需不同，可只在 `src/api/remote.ts` 做映射，不需要改页面。
 
@@ -175,7 +175,7 @@ event: error
 data: {"error":"订单服务暂时不可用"}
 ```
 
-解析器支持 UTF-8 分片、LF/CRLF/CR 行结束、多行 data、注释行、分片中的未完成行，以及流结束时最后一个没有空行终止的事件。建议服务端在客户端断开流时也将助手消息状态落为 `stopped`，以便刷新后保持一致。当前给定契约没有“转人工后用户追加消息”的独立 endpoint，因此转接后用户页展示状态和客服回复，输入框切换为只读。
+解析器支持 UTF-8 分片、LF/CRLF/CR 行结束、多行 data、注释行、分片中的未完成行，以及流结束时最后一个没有空行终止的事件。建议服务端在客户端断开流时也将助手消息状态落为 `stopped`，以便刷新后保持一致。转人工后用户仍可在原会话继续留言：用户侧 `POST /api/conversations/{id}/messages` 在 `waiting`/`staff` 阶段写入留言（`backend/app/api/routes/conversations.py` 中的 `send_user_human_message()`），用户页输入框保持可用，`frontend/src/pages/UserWorkspace.tsx` 的 `send()` 在这两个状态下改调 `api.sendHumanMessage`。
 
 ## 代码组织
 
