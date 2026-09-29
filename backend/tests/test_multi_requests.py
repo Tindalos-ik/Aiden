@@ -2,9 +2,11 @@
 
 import json
 import unittest
+from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.agent import graph as support_graph
@@ -28,11 +30,13 @@ class FakeModel:
     def __init__(self, requests, cite_faq=True):
         self.requests = requests
         self.cite_faq = cite_faq
+        self.configs = []
 
     def bind(self, **_kwargs):
         return self
 
-    async def ainvoke(self, messages):
+    async def ainvoke(self, messages, config=None):
+        self.configs.append(config)
         instruction = str(messages[0].content)
         if "请求拆分器" in instruction:
             return AIMessage(content=json.dumps({"requests": self.requests}, ensure_ascii=False))
@@ -69,10 +73,13 @@ class FakeToolNode:
 
 
 class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
-    async def run_case(self, text, requests, payloads=None, history=None, cite_faq=True):
+    async def run_case(self, text, requests, payloads=None, history=None, cite_faq=True,
+                       langfuse=False):
         FakeToolNode.calls = []
         FakeToolNode.payloads = payloads or {}
         model = FakeModel(requests, cite_faq=cite_faq)
+        self.last_model = model
+        self.last_trace_client = Mock()
         tools = {name: SimpleNamespace(name=name) for name in support_graph._TOOLS_BY_NAME}
         with (
             patch.object(support_graph, "ChatOpenAI", return_value=model),
@@ -82,7 +89,11 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
                 *(history or []), {"role": "user", "content": text},
             ]),
             patch.object(support_graph, "finish_assistant_message"),
-            patch.object(support_graph.settings, "langfuse_enabled", False),
+            patch.object(support_graph.settings, "langfuse_enabled", langfuse),
+            patch("langfuse.langchain.CallbackHandler", return_value=BaseCallbackHandler())
+            if langfuse else nullcontext(),
+            patch("langfuse.get_client", return_value=self.last_trace_client)
+            if langfuse else nullcontext(),
         ):
             result = await support_graph.build_support_graph().ainvoke({
                 "conversation_id": "c", "assistant_message_id": "m", "user_id": "u",
@@ -405,6 +416,77 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("证据不足", refused["answer"])
         self.assertEqual(refused["citations"], [])
+
+    async def test_langfuse_metadata_is_ordered_minimal_and_cost_is_attributed_per_item(self):
+        requests = [
+            request("smalltalk", "smalltalk", "你好"),
+            request("product", "product", "查询猫粮口味 TEST-999", "TEST-999"),
+        ]
+        result, _ = await self.run_case(
+            "你好，再查询猫粮口味，订单号 TEST-999",
+            requests,
+            {"search_faq": {"status": "ok", "results": [{
+                "chunkId": "flavors", "answer": "鸡肉味", "score": 1.0,
+            }]}},
+            langfuse=True,
+        )
+        self.last_trace_client.update_current_trace.assert_called_once()
+        metadata = self.last_trace_client.update_current_trace.call_args.kwargs["metadata"]
+        self.assertEqual(metadata, {"recognized_intents": [
+            {"intent": "smalltalk", "goal": "smalltalk"},
+            {"intent": "product", "goal": "product"},
+        ]})
+        self.assertNotIn("TEST-999", json.dumps(metadata))
+        self.assertEqual(
+            [item["intent"] for item in result["request_results"]],
+            ["smalltalk", "product"],
+        )
+        call_configs = [config for config in self.last_model.configs if config]
+        self.assertEqual(
+            sum(config["metadata"] == {"cost_bucket": "intent_classification"}
+                for config in call_configs),
+            1,
+        )
+        self.assertEqual(
+            [config["metadata"]["cost_intent"] for config in call_configs
+             if "cost_intent" in config["metadata"]],
+            ["product", "smalltalk", "product"],
+        )
+        self.assertEqual(
+            [config["run_name"] for config in call_configs],
+            [
+                "cost_bucket_intent_classification",
+                "cost_intent_product",
+                "cost_intent_smalltalk",
+                "cost_intent_product",
+            ],
+        )
+
+    async def test_contextual_classifier_retry_uses_shared_cost_bucket(self):
+        result, _ = await self.run_case(
+            "这个呢",
+            [request("other", "other", "需要澄清")],
+            history=[
+                {"role": "assistant", "content": "请说明您指什么？"},
+                {"role": "user", "content": "刚才那个"},
+            ],
+            langfuse=True,
+        )
+        call_configs = [config for config in self.last_model.configs if config]
+        self.assertEqual(
+            call_configs,
+            [
+                {
+                    "metadata": {"cost_bucket": "intent_classification"},
+                    "run_name": "cost_bucket_intent_classification",
+                },
+                {
+                    "metadata": {"cost_bucket": "intent_classification"},
+                    "run_name": "cost_bucket_intent_classification",
+                },
+            ],
+        )
+        self.assertEqual(result["request_results"][0]["intent"], "other")
 
 
 if __name__ == "__main__":

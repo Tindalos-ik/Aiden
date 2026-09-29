@@ -864,7 +864,16 @@ def build_support_graph():
                     )),
                     current_message,
                 ]
-            response = await json_model.ainvoke(messages)
+            response = await json_model.ainvoke(
+                messages,
+                config=(
+                    {
+                        "metadata": {"cost_bucket": "intent_classification"},
+                        "run_name": "cost_bucket_intent_classification",
+                    }
+                    if settings.langfuse_enabled else None
+                ),
+            )
             content = _content_as_text(response.content)
             try:
                 requests = SupportRequests.model_validate_json(content)
@@ -901,13 +910,27 @@ def build_support_graph():
         ):
             try:
                 context_response = await json_model.ainvoke(
-                    _structured_messages(state["messages"], MULTI_REQUEST_PROMPT, SupportRequests)
+                    _structured_messages(state["messages"], MULTI_REQUEST_PROMPT, SupportRequests),
+                    config=(
+                        {
+                            "metadata": {"cost_bucket": "intent_classification"},
+                            "run_name": "cost_bucket_intent_classification",
+                        }
+                        if settings.langfuse_enabled else None
+                    ),
                 )
                 requests = SupportRequests.model_validate_json(
                     _content_as_text(context_response.content)
                 )
             except (TypeError, ValueError):
                 logger.warning("Contextual intent result rejected; using current-message result")
+        recognized_intents = [
+            {"intent": item.intent, "goal": item.goal} for item in requests.requests
+        ]
+        if settings.langfuse_enabled:
+            from langfuse import get_client
+
+            get_client().update_current_trace(metadata={"recognized_intents": recognized_intents})
         return {
             "requests": [item.model_dump() for item in requests.requests],
             "request_index": 0, "request_results": [], "query_cache": [],
@@ -1103,7 +1126,17 @@ def build_support_graph():
             HumanMessage(content=json.dumps({"question": question, "evidence": results}, ensure_ascii=False)),
         ]
         try:
-            check = await model.ainvoke(check_messages)
+            cost_intent = state["requests"][state["request_index"]]["intent"]
+            check = await model.ainvoke(
+                check_messages,
+                config=(
+                    {
+                        "metadata": {"cost_intent": cost_intent},
+                        "run_name": f"cost_intent_{cost_intent}",
+                    }
+                    if settings.langfuse_enabled else None
+                ),
+            )
             raw = _content_as_text(check.content).strip()
             if raw.startswith("```"):
                 raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
@@ -1174,7 +1207,13 @@ def build_support_graph():
                     HumanMessage(content=json.dumps({
                         "question": item["question"], "evidence": [],
                     }, ensure_ascii=False)),
-                ])
+                ], config=(
+                    {
+                        "metadata": {"cost_intent": item["intent"]},
+                        "run_name": f"cost_intent_{item['intent']}",
+                    }
+                    if settings.langfuse_enabled else None
+                ))
                 reply = _content_as_text(response.content).strip()
             if not reply:
                 evidence = []
@@ -1193,7 +1232,13 @@ def build_support_graph():
                     SystemMessage(content=SYSTEM_PROMPT + "\n只回答这一项请求。必须以给出的本轮结果为准，简短说明查到的事实；不要输出 JSON 或工具名。商品知识和政策规则的每条事实必须引用给出的编号。"
                                   + ("\n这是退款申请提交前说明：指出已核对的订单事实、政策证据能确认的条件、仍缺少或无法判断的信息；提交后待员工审核，不得说退款资格、金额或时效已经确定，也不要自行要求用户确认。" if refund_policy else "")),
                     HumanMessage(content=json.dumps({"question": item["question"], "evidence": evidence}, ensure_ascii=False)),
-                ])
+                ], config=(
+                    {
+                        "metadata": {"cost_intent": item["intent"]},
+                        "run_name": f"cost_intent_{item['intent']}",
+                    }
+                    if settings.langfuse_enabled else None
+                ))
                 reply = _content_as_text(response.content).strip()
                 if local_citations:
                     used_numbers = {int(value) for value in re.findall(r"\[(\d+)\]", reply)}
@@ -1296,6 +1341,7 @@ def build_support_graph():
             })
         result = {
             "question": requests[index]["completed_question"],
+            "intent": requests[index]["intent"],
             "goal": requests[index]["goal"],
             "direct_reply": state.get("direct_reply", ""),
             "tools": tool_results,
