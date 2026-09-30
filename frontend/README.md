@@ -63,56 +63,187 @@ VITE_API_BASE_URL=/api
 开发服务器默认将 `/api` 代理到 `http://127.0.0.1:8000`。使用根目录 `start.ps1` 时，可在启动前设置 `FASTAPI_PORT`，脚本会用该端口启动后端，并让 Vite 代理自动指向同一端口：
 
 ```powershell
-$env:FASTAPI_PORT = '8001'
+$env:FASTAPI_PORT = '8100'
 .\start.ps1
 ```
 
-单独运行前后端时，后端的 Uvicorn 端口和前端启动环境中的 `VITE_API_PROXY_TARGET` 要保持一致，例如将后者设为 `http://127.0.0.1:8001`。remote 请求全部使用 `credentials: 'include'`，登录态只从服务端 HttpOnly Cookie 恢复。若改为跨域直连，服务端还需要允许对应前端来源并启用凭证 CORS。remote 接口报错会直接呈现给用户，不会切回 mock。
+单独运行前后端时，后端的 Uvicorn 端口和前端启动环境中的 `VITE_API_PROXY_TARGET` 要保持一致，例如将后者设为 `http://127.0.0.1:8100`。独立运行前先确认所选 API 端口未被监听，且不与 embedding 服务端口 `8001` 冲突；`8100` 仅为示例，不保证本机空闲。remote 请求全部使用 `credentials: 'include'`，登录态只从服务端 HttpOnly Cookie 恢复。若改为跨域直连，服务端还需要允许对应前端来源并启用凭证 CORS。remote 接口报错会直接呈现给用户，不会切回 mock。
 
 ### 本地启动
 
-需要 Python 3.10+、Node.js、npm、MySQL。真实建库和在线混合检索还需要按 [`docs/RAG.md`](../docs/RAG.md) 配置与集合维度一致的 embedding 服务、Milvus 2.5+、`bge-reranker-v2-m3` 及对话模型；历史对话挖掘另需配置抽取模型。在仓库根目录开两个 PowerShell 窗口。
+以下是 **remote 演示业务基线准备步骤**，不是已完成全链路验收记录。默认前端仍是 mock；根目录 `start.ps1` 会在进程环境**强制**设置 `VITE_API_MODE=remote`、`VITE_API_BASE_URL=/api` 和代理目标，remote 失败不会回退 mock。
 
-后端窗口：
+#### 1. 依赖和写入边界（先读，再显式执行）
+
+需要 Python 3.10+、Node.js/npm、Docker Desktop/MySQL 8.4、Milvus 2.5+、embedding 服务、reranker 权重和可用的聊天模型。只复制不存在的配置，绝不覆盖已有文件：
+
+```powershell
+# 仓库根目录
+if (!(Test-Path deploy/.env.mysql)) { Copy-Item deploy/.env.mysql.example deploy/.env.mysql }
+if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
+if (!(Test-Path frontend/.env.local)) { Copy-Item frontend/.env.example frontend/.env.local }
+cd backend
+# 仅尚无虚拟环境时创建
+if (!(Test-Path .venv/Scripts/python.exe)) { py -3.13 -m venv .venv }
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-db.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-rag.txt
+cd ../frontend
+npm ci
+cd ..
+```
+
+执行任何后续写入步骤前，审阅目标库与以下副作用：
+
+| 入口 | 写入范围与约束 |
+| --- | --- |
+| 手动 `CREATE DATABASE` / `GRANT` | 创建独立演示库、授予本地应用账号权限；保留现有库，不删除或清空数据 |
+| `alembic upgrade head` | 创建/修改目标库的业务表、约束和 `alembic_version`；`0011` 会删除旧 `unanswered_questions` 表，故本基线只在独立新库执行 |
+| `scripts.init_demo_users` | 仅 `users`，新增 maya/chen；冲突回滚，不重置已有密码 |
+| `sql/test.sql` | `users`、`login_sessions`、`products`、`product_skus`、`orders`、`order_items`、`shipments`、`tracking_events`、`after_sale_requests`、`policies`、`faq`、`conversations`、`messages`、`tickets`、`low_confidence_questions`；固定键重复不覆盖，不是恢复初始状态 |
+| `scripts.init_staff_user` | 仅 `users`，新增员工；邮箱冲突拒绝，不重置已有账号 |
+| `import-markdown` / 可选 `import-faq` | `knowledge_chunks`（含来源状态和前后块关系）；更新来源可能使旧块 superseded 并清理旧向量 |
+| `vectorize` | 写入/创建指定 Milvus 集合，并回填 MySQL `knowledge_chunks.vector_id/vector_status`；扫描目标库所有 pending 块 |
+| `start.ps1` | 启动 MySQL，**自动执行 `alembic upgrade head` 和 `init_demo_users`**，再启动 API/Vite；不会执行业务 SQL、创建员工或导入知识。可选 `-EnableConversationMining` 另启会写挖掘/知识表并调用模型的任务，本基线不启用 |
+
+只有用户明确选择执行这些准备命令时才写入。API 模块导入不自动建表。不要把密码、API Key 或真实连接串写入示例、命令历史或提交。
+
+#### 2. 独立数据库与演示账号
+
+现有库可能已混入多版本中英文知识；只导入一个文件**不会撤回其他来源**。已有 `vectorized` 块不会因更换集合名自动重建，因此不得将现有库直接切到新集合并声称获得纯净基线。使用新库（示例 `aiden_demo`）与新集合，保留原库/原集合。若这些名称已存在且有数据，先只读审阅，选择另一个未使用名称，不清空重置。
+
+本仓库 `deploy/compose.mysql.yml` 只部署 MySQL，不部署 Milvus、embedding、API 或前端。先编辑本地配置的占位密码，然后显式启动 MySQL：
+
+```powershell
+docker compose --env-file deploy/.env.mysql -f deploy/compose.mysql.yml up -d mysql
+# 交互输入管理员密码；下方 SQL 由用户审阅后在此客户端手动执行
+docker compose --env-file deploy/.env.mysql -f deploy/compose.mysql.yml exec mysql mysql -u root -p
+```
+
+```sql
+-- 示例库名和应用账号；按本机实际账号调整，不删除现有 aiden 库。
+CREATE DATABASE aiden_demo CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+GRANT ALL PRIVILEGES ON aiden_demo.* TO 'aiden'@'%';
+```
+
+在 MySQL 提示符执行 `exit;` 返回 PowerShell，再进行下面的配置与命令。
+
+在未提交的 `backend/.env` 和 `deploy/.env.mysql` 中将 `DATABASE_URL` 指向该库（账号/密码/端口保持实际值且两文件一致），供手动命令和 `start.ps1` 使用。已存在的 MySQL 数据卷不会因改 `MYSQL_DATABASE` 自动创建新库，以上创建与授权仍须手动执行。设置聊天服务的 `OPENAI_API_KEY`、兼容地址和可用模型；DeepSeek 示例在线客服明确设 `OPENAI_THINKING_MODE=disabled`，不要留空照抄后触发 tools/reasoning_content 400。
 
 ```powershell
 cd backend
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m pip install -r requirements-rag.txt
-Copy-Item .env.example .env
+# 仅从已审阅的本地 .env 读取，显式覆盖旧进程 DATABASE_URL；输出被赋值捕获，不回显连接串。
+# Alembic 和 init_demo_users 不自动加载 .env；缺项时只返回不含凭据的错误并停止。
+$env:DATABASE_URL = (& .\.venv\Scripts\python.exe -c "import sys; from dotenv import dotenv_values; url=(dotenv_values('.env', interpolate=False).get('DATABASE_URL') or '').strip(); sys.exit('Missing DATABASE_URL in backend/.env') if not url else None; print(url)")
+if ($LASTEXITCODE -ne 0 -or !$env:DATABASE_URL) { throw 'Cannot load DATABASE_URL from backend/.env; no preparation writes should run.' }
+.\.venv\Scripts\alembic.exe -c alembic.ini heads
+# 应为 0011_remove_unanswered_questions (head)；以下开始写目标库
+.\.venv\Scripts\alembic.exe -c alembic.ini upgrade head
+.\.venv\Scripts\alembic.exe -c alembic.ini current
+.\.venv\Scripts\python.exe -m scripts.init_demo_users
+cd ..
+# 将 SQL 文件复制到容器；不执行数据库写入
+docker compose --env-file deploy/.env.mysql -f deploy/compose.mysql.yml cp sql/test.sql mysql:/tmp/aiden-demo.sql
+# 明确目标库，交互输入应用账号密码；source 才会写入上表所列业务数据
+docker compose --env-file deploy/.env.mysql -f deploy/compose.mysql.yml exec mysql mysql -u aiden -p --database=aiden_demo
 ```
 
-编辑 `backend/.env`，填入 DeepSeek API Key。示例已设置 `OPENAI_BASE_URL=https://api.deepseek.com` 与 `OPENAI_MODEL=deepseek-flash`；如果你的 OpenAI 兼容服务使用不同地址或模型标识，可在这里调整。然后启动：
+在该客户端先执行 `SELECT DATABASE();`，确认 `aiden_demo` 后显式执行 `SOURCE /tmp/aiden-demo.sql;`。SQL 不再含 `USE aiden`，目标库由连接参数决定；脚本不创建/删除数据库。导入后可只读执行 `SELECT order_no, user_id, status FROM orders;` 和 `SELECT policy_key, version, is_active, effective_from, effective_until FROM policies;` 核对归属与有效期。
 
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
-```
+检查完成后执行 `exit;` 返回 PowerShell，之后才执行员工创建、知识导入等 shell 命令。
 
-首次启动前，在 `backend/.env` 中配置 MySQL `DATABASE_URL`，然后从 `backend` 目录运行 `.\.venv\Scripts\alembic.exe -c alembic.ini upgrade head` 和 `.\.venv\Scripts\python.exe -m scripts.init_demo_users`。数据库表由 Alembic 管理，演示账号需显式初始化。建库控制台员工账号另由 `.\.venv\Scripts\python.exe -m scripts.init_staff_user` **人工执行**创建：先在运行环境设置 `AIDEN_STAFF_EMAIL`、`AIDEN_STAFF_NAME`、`AIDEN_STAFF_PASSWORD`（至少 12 字符），脚本不会覆盖已有账号或密码。不要把真实密码或 API Key 放入示例文件或提交到仓库。
+| remote 身份 | 账号/密码 | 数据归属 |
+| --- | --- | --- |
+| SQL 测试用户 | `sql.customer@aiden.test` / `aiden123` | ID `11111111-1111-4111-8111-000000000001`；`TEST-20260922-001` 耳机 269 元、已发货；`TEST-20260918-002` 双肩包 329 元、已签收，已有 pending 退货申请 |
+| 林沐言、陈屿 | `maya@aiden.demo`、`chen@aiden.demo` / `aiden123` | 只有登录身份，本 SQL 不给这两个用户订单；不能套用 mock 的订单 |
+| SQL 测试客服 | `sql.staff@aiden.test` | 仅用于预置会话/工单关联，没有密码，不能登录 |
+| 实际演示员工 | 用户自行设置 | 显式创建后可使用 `/staff/rag`、售后和人工工作台；mock `staff@aiden.demo` 不可用 |
 
-前端窗口：
+员工账号：在 `backend` 的运行环境设置 `AIDEN_STAFF_EMAIL`、`AIDEN_STAFF_NAME`、`AIDEN_STAFF_PASSWORD`（至少 12 字符，私下安全输入），再**显式**执行 `.\.venv\Scripts\python.exe -m scripts.init_staff_user`。不输出/记录密码；重复执行已有邮箱会拒绝。
 
-```powershell
-cd frontend
-Copy-Item .env.example .env.local
-```
+SQL 的 `test_return_policy`、`test_shipping_insurance`、`demo_refund_policy` 均为**演示政策，不是正式商家承诺**，起始 `2026-01-01`、active、无结束时间。订单退款核验与售后页面从有效 `policies` 读取（active 且 `effective_from <= 当前时间 < effective_until`，结束为空时无上界），退款演示使用 `demo_refund_policy` 的质量问题/货不对板/商品与描述不符/发错货受理口径，再交员工审核；不保证运费、金额或到账天数。示例订单日期固定，随时间推移不保证满足七天无理由期限；审批也不等于外部支付到账。
 
-将 `frontend/.env.local` 改为：
+#### 3. 服务配置与精确知识导入
+
+本基线固定 **`BAAI/bge-small-zh-v1.5` / 512 维 / 最大序列 512 tokens**，与 `.env.example` 的 **BGE-M3 / 1024 / 8192** 分开。修改本地 `backend/.env`：
 
 ```dotenv
-VITE_API_MODE=remote
-VITE_API_BASE_URL=/api
+EMBEDDING_BASE_URL=http://127.0.0.1:8001/v1
+EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+EMBEDDING_DIMENSION=512
+EMBEDDING_MAX_SEQ_TOKENS=512
+MILVUS_URI=http://127.0.0.1:19531
+MILVUS_KNOWLEDGE_COLLECTION=knowledge_demo_bge_small_512
+RAG_KNOWLEDGE_DIR=knowledge
+RAG_ONLINE_STRATEGY=hybrid_rerank
+RAG_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
 ```
 
-然后启动：
+`EMBEDDING_TOKENIZER_PATH` 若配置，必须指向 **bge-small** 的 `tokenizer.json`，不能指向 M3；留空采用有安全余量的字符估算。切块上限由序列长度压到 512，不可将 M3 向量或其他模型的 512 维向量混用。离线与在线共用同一模型、维度和归一化配置；reranker 在 API 进程通过 FlagEmbedding 加载，须有其权重（或将变量指向真实本地模型目录）。
+
+`settings` 使用 `.env` 时不会覆盖已有进程变量。开始员工创建、建库或启动 API 前，检查并清除旧进程中的 `EMBEDDING_*`、`MILVUS_*`、`RAG_*`、`OPENAI_*` 覆盖值，或确保它们与已审阅的本地配置一致；不要打印密钥。`DATABASE_URL` 则必须按上面的捕获赋值步骤显式覆盖，在新 PowerShell 窗口重做该步骤后才能执行迁移/账户写命令。
+
+Milvus 必须支持原生 BM25（2.5+）。本机既有部署是 `milvusdb/milvus:v2.5.0` 的 `milvus run standalone`，宿主 `19531 → 19530`、`9092 → 9091`，采用 **embedded etcd (`ETCD_USE_EMBED=true`) 与 local storage (`COMMON_STORAGETYPE=local`)**，非本仓库 Compose 管理；此方式不需外置 etcd/MinIO。其他机器应先按 Milvus 官方 standalone 部署方式提供完整服务；若使用外置 etcd/MinIO，则这些依赖也须由该部署提供，不能只启动一个缺依赖的 Milvus 容器。本任务不新增 Compose/readiness 模块。
+
+先只读核实已有 embedding `/health` 的模型和维度、Milvus `/healthz` 与实际集合 schema。本机可用地址：
 
 ```powershell
-npm run dev
+Invoke-RestMethod http://127.0.0.1:8001/health
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:9092/healthz
 ```
 
-访问 Vite 显示的地址。普通用户演示账号为 `maya@aiden.demo` 或 `chen@aiden.demo`，密码均为 `aiden123`。选择员工身份并使用上一步创建的员工账号登录后进入 `/staff/rag`。mock 的 `staff@aiden.demo` 只属于浏览器演示数据，不能用于真实建库。`start.ps1` 默认不启动定时对话挖掘；显式使用 `.\start.ps1 -EnableConversationMining` 才启动独立的周期任务。
+若没有 embedding 服务，在单独窗口从 `backend` 显式启动现有脚本（首次加载可能下载模型）；不要在已有监听端口上再启动：
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.embedding_server --model BAAI/bge-small-zh-v1.5 --port 8001 --device cpu --max-length 512
+```
+
+**唯一 Markdown 导入清单：`商品FAQ.md`**。整个文件都是演示知识，包括保修/换码等示例口径，不能当正式业务授权；正式业务办理依据须由商家核准的有效 `policies` 和员工审核确认。**不导入** `README.md`、`退货政策.md`、`售后手册.md`、`product-faq.md`、`product-specs.md`、`returns-policy.md`、`after-sales-manual.md`、`billing-shipping.md`、`member-benefits.md`；这里不解决它们的冲突，也不使用全量目录导入。
+
+```powershell
+cd backend
+# 精确单文件 glob；现有 CLI 没有 --file
+.\.venv\Scripts\python.exe -m scripts.build_knowledge_base import-markdown --directory ./knowledge --pattern '商品FAQ.md'
+# 显式写新集合+回填目标库；只在独立演示库执行，不能共享旧库 vectorized 状态
+.\.venv\Scripts\python.exe -m scripts.build_knowledge_base vectorize
+# 以下只读核对状态；不能以块数量替代实际检索/回答验收
+.\.venv\Scripts\python.exe -m scripts.build_knowledge_base stats
+.\.venv\Scripts\python.exe -m scripts.build_knowledge_base scan-pending
+cd ..
+```
+
+`import-faq` 是**独立可选阶段**：它导入目标库所有 active FAQ，不能只凭 SQL 里有两行就假定范围只有两行。先只读审阅 `SELECT id, question, answer FROM faq WHERE is_active=1;`，明确范围后才显式执行 `scripts.build_knowledge_base import-faq`，再 `vectorize`；主基线不依赖此阶段。员工控制台也可按单文档 `商品FAQ.md` 导入，不能点 `import-markdown-all`。如果已有 chunks 为 `vectorized`，切集合不自动复制它们，本步骤不是旧知识迁移方案。
+
+#### 4. 进入 remote 与验收边界
+
+完成以上显式准备后，在根目录运行 `.\start.ps1`（会再次执行上表中的迁移/普通演示账号初始化），访问 `http://127.0.0.1:5173`。普通用户选择 user，用 **SQL 测试用户**查本人订单和物流；员工用手动创建的 staff 登录查看建库/售后/人工。同站点 Cookie 会共享登录态，用户和员工并行演示应使用不同浏览器或独立隐私会话，不是两个普通标签页。
+
+不用脚本时，在 `frontend/.env.local` 设置 `VITE_API_MODE=remote`、`VITE_API_BASE_URL=/api`，分别运行后端 `.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload` 和前端 `npm run dev`；代理端口要与后端一致。API `/api/health` 成功不代表登录、模型、检索或支付链路成功。
+
+**2026-09-30 前轮只读核验记录（非本轮业务验收）**：脚本 help、精确单文件发现/切块、Alembic 图 head、MySQL `SELECT 1`、已有迁移 `0011_remove_unanswered_questions`、Milvus `2.5.0` 健康与旧 `knowledge_bm25` 512 维、embedding `8001` bge-small/512、旧 API `8000` health 均只读核验。旧库当时有 135 块混杂来源；此前没有清空或迁移它们。本记录不代表本轮准备或业务验收，后续授权写入结果见下文。
+ 
+#### 本轮用户授权真实验收记录
+**2026-09-30 本轮真实验收**：写入与知识准备只针对独立 MySQL `aiden_demo`、Milvus `knowledge_demo_bge_small_512`；旧库业务/知识未清空，旧库既有 135 块未导入新集合。曾误连外来 API 端口尝试登录，不将该请求计入验收，也不推断其是否写入 session；所有下述验收状态均来自我启动并核对 PID 的隔离 API（`127.0.0.1:57580`）及 remote Vite（`127.0.0.1:54273`）。两者已在本轮结束时停止。凭据从本地环境读取使用，未输出密钥、Cookie、含密码连接串或员工明文密码到报告或跟踪文件。
+
+**准备步骤与结果**：
+
+1. 从本地 `backend/.env` 安全读取连接参数，将库名显式改为新库；从 `deploy/.env.mysql` 仅在管理操作中读取本地管理员凭据。只新建 `aiden_demo` 并授权应用用户，没有 `DROP`、`TRUNCATE` 或重置旧库。
+2. 在新库运行 `alembic upgrade head`、`current`，结果为 `0011_remove_unanswered_questions`；运行 `scripts.init_demo_users` 新增 maya/chen 两个普通用户。
+3. 按审阅的写入范围执行 `sql/test.sql`，涉及 `users`、`login_sessions`、`products`、`product_skus`、`orders`、`order_items`、`shipments`、`tracking_events`、`after_sale_requests`、`policies`、`faq`、`conversations`、`messages`、`tickets`、`low_confidence_questions`；脚本不清空既有行。首次执行遇到 MySQL 1364：`messages.citations` NOT NULL 且无 server default，事务失败回滚。已在 `sql/test.sql:160-175` 的四条手写消息 INSERT 明确加入 `JSON_ARRAY()`；模型 `Message.citations` 的 ORM 默认不适用于手工 SQL。修复后同库执行成功，预置 `messages=4`。另显式新增一名随机临时员工，只用于本次真实员工验收；明文凭据未写入文档、日志或跟踪文件，用户复现仍按本页自行设置员工账号。
+4. 唯一 Markdown 来源按精确参数 `import-markdown --directory ./knowledge --pattern '商品FAQ.md'` 导入 10 个 chunks；设置 bge-small `512` 维、最大序列 `512`，使用本机 embedding `8001`。`vectorize` 实际写入 `10`，MySQL 状态 `vectorized=10`、`pending=0`。Milvus 集合为 `knowledge_demo_bge_small_512`，配置维度 `512`，reranker 为本地 `BAAI/bge-reranker-v2-m3` 权重目录；在线 `RAG_ONLINE_STRATEGY=hybrid_rerank`。没有执行全量目录或可选 `import-faq`。
+5. 隔离 API 在动态空闲端口 `57580`、Vite 在 `54273` 提供 remote；API health `200`、OpenAPI 包含 service 路由，Vite HTTP `200`。启动配置显式指定新库、新集合、embedding 模型/维度/max-length 与 `OPENAI_THINKING_MODE=disabled`；不修改本地 `.env`。
+
+**实际 remote 代表场景（非完整 P0 全矩阵）**：
+
+- SQL 用户登录 `200`；本人订单接口列出 `TEST-20260922-001`（已发货）和 `TEST-20260918-002`（已签收），本人售后列出预置 `TEST-AS-20260921-001`、`pending` 退货申请。真实模型 SSE 查询首单物流，返回顺丰运单 `SFTEST20260922001`、揽收及杭州转运中心轨迹。
+- 真实模型 SSE 问“如何正确清洁运动鞋？”命中唯一 `商品FAQ.md` 块并引用有效正文；source URL `/api/knowledge/source/a52ac4f5-da30-4092-bd0a-e5575b43b57b` 经本人 Cookie 访问 `200`，返回文档原文。实际配置 `hybrid_rerank`，助手消息持久化 `retrieval_status=searched`、rank 1 `score=0.9992120172209172`；`search_faq` 将该值来自 `hit.rerank_score`。这是已运行路径上的 rerank 分数证据；没有单独 reranker stage trace，分数不是校准正确率。
+- 退款原始完整输入“订单 TEST-20260922-001 的 QuietPods 耳机存在质量问题，我要申请退款，请先核对政策、说明需要的材料和提交边界。”曾两次失败：第一次原因摘录含商品主语导致全文匹配失败；第一次意图提示修订后仍输出“存在质量问题”，与政策正文“质量问题”不匹配。第二版 `backend/app/agent/intent.py:110-135` 明确排除无语义作用的肯定引导词并保留否定/假设/程度限定。相同完整输入在第二版后新会话真实 SSE 返回演示政策覆盖质量问题、所需照片/面单、员工审核及无到账时限承诺，并要求用户确认；按原话回复“确认提交”后真实创建 `ASA9B84F3B12D51A916BE81C74C17440FA`，本人售后接口确认订单 `TEST-20260922-001` 状态 `pending`。回复不承诺退款到账。首次失败记录仍保留在独立验收库；它没有被删除或覆盖。
+- 已有 `TEST-20260918-002` 对话退款预览 `200` 返回有效 `demo_refund_policy` 演示政策原文；按确认提交因 seed 预置同商品的其他类型未结束退货申请，真实回复“该商品已有其他类型的未结束售后申请”，未重复创建申请。
+- 否定输入“没有质量问题”及假设输入“如果……存在质量问题”均经真实 SSE 返回知识证据不足，均未产生肯定退款提交确认。此代表安全检查只证明未肯定创建；没有验收更广泛否定、假设或多诉求矩阵。
+- 另一新会话真实转人工进入 `waiting`；临时员工登录 `200`、queue 可见、接单 `200` 进入 `staff`、发送员工回复 `200`、用户读取到员工消息、员工关闭 `200` 成为 `closed`；用户关闭后仍可读历史。
+- `maya@aiden.demo` 真实登录 `200`；其本人订单与会话均为空；尝试读取 SQL 用户会话消息为 `404`。
+
+本轮验收不覆盖完整 P0 第 3 节矩阵、全量 multi-intent / 并发员工竞争、Typora 预览或完整浏览器视觉交互。`intent.py` 的原因摘录契约是为严格政策全文匹配暴露的维护风险，需保留否定、假设、程度及时间限定，不能为通过而放宽 matcher；`sql/test.sql` citations 修复只显式补齐 ORM-only 默认字段。演示政策不是正式商家承诺；员工审核不代表外部支付退款已到账。
 
 后端模型配置变量：
 
@@ -179,7 +310,7 @@ data: {"error":"订单服务暂时不可用"}
 
 ## 代码组织
 
-- `src/pages/`：登录、用户会话、mock 人工客服工作台、`RagConsole.tsx` 员工建库控制台及 `RagEvals.tsx` 评估页面。
+- `src/pages/`：登录、用户会话、mock/remote 两模式人工客服工作台、`RagConsole.tsx` 员工建库控制台及 `RagEvals.tsx` 评估页面。
 - `src/components/`：品牌、模式提示、会话状态等共享 UI。
 - `src/api/contracts.ts`：页面使用的统一适配器接口。
 - `src/api/mock.ts`：本地持久化、跨标签同步和模拟 Agent 行为。

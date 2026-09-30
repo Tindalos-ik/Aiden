@@ -143,15 +143,15 @@ function ConversationList({ conversations, selectedId, onSelect, onCreate, compa
 function WelcomePanel({ onAsk }: { onAsk: (text: string) => void }) {
   const visibleSuggestions = apiMode === 'mock'
     ? suggestions
-    : ['你好，你能帮我做什么？', '购买耳机时可以关注哪些方面？', '怎么清洁机械键盘？'];
+    : ['我的订单到哪了？', '帮我查一下售后申请进度', '退货需要满足哪些条件？'];
   return <div className="welcome-panel">
     <div className="welcome-illustration"><div className="welcome-orbit orbit-one" /><div className="welcome-orbit orbit-two" /><div className="welcome-bubble"><span className="brand-mark"><span /><span /><span /><span /></span></div><span className="welcome-spark spark-one">✦</span><span className="welcome-spark spark-two">✳</span><span className="welcome-spark spark-three">·</span></div>
     <div className="welcome-eyebrow">YOUR ORDER, IN GOOD HANDS</div>
     <h2>你好，我是 Aiden<span>。</span></h2>
-    <p>{apiMode === 'mock' ? <>我可以帮你查询订单、物流和退款进度。<br />需要更多帮助时，也可以随时转接人工客服。</> : <>可以直接向我提问，我会尽量提供帮助。<br />当前无法核实订单、物流、退款或商城政策信息。</>}</p>
+    <p>{apiMode === 'mock' ? <>我可以帮你查询订单、物流和退款进度。<br />需要更多帮助时，也可以随时转接人工客服。</> : <>我可以查询本人订单、物流和售后进度，依据已入库知识解答商品与政策问题。<br />需要人工协助时，可申请站内排队，客服接单后在本会话回复。</>}</p>
     <div className="suggestions-label">试着问我</div>
     <div className="suggestion-list">{visibleSuggestions.map((item, index) => <button key={item} className="suggestion-chip" onClick={() => onAsk(item)}><span className={`suggestion-index suggestion-index-${index}`}>0{index + 1}</span>{item}<ArrowUpOutlined /></button>)}</div>
-    <div className="welcome-demo-note"><span className="demo-footer-dot" />{apiMode === 'mock' ? '当前为本地演示数据，订单状态为模拟内容' : '当前未连接订单、售后和商城政策数据'}</div>
+    <div className="welcome-demo-note"><span className="demo-footer-dot" />{apiMode === 'mock' ? '当前为本地演示数据，订单状态为模拟内容' : '远端模式读取当前账号的业务数据；无记录或服务故障会明确提示'}</div>
   </div>;
 }
 
@@ -337,7 +337,7 @@ export function UserWorkspace() {
               <Input.TextArea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onInputKeyDown} autoSize={{ minRows: 1, maxRows: 5 }} placeholder={conversation.status === 'bot' ? '输入消息开始对话…' : '在原会话继续留言…'} disabled={isBusy || humanSending} aria-label="输入消息" />
               <div className="composer-toolbar"><span className="composer-hint">Enter 发送 · Shift + Enter 换行</span>{isBusy ? <Button className="stop-button" type="primary" danger icon={<StopOutlined />} onClick={() => abortRef.current?.abort()}>停止生成</Button> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} loading={humanSending} disabled={!draft.trim()} onClick={() => void send(draft)}>发送</Button>}</div>
             </div>}
-            <div className="composer-disclaimer"><span className="composer-lock">◆</span>{apiMode === 'mock' ? '演示模式使用本地模拟数据，请勿输入真实个人信息' : '当前未接入订单和商城政策数据，请勿将回答作为具体订单或政策核实结果'}</div>
+            <div className="composer-disclaimer"><span className="composer-lock">◆</span>{apiMode === 'mock' ? '演示模式使用本地模拟数据，请勿输入真实个人信息' : '回答以查询结果和知识证据为准；售后审核通过不代表退款到账，不保证人工立即接入'}</div>
           </div>
         </>}
       </section>

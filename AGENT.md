@@ -4,9 +4,11 @@
 
 ## 项目概况
 
-Aiden 是一个智能订单客服原型。当前技术栈是 React、TypeScript、Vite 前端，Python、FastAPI、LangGraph 后端，以及 MySQL、SQLAlchemy 和 Alembic。前端有 mock 与 remote 两种 API 模式。
+Aiden 是一个智能订单客服原型。当前技术栈是 React、TypeScript、Vite 前端，Python、FastAPI、LangGraph 后端，以及 MySQL、Milvus、SQLAlchemy 和 Alembic。前端有 mock 与 remote 两种 API 模式。
 
-项目仍在开发中。`docs/Aiden.md` 中的架构图包含目标设计；其中某些服务、工具、运营能力还没有对应的实现代码。说明或修改功能时，要区分已实现内容与规划内容，不要根据架构图推断功能已经可用。
+当前已实现本人订单/物流/售后/工单查询、知识检索与证据闸门、售后申请和员工处理、站内人工排队接管及审核补库。Agent 工具由服务端静态注册、按意图白名单合成调用，不是模型自主选择工具的 ReAct。退款审核通过不代表外部支付退款到账。
+
+项目仍在开发中。`docs/Aiden.md` 分别列出当前实现和目标设计；MCP、历史摘要和小分类器等仍属规划。已有源码或 mock 演示不等于真实依赖环境已验收，验收应有具体场景与运行记录。
 
 ## 目录结构
 
@@ -21,12 +23,18 @@ Aiden 是一个智能订单客服原型。当前技术栈是 React、TypeScript�
 │  ├─ app/
 │  │  ├─ agent/                     # LangGraph 状态与图编排
 │  │  ├─ api/                       # FastAPI 依赖、请求模型、SSE 与路由
-│  │  │  └─ routes/                 # 登录、会话等 HTTP 路由
-│  │  ├─ config/                    # 运行配置
-│  │  ├─ persistence/mysql/         # MySQL 模型、连接、查询与对话数据访问
-│  │  └─ services/                  # 规划中的服务目录；子目录目前没有已跟踪的实现文件
+│  │  │  └─ routes/                 # 登录、会话、售后、人工接管、RAG 与审核 HTTP 路由
+│  │  ├─ config/                    # 运行、RAG 与对话挖掘配置
+│  │  ├─ persistence/
+│  │  │  ├─ mysql/                  # 鉴权、业务记录、对话、人工接管、知识与审核数据访问
+│  │  │  └─ milvus/                 # 知识向量、BM25 与混合召回
+│  │  └─ services/
+│  │     ├─ rag/                    # 切块、建库、检索、历史挖掘、审核问题池与控制台
+│  │     └─ tools/                  # 静态注册的订单、物流、知识、售后和工单工具
 │  ├─ alembic/versions/             # 数据库结构迁移
-│  └─ scripts/                      # 后端维护脚本，如演示用户初始化
+│  ├─ scripts/                      # 演示用户、知识建库、embedding 服务与历史挖掘脚本
+│  ├─ knowledge/                    # 演示知识素材；按明确清单导入，不视为正式政策
+│  └─ evals/                        # 离线 RAG 评估入口与题集
 ├─ frontend/
 │  ├─ README.md                     # 前端模式、演示账号与启动说明
 │  └─ src/

@@ -1,8 +1,11 @@
--- Aiden local demo data for MySQL 8.4, after Alembic upgrade head.
--- Run against the disposable local aiden database. Re-running leaves these fixed rows unchanged.
--- Seeds core business tables plus one low-confidence question; alembic_version is untouched.
+-- Aiden demo data for MySQL 8.4, after Alembic upgrade head.
+-- Explicitly select the target database in the client connection (for example aiden_demo).
+-- This script never creates, selects, drops or clears a database; do not run against production.
+-- Writes: users, login_sessions, products, product_skus, orders, order_items, shipments,
+-- tracking_events, after_sale_requests, policies, faq, conversations, messages, tickets,
+-- low_confidence_questions. Fixed-key collisions leave existing rows unchanged; review first.
+-- Re-running is not a reset, nor proof that existing rows match this demo baseline.
 SET NAMES utf8mb4;
-USE aiden;
 START TRANSACTION;
 
 -- Login: sql.customer@aiden.test / aiden123. The staff row is for relationships only.
@@ -154,21 +157,22 @@ VALUES ('88888888-8888-4888-8888-000000000002', '11111111-1111-4111-8111-0000000
         '2026-09-21 09:00:00', '2026-09-21 09:10:00')
 ON DUPLICATE KEY UPDATE id = id;
 
-INSERT INTO messages (id, conversation_id, sender_role, content, status, client_message_id, created_at)
+-- 预置消息无知识引用；citations 为非空且仅有 ORM 默认，手工 SQL 显式写空数组。
+INSERT INTO messages (id, conversation_id, sender_role, content, citations, status, client_message_id, created_at)
 VALUES ('99999999-9999-4999-8999-000000000001', '88888888-8888-4888-8888-000000000001',
-        'user', '你好', 'complete', 'sql-seed-hello', '2026-09-24 09:00:00')
+        'user', '你好', JSON_ARRAY(), 'complete', 'sql-seed-hello', '2026-09-24 09:00:00')
 ON DUPLICATE KEY UPDATE id = id;
-INSERT INTO messages (id, conversation_id, sender_role, content, status, created_at)
+INSERT INTO messages (id, conversation_id, sender_role, content, citations, status, created_at)
 VALUES ('99999999-9999-4999-8999-000000000002', '88888888-8888-4888-8888-000000000001',
-        'assistant', '【预置测试消息】你好，这是用于检查消息表的示例。', 'complete', '2026-09-24 09:01:00')
+        'assistant', '【预置测试消息】你好，这是用于检查消息表的示例。', JSON_ARRAY(), 'complete', '2026-09-24 09:01:00')
 ON DUPLICATE KEY UPDATE id = id;
-INSERT INTO messages (id, conversation_id, sender_role, content, status, client_message_id, created_at)
+INSERT INTO messages (id, conversation_id, sender_role, content, citations, status, client_message_id, created_at)
 VALUES ('99999999-9999-4999-8999-000000000003', '88888888-8888-4888-8888-000000000002',
-        'user', '包裹显示签收，但我没收到。', 'complete', 'sql-seed-complaint', '2026-09-21 09:00:00')
+        'user', '包裹显示签收，但我没收到。', JSON_ARRAY(), 'complete', 'sql-seed-complaint', '2026-09-21 09:00:00')
 ON DUPLICATE KEY UPDATE id = id;
-INSERT INTO messages (id, conversation_id, sender_role, content, status, created_at)
+INSERT INTO messages (id, conversation_id, sender_role, content, citations, status, created_at)
 VALUES ('99999999-9999-4999-8999-000000000004', '88888888-8888-4888-8888-000000000002',
-        'staff', '【预置测试消息】工单已记录，等待进一步核实。', 'complete', '2026-09-21 09:10:00')
+        'staff', '【预置测试消息】工单已记录，等待进一步核实。', JSON_ARRAY(), 'complete', '2026-09-21 09:10:00')
 ON DUPLICATE KEY UPDATE id = id;
 
 INSERT INTO tickets (id, ticket_no, conversation_id, user_id, issue_type, description, status,
