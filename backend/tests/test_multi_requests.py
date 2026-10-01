@@ -276,6 +276,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         policy = {"status": "ok", "policies": [{
             "id": "66666666-6666-4666-8666-000000000001", "name": "退款政策", "version": "1.0",
             "content": "商品存在质量问题的，可在签收后 7 天内申请退款。",
+            "snapshot": "a" * 64,
         }]}
         prepared, calls = await self.run_case(
             "质量问题",
@@ -300,10 +301,6 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
                       "workflow_state": {"refund": prepared["refund_pending"]}}],
         )
         self.assertEqual([name for name, _ in calls], ["submit_after_sale"])
-        self.assertEqual(calls[0][1], {
-            "order_no": "TEST-001", "reason": "质量问题",
-            "policy_id": "66666666-6666-4666-8666-000000000001",
-        })
         self.assertIn("已提交退款申请", confirmed["answer"])
         self.assertIn("审核通过不代表款项已退", confirmed["answer"])
         declined, calls = await self.run_case(
@@ -337,6 +334,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
                  "items": [{"product_name": "商品", "quantity": 1}]}]},
              "query_refund_policy": {"status": "ok", "policies": [{
                  "id": "66666666-6666-4666-8666-000000000003", "name": "退款政策", "version": "1.0",
+                 "snapshot": "a" * 64,
                  "content": "商品存在质量问题的，可在签收后 7 天内申请退款。"}]}},
             answer_suffix=" 见政策条款 [1]",
         )

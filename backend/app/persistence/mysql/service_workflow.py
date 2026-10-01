@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from hashlib import sha256
 from typing import Any
 
@@ -67,16 +68,11 @@ def _active_policies(session: Session, kind: str) -> list[Policy]:
     ).order_by(Policy.effective_from.desc(), Policy.created_at.desc(), Policy.id.desc()).limit(5)))
 
 
-def _valid_policy(session: Session, policy_id: str, kind: str) -> bool:
-    now = utc_now_naive()
-    name = REQUEST_TYPES[kind]
-    return session.scalar(select(Policy.id).where(
-        Policy.id == policy_id, Policy.is_active.is_(True),
-        Policy.effective_from <= now,
-        or_(Policy.effective_until.is_(None), Policy.effective_until > now),
-        or_(Policy.name.contains(name, autoescape=True),
-            Policy.policy_key.contains(kind, autoescape=True)),
-    )) is not None
+def policy_snapshot(policy: Policy) -> str:
+    """绑定商家政策完整内容与生效边界，同 ID 原地更新也必须重新确认。"""
+    fields = [policy.id, policy.policy_key, policy.name, policy.version, policy.content,
+              bool(policy.is_active), _iso(policy.effective_from), _iso(policy.effective_until)]
+    return sha256(json.dumps(fields, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
 def _link_ticket(session: Session, user_id: str, ticket_no: str, request_id: str) -> None:
@@ -103,14 +99,14 @@ def preview_request(session: Session, user_id: str, order_no: str, kind: str) ->
         "items": [{"id": item.id, "name": item.product_name_snapshot,
                    "quantity": item.quantity, "lineTotal": str(item.line_total)} for item in items],
         "policies": [{"id": policy.id, "name": policy.name, "version": policy.version,
-                      "content": policy.content} for policy in policies],
+                      "content": policy.content, "snapshot": policy_snapshot(policy)} for policy in policies],
     }
 
 
 def submit_request(
     session: Session, *, user_id: str, order_no: str, order_item_id: str,
     request_type: str, reason: str, policy_reference: str, submission_key: str,
-    confirmed: bool, source_ticket_no: str | None = None,
+    confirmed: bool, policy_snapshot_value: str, source_ticket_no: str | None = None,
     confirmation_message_id: str | None = None,
 ) -> tuple[AfterSaleRequest, bool]:
     """服务端复核订单、商品、政策与确认，并锁定用户行防止并发重复申请。"""
@@ -140,20 +136,15 @@ def submit_request(
         raise LookupError("订单商品不存在")
     if order.status in {"pending", "cancelled"}:
         raise ValueError("当前订单状态不能提交售后申请")
-    if policy_reference.startswith("rag:"):
-        # 兼容既有知识库引用；引用和确认都必须来自本人会话的上一轮助手回答。
-        previous = session.scalar(select(Message).join(Conversation).where(
-            Conversation.user_id == user_id, Message.id == policy_reference[4:],
-            Message.sender_role == "assistant", Message.status == "complete",
-        ))
-        context = (previous.workflow_state or {}).get("refund") if previous else None
-        if not previous or not previous.citations or not isinstance(context, dict) or (
-            context.get("stage"), context.get("order_no"), context.get("reason")) != (
-                "confirm", order_no, reason.strip()):
-            raise ValueError("缺少已核对的政策与申请确认")
-    elif not _valid_policy(session, policy_reference, request_type):
-        raise ValueError("政策已失效，请重新查询后确认")
-    if confirmation_message_id is not None or policy_reference.startswith("rag:"):
+    # 锁政策行，避免复核与写入之间政策被并发修改；FAQ 引用不再授予写入权限。
+    policy = session.scalar(select(Policy).where(Policy.id == policy_reference).with_for_update())
+    now = utc_now_naive()
+    if (policy is None or not policy.is_active or policy.effective_from > now
+            or (policy.effective_until is not None and policy.effective_until <= now)
+            or not (REQUEST_TYPES[request_type] in policy.name or request_type in policy.policy_key)
+            or policy_snapshot(policy) != policy_snapshot_value):
+        raise ValueError("政策已变化或失效，请重新查询并确认")
+    if confirmation_message_id is not None:
         current = session.scalar(select(Message).join(Conversation).where(
             Conversation.user_id == user_id,
             Message.id == confirmation_message_id,
@@ -161,19 +152,17 @@ def submit_request(
         ))
         if current is None:
             raise ValueError("确认消息不存在")
-        if not policy_reference.startswith("rag:"):
-            previous = session.scalar(select(Message).where(
-                Message.conversation_id == current.conversation_id,
-                Message.sender_role == "assistant", Message.status == "complete",
-                Message.created_at < current.created_at,
-            ).order_by(Message.created_at.desc()).limit(1))
-            context = (previous.workflow_state or {}).get("refund") if previous else None
-            if not isinstance(context, dict) or (
-                context.get("stage"), context.get("order_no"), context.get("reason"),
-                context.get("policy_id")) != ("confirm", order_no, reason.strip(), policy_reference):
-                raise ValueError("缺少已核对的政策与申请确认")
-        elif current.conversation_id != previous.conversation_id:
-            raise ValueError("确认消息不存在")
+        previous = session.scalar(select(Message).where(
+            Message.conversation_id == current.conversation_id,
+            Message.sender_role == "assistant", Message.status == "complete",
+            Message.created_at < current.created_at,
+        ).order_by(Message.created_at.desc()).limit(1))
+        context = (previous.workflow_state or {}).get("refund") if previous else None
+        if not isinstance(context, dict) or (
+            context.get("stage"), context.get("order_no"), context.get("reason"),
+            context.get("policy_id"), context.get("policy_snapshot")) != (
+                "confirm", order_no, reason.strip(), policy_reference, policy_snapshot_value):
+            raise ValueError("缺少已核对的政策与申请确认")
         user_message = session.scalar(select(Message).where(
             Message.conversation_id == current.conversation_id,
             Message.sender_role == "user", Message.created_at < current.created_at,

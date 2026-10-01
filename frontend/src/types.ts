@@ -41,7 +41,7 @@ export interface AfterSalePreview extends ServiceOrder {
   orderId: string;
   orderStatus: string;
   items: Array<{ id: string; name: string; quantity: number; lineTotal: string }>;
-  policies: Array<{ id: string; name: string; version: string; content: string }>;
+  policies: Array<{ id: string; name: string; version: string; content: string; snapshot: string }>;
 }
 export interface AfterSaleApplication {
   id: string; requestNo: string; userId: string; orderId: string; orderNo: string | null;
@@ -65,7 +65,7 @@ export interface ServiceTicket {
 }
 export interface SubmitAfterSaleInput {
   orderNo: string; orderItemId: string; requestType: AfterSaleApplication['requestType'];
-  reason: string; policyReference: string; submissionKey: string; confirmed: boolean;
+  reason: string; policyReference: string; policySnapshot: string; submissionKey: string; confirmed: boolean;
   sourceTicketNo?: string;
 }
 

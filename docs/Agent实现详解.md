@@ -209,7 +209,7 @@ requests = SupportRequests.model_validate_json(_content_as_text(response.content
 4. `smalltalk` 用于问候、自我介绍和能力范围咨询，不分配业务工具；主回答模型只能按 System Prompt 说明身份和已接入能力。
 5. 订单号必须能从真实用户消息或会话历史中逐字验证；分类模型编造或误提取的号码不会成为查询参数。
 6. 订单或物流缺少唯一目标时，服务端可以先查询该用户近期订单并列出选项。只有用户选择的订单经过本轮本人订单结果再次核对后，才会授权后续查询。
-7. 退款办理先核对本人订单和用户原因，再用 `query_refund_policy` 读取本人订单当前有效的商家退款政策。政策正文必须覆盖用户陈述的原因才能进入确认：确认时生成登记前说明和固定确认话术，并把 `{stage: confirm, order_no, reason, policy_id}` 存到助手消息的 `workflow_state`；没有覆盖该原因的现行政策时不询问提交，改为陈述已核验的订单事实并引导“售后与工单”页面与人工审核，同时以 `refund_policy_unavailable` 记入低置信度问题池。只有紧邻上一轮保存的确认状态与用户本轮明确的 `确认提交` 原文同时成立，才开放 `submit_after_sale`。可见文字本身没有写入权限；拒绝或仅说“我要退款”均不写入。`search_faq` 召回的知识块只是说明材料，不能作为提交依据。
+7. 单商品退款办理先核对本人订单和用户原因，再用 `query_refund_policy` 读取当前有效的商家退款政策。政策正文必须覆盖用户陈述的原因才能进入确认：生成登记前说明和固定确认话术，并把 `{stage: confirm, order_no, reason, policy_id, policy_snapshot, request_type: refund}` 存到助手消息的 `workflow_state`。只有紧邻上一轮保存的确认状态与用户本轮原文 `确认提交` 同时成立，才开放 `submit_after_sale`；写入层锁定政策行复核快照，同 ID 原地修改正文、版本或生效范围也使旧确认失效，用户需重新核验后再次确认。没有覆盖原因的现行政策时不询问提交，提供带已核验订单和原因的页面链接用于核对政策或咨询人工，并以 `refund_policy_unavailable` 记入低置信度问题池；无有效政策时页面也不能正式提交。多商品退款、退货和换货核验本人订单后转 `/app/service?orderNo=...&requestType=...`，可附已核验原因，订单追问保留申请类型。可见文字本身没有写入权限；拒绝或仅说“我要退款”均不写入。`search_faq` 与旧 `rag:` 引用不授予提交权限，详见 [`售后与工单.md`](售后与工单.md)。
 
 路由逻辑见 `backend/app/agent/graph.py`。`dispatch_tool_call()` 只按服务端白名单和已复核字段构造参数；退款写入还检查跨轮确认授权。置信度和分类结果都不能决定登录身份或扩大数据权限。
 

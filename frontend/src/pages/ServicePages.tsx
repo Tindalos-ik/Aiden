@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Empty, Input, Select, Space, Spin, Tabs, Tag, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { api, apiMode } from '../api';
 import { PageHeader } from '../components/Common';
 import type { AfterSaleApplication, AfterSalePreview, ServiceTicket, SubmitAfterSaleInput } from '../types';
@@ -37,32 +38,74 @@ function TicketCard({ row, action, linkedRequestNo }: { row: ServiceTicket; acti
 }
 
 export function UserServicePage() {
+  const [searchParams] = useSearchParams();
+  const requestedOrderNo = searchParams.get('orderNo')?.trim() ?? '';
+  const requestedType = searchParams.get('requestType');
+  const requestedReason = searchParams.get('reason') ?? '';
+  const validRequestType = requestedType === 'refund' || requestedType === 'return' || requestedType === 'exchange' ? requestedType : null;
   const client = useQueryClient();
   const actor = useQuery({ queryKey: ['me'], queryFn: api.me });
   const orders = useQuery({ queryKey: ['service-orders'], queryFn: api.listServiceOrders });
   const applications = useQuery({ queryKey: ['after-sales'], queryFn: api.listAfterSales });
   const tickets = useQuery({ queryKey: ['tickets'], queryFn: api.listTickets });
-  const [orderNo, setOrderNo] = useState('');
-  const [kind, setKind] = useState<SubmitAfterSaleInput['requestType']>('refund');
+  const [orderNo, setOrderNo] = useState(requestedOrderNo);
+  const [kind, setKind] = useState<SubmitAfterSaleInput['requestType']>(validRequestType ?? 'refund');
   const [preview, setPreview] = useState<AfterSalePreview | null>(null);
   const [itemId, setItemId] = useState('');
   const [policyId, setPolicyId] = useState('');
-  const [reason, setReason] = useState('');
+  const [reason, setReason] = useState(requestedReason);
   const [sourceTicketNo, setSourceTicketNo] = useState('');
   const [confirmed, setConfirmed] = useState(false);
   const [submissionKey, setSubmissionKey] = useState(() => crypto.randomUUID());
+  const preserveSelectionRef = useRef(false);
+  const previewSequence = useRef(0);
   const previewMutation = useMutation({
-    mutationFn: () => api.previewAfterSale(orderNo, kind),
-    onSuccess: (result) => { setPreview(result); setItemId(result.items[0]?.id ?? ''); setPolicyId(result.policies[0]?.id ?? ''); setConfirmed(false); },
+    mutationFn: ({ targetOrderNo, targetKind }: { targetOrderNo: string; targetKind: SubmitAfterSaleInput['requestType']; sequence: number }) => api.previewAfterSale(targetOrderNo, targetKind),
+    onSuccess: (result, variables) => {
+      if (variables.sequence !== previewSequence.current) return;
+      const refreshingConflict = preserveSelectionRef.current;
+      setPreview(result);
+      setItemId((current) => refreshingConflict && result.items.some((item) => item.id === current) ? current : result.items.length === 1 ? result.items[0].id : '');
+      setPolicyId((current) => refreshingConflict && result.policies.some((policy) => policy.id === current) ? current : result.policies.length === 1 ? result.policies[0].id : '');
+      preserveSelectionRef.current = false;
+      setConfirmed(false);
+      if (refreshingConflict) message.info('当前售后政策已重新核对，请重新确认后再提交。');
+    },
   });
+  const requestPreview = (targetOrderNo: string, targetKind: SubmitAfterSaleInput['requestType']) => {
+    setConfirmed(false);
+    setPreview(null);
+    previewMutation.mutate({ targetOrderNo, targetKind, sequence: ++previewSequence.current });
+  };
+  useEffect(() => {
+    previewSequence.current += 1;
+    setOrderNo(requestedOrderNo);
+    setKind(validRequestType ?? 'refund');
+    setReason(requestedReason);
+    setPreview(null);
+    setItemId('');
+    setPolicyId('');
+    setConfirmed(false);
+    preserveSelectionRef.current = false;
+    if (requestedOrderNo && validRequestType) requestPreview(requestedOrderNo, validRequestType);
+  }, [requestedOrderNo, requestedType, requestedReason]);
+  const selectedPolicy = preview?.policies.find((policy) => policy.id === policyId);
   const submit = useMutation({
     mutationFn: () => api.submitAfterSale({ orderNo, orderItemId: itemId, requestType: kind,
-      reason: reason.trim(), policyReference: policyId, submissionKey, confirmed,
+      reason: reason.trim(), policyReference: policyId, policySnapshot: selectedPolicy!.snapshot, submissionKey, confirmed,
       sourceTicketNo: sourceTicketNo || undefined }),
     onSuccess: async (row) => {
       message.success(row.alreadyExists ? `已有申请 ${row.requestNo}` : `已提交申请 ${row.requestNo}`);
       setSubmissionKey(crypto.randomUUID()); setConfirmed(false); setReason(''); setPreview(null);
       await Promise.all([client.invalidateQueries({ queryKey: ['after-sales'] }), client.invalidateQueries({ queryKey: ['tickets'] })]);
+    },
+    onError: (error) => {
+      if (typeof error === 'object' && error !== null && 'status' in error && error.status === 409) {
+        setConfirmed(false);
+        preserveSelectionRef.current = true;
+        requestPreview(orderNo, kind);
+        message.warning('提交条件冲突，正在重新核对政策，请等待并重新确认。');
+      }
     },
   });
   const cancel = useMutation({
@@ -76,20 +119,20 @@ export function UserServicePage() {
     <Tabs items={[
       { key: 'submit', label: '提交售后申请', children: <Card title="申请退款、退货或换货">
         <Space wrap style={{ marginBottom: 12 }}>
-          <Select placeholder="选择本人订单" style={{ minWidth: 260 }} value={orderNo || undefined} options={(orders.data ?? []).map((row) => ({ label: `${row.orderNo} · ${row.items.map((item) => item.name).join('、')}`, value: row.orderNo }))} onChange={(value) => { setOrderNo(value); setPreview(null); setConfirmed(false); }} />
-          <Select value={kind} style={{ width: 110 }} options={Object.entries(requestText).map(([value, label]) => ({ value, label }))} onChange={(value) => { setKind(value); setPreview(null); setConfirmed(false); }} />
-          <Button loading={previewMutation.isPending} disabled={!orderNo} onClick={() => previewMutation.mutate()}>核对订单与政策</Button>
+          <Select disabled={submit.isPending} placeholder="选择本人订单" style={{ minWidth: 260 }} value={orderNo || undefined} options={(orders.data ?? []).map((row) => ({ label: `${row.orderNo} · ${row.items.map((item) => item.name).join('、')}`, value: row.orderNo }))} onChange={(value) => { previewSequence.current += 1; setOrderNo(value); setPreview(null); setConfirmed(false); }} />
+          <Select disabled={submit.isPending} value={kind} style={{ width: 110 }} options={Object.entries(requestText).map(([value, label]) => ({ value, label }))} onChange={(value) => { previewSequence.current += 1; setKind(value); setPreview(null); setConfirmed(false); }} />
+          <Button loading={previewMutation.isPending} disabled={!orderNo || submit.isPending} onClick={() => requestPreview(orderNo, kind)}>核对订单与政策</Button>
         </Space><ErrorLine error={orders.error ?? previewMutation.error} />
         {preview && <>
-          <p>订单状态：{preview.orderStatus}。请选择本次申请涉及的商品：</p>
-          <Select style={{ width: '100%', marginBottom: 12 }} value={itemId} options={preview.items.map((item) => ({ value: item.id, label: `${item.name} × ${item.quantity} · ¥${item.lineTotal}` }))} onChange={setItemId} />
+          <p>订单状态：{preview.orderStatus}。{preview.items.length > 1 ? '请选择本次申请涉及的具体商品（多商品订单不会自动选择）。' : '请选择本次申请涉及的商品：'}</p>
+          <Select disabled={submit.isPending} style={{ width: '100%', marginBottom: 12 }} placeholder="选择商品" value={itemId || undefined} options={preview.items.map((item) => ({ value: item.id, label: `${item.name} × ${item.quantity} · ¥${item.lineTotal}` }))} onChange={(value) => { setItemId(value); setConfirmed(false); }} />
           <p>适用政策：</p>
           {!preview.policies.length && <Alert type="warning" showIcon message="当前没有可核验的有效政策，暂不能提交正式申请。可通过会话咨询客服。" />}
-          {preview.policies.map((policy) => <Card size="small" key={policy.id} style={{ marginBottom: 10 }}><Checkbox checked={policyId === policy.id} onChange={() => setPolicyId(policy.id)}>{policy.name}（{policy.version}）</Checkbox><p style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{policy.content}</p></Card>)}
-          <Input.TextArea rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="请说明申请原因和商品问题" maxLength={2000} style={{ marginBottom: 12 }} />
-          {(tickets.data ?? []).some((item) => !item.afterSaleRequestId) && <Select allowClear placeholder="可选：关联已有工单" style={{ width: '100%', marginBottom: 12 }} value={sourceTicketNo || undefined} options={(tickets.data ?? []).filter((item) => !item.afterSaleRequestId).map((item) => ({ value: item.ticketNo, label: `${item.ticketNo} · ${item.description}` }))} onChange={(value) => setSourceTicketNo(value ?? '')} />}
-          <Checkbox checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}>我已核对订单、商品和政策，确认提交正式售后申请供员工审核。</Checkbox>
-          <div style={{ marginTop: 14 }}><Button type="primary" loading={submit.isPending} disabled={!policyId || !itemId || !reason.trim() || !confirmed} onClick={() => submit.mutate()}>提交申请</Button></div>
+          {preview.policies.map((policy) => <Card size="small" key={policy.id} style={{ marginBottom: 10 }}><Checkbox disabled={submit.isPending} checked={policyId === policy.id} onChange={() => { setPolicyId(policy.id); setConfirmed(false); }}>{policy.name}（{policy.version}）</Checkbox><p style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{policy.content}</p></Card>)}
+          <Input.TextArea disabled={submit.isPending} rows={3} value={reason} onChange={(event) => { setReason(event.target.value); setConfirmed(false); }} placeholder="请说明申请原因和商品问题" maxLength={2000} style={{ marginBottom: 12 }} />
+          {(tickets.data ?? []).some((item) => !item.afterSaleRequestId) && <Select disabled={submit.isPending} allowClear placeholder="可选：关联已有工单" style={{ width: '100%', marginBottom: 12 }} value={sourceTicketNo || undefined} options={(tickets.data ?? []).filter((item) => !item.afterSaleRequestId).map((item) => ({ value: item.ticketNo, label: `${item.ticketNo} · ${item.description}` }))} onChange={(value) => setSourceTicketNo(value ?? '')} />}
+          <Checkbox disabled={submit.isPending} checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}>我已核对订单、商品和政策，确认提交正式售后申请供员工审核。</Checkbox>
+          <div style={{ marginTop: 14 }}><Button type="primary" loading={submit.isPending} disabled={submit.isPending || previewMutation.isPending || !preview || !selectedPolicy || !itemId || !reason.trim() || !confirmed} onClick={() => submit.mutate()}>提交申请</Button></div>
           <ErrorLine error={submit.error} />
         </>}
       </Card> },

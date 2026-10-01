@@ -59,6 +59,9 @@ class SupportState(TypedDict, total=False):
     refund_order_facts: str
     # 正文已覆盖本次退款原因的有效商家政策 ID；只有它存在才允许给出提交确认。
     refund_policy_id: str
+    refund_policy_snapshot: str
+    # 共用订单核验流程；仅单商品退款留在对话，其他类型转页面。
+    refund_request_type: str
     refund_authorized: bool
     refund_context: dict[str, str]
     refund_pending: dict[str, str]

@@ -376,18 +376,27 @@ export const mockApi: AidenApi = {
     const order = (database().ordersByUser[actor.id] ?? []).find((item) => item.orderId === orderNo);
     if (!order) throw new Error('订单不存在');
     const name = { refund: '退款', return: '退货', exchange: '换货' }[kind];
+    const policy = { id: `mock-${kind}`, name: `${name}演示政策`, version: 'demo', content: '仅供本地流程演示；具体条件以真实商城政策为准。' };
+    const hashInput = JSON.stringify([policy.id, policy.id, policy.name, policy.version, policy.content, true, null, null]);
+    const snapshot = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput))), (byte) => byte.toString(16).padStart(2, '0')).join('');
     return {
       orderId: orderNo, orderNo, orderStatus: order.status, status: order.status,
       items: [{ id: `${orderNo}-item`, name: order.product, quantity: 1, lineTotal: String(order.amount) }],
-      policies: [{ id: `mock-${kind}`, name: `${name}演示政策`, version: 'demo', content: '仅供本地流程演示；具体条件以真实商城政策为准。' }],
+      policies: [{ ...policy, snapshot }],
     };
   },
   async submitAfterSale(input) {
     const actor = requireUser();
+    const db = database();
     if (!input.confirmed || !input.reason.trim()) throw new Error('请填写原因并确认提交');
     const preview = await this.previewAfterSale(input.orderNo, input.requestType);
-    if (!preview.items.some((item) => item.id === input.orderItemId) || !preview.policies.some((item) => item.id === input.policyReference)) throw new Error('订单商品或政策无效');
-    const db = database();
+    const policy = preview.policies.find((item) => item.id === input.policyReference);
+    if (!preview.items.some((item) => item.id === input.orderItemId) || !policy) throw new Error('订单商品或政策无效');
+    if (policy.snapshot !== input.policySnapshot) {
+      const conflict = new Error('售后政策已更新，请重新核对并确认') as Error & { status: number };
+      conflict.status = 409;
+      throw conflict;
+    }
     const rows = db.afterSales ?? [];
     const linkTicket = (requestId: string) => {
       if (!input.sourceTicketNo) return;

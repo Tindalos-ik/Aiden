@@ -24,7 +24,7 @@ from app.persistence.mysql.models import (  # noqa: E402
     AfterSaleRequest, Conversation, Message, Order, OrderItem, Policy, Ticket, User, utc_now_naive,
 )
 from app.persistence.mysql.service_workflow import (  # noqa: E402
-    change_request, change_ticket, preview_request, submit_request,
+    change_request, change_ticket, policy_snapshot, preview_request, submit_request,
 )
 from app.services.tools.after_sale_submit import submit_after_sale  # noqa: E402
 
@@ -85,10 +85,12 @@ class ServiceWorkflowTests(unittest.TestCase):
     def submit(self, *, key=None, user=None, reason="商品故障", item=None, policy=None, kind="refund",
                confirmed=True, ticket=None):
         with get_session_factory().begin() as session:
+            selected_policy = session.get(Policy, policy or self.policy_id)
             row, repeated = submit_request(
                 session, user_id=user or self.owner, order_no=self.order_no,
                 order_item_id=item or self.item_id, request_type=kind, reason=reason,
                 policy_reference=policy or self.policy_id,
+                policy_snapshot_value=policy_snapshot(selected_policy) if selected_policy else "0" * 64,
                 submission_key=key or uuid4().hex, confirmed=confirmed,
                 source_ticket_no=ticket,
             )
@@ -234,11 +236,13 @@ class ServiceWorkflowTests(unittest.TestCase):
     def test_dialogue_requires_saved_policy_and_exact_confirmation(self):
         now = utc_now_naive()
         with get_session_factory().begin() as session:
+            snapshot = policy_snapshot(session.get(Policy, self.policy_id))
             previous = Message(conversation_id=self.conversation_id, sender_role="assistant",
                                content="政策已核对，请确认提交", status="complete",
                                workflow_state={"refund": {"stage": "confirm", "order_no": self.order_no,
                                                           "reason": "商品故障",
-                                                          "policy_id": self.policy_id}}, created_at=now)
+                                                          "policy_id": self.policy_id,
+                                                          "policy_snapshot": snapshot}}, created_at=now)
             user = Message(conversation_id=self.conversation_id, sender_role="user",
                            content="先不要提交", status="complete", created_at=now + timedelta(microseconds=1))
             current = Message(conversation_id=self.conversation_id, sender_role="assistant",
@@ -249,6 +253,7 @@ class ServiceWorkflowTests(unittest.TestCase):
         def invoke():
             return json.loads(submit_after_sale.func(
                 order_no=self.order_no, reason="商品故障", policy_id=self.policy_id,
+                policy_snapshot=snapshot,
                 user_id=self.owner, conversation_id=self.conversation_id,
                 assistant_message_id=current_id, refund_authorized=True))
         self.assertEqual(invoke()["status"], "invalid")

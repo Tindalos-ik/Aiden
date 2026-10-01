@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.api.deps import current_actor, current_staff
 from app.persistence.mysql.database import get_session_factory
-from app.persistence.mysql.models import AfterSaleRequest, Message, Order, OrderItem, Policy, Ticket
+from app.persistence.mysql.models import AfterSaleRequest, Order, OrderItem, Policy, Ticket
 from app.persistence.mysql.queries import list_user_orders
 from app.persistence.mysql.service_workflow import (
     change_request, change_ticket, preview_request, request_data,
@@ -25,6 +25,7 @@ class SubmitRequest(BaseModel):
     requestType: Literal["refund", "return", "exchange"]
     reason: str = Field(min_length=1, max_length=2000)
     policyReference: str = Field(min_length=1, max_length=255)
+    policySnapshot: str = Field(pattern=r"^[0-9a-f]{64}$")
     submissionKey: str = Field(min_length=1, max_length=100)
     confirmed: bool
     sourceTicketNo: str | None = Field(default=None, max_length=64)
@@ -67,6 +68,7 @@ def submit(body: SubmitRequest, actor: dict = Depends(current_actor)) -> dict[st
                 session, user_id=actor["id"], order_no=body.orderNo,
                 order_item_id=body.orderItemId, request_type=body.requestType,
                 reason=body.reason, policy_reference=body.policyReference,
+                policy_snapshot_value=body.policySnapshot,
                 submission_key=body.submissionKey, confirmed=body.confirmed,
                 source_ticket_no=body.sourceTicketNo,
             )
@@ -119,12 +121,6 @@ def staff_requests(_actor: dict = Depends(current_staff)) -> list[dict[str, Any]
             data["itemName"] = item_name
             data["policyName"] = policy.name if policy else None
             data["policyEvidence"] = policy.content if policy else None
-            if row.policy_reference and row.policy_reference.startswith("rag:"):
-                cited_message = session.get(Message, row.policy_reference[4:])
-                if cited_message:
-                    data["policyName"] = "对话知识库引用"
-                    data["policyEvidence"] = "\n".join(str(item.get("content", ""))
-                        for item in (cited_message.citations or [])[:5] if isinstance(item, dict))
             result.append(data)
         return result
 

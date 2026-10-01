@@ -35,6 +35,7 @@ def submit_after_sale(
     order_no: str,
     reason: str,
     policy_id: str,
+    policy_snapshot: str,
     user_id: Annotated[str, InjectedState("user_id")],
     conversation_id: Annotated[str, InjectedState("conversation_id")],
     assistant_message_id: Annotated[str, InjectedState("assistant_message_id")],
@@ -55,12 +56,14 @@ def submit_after_sale(
             row, repeated = submit_request(
                 session, user_id=user_id, order_no=order_no, order_item_id=items[0].id,
                 request_type="refund", reason=reason, policy_reference=policy_id,
+                policy_snapshot_value=policy_snapshot,
                 submission_key=key, confirmed=True,
                 confirmation_message_id=assistant_message_id,
             )
             return json.dumps({"status": "ok", "request_no": row.request_no,
                                "request_status": row.status, "already_exists": repeated}, ensure_ascii=False)
     except (LookupError, ValueError) as exc:
-        return json.dumps({"status": "invalid", "message": str(exc)}, ensure_ascii=False)
+        status = "policy_changed" if str(exc) == "政策已变化或失效，请重新查询并确认" else "invalid"
+        return json.dumps({"status": status, "message": str(exc)}, ensure_ascii=False)
     except Exception:
         return json.dumps({"status": "error", "message": "申请提交暂时失败，请稍后重试"}, ensure_ascii=False)

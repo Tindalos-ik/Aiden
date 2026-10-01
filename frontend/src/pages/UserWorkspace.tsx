@@ -60,9 +60,10 @@ function CitationContent({ citation }: { citation: Citation }) {
 
 function AnswerContent({ item }: { item: ChatMessageType }) {
   const content = plainMessageText(item.content);
-  if (item.role !== 'assistant' || !item.citations?.length) return <>{content}</>;
-  const citations = new Map(item.citations.map((citation) => [citation.number, citation]));
-  return <>{content.split(/(\[\d+\])/g).map((part, index) => {
+  const citations = new Map((item.role === 'assistant' ? item.citations ?? [] : []).map((citation) => [citation.number, citation]));
+  return <>{content.split(/(\[[^\]]+\]\(\/app\/service(?:\?[^)\s]*)?\)|\[\d+\])/g).map((part, index) => {
+    const serviceLink = /^\[([^\]]+)\]\((\/app\/service(?:\?[^)\s]*)?)\)$/.exec(part);
+    if (serviceLink) return <a key={index} href={serviceLink[2]}>{serviceLink[1]}</a>;
     const number = /^\[(\d+)\]$/.exec(part)?.[1];
     const citation = number ? citations.get(Number(number)) : undefined;
     return citation ? <Popover key={index} trigger="click" title={`来源 [${citation.number}]`} content={<CitationContent citation={citation} />}><button type="button" className="citation-marker" aria-label={`查看来源 ${citation.number}`}>{part}</button></Popover> : part;
