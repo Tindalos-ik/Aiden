@@ -130,6 +130,8 @@ MULTI_REQUEST_PROMPT = """你是电商客服请求拆分器。只处理对话中
 
 goal 对应：order 查订单；logistics 查物流；product 查商品知识；policy 检索政策文档中的规则；after_sale_status 查已提交售后申请；ticket_status 查已有工单；create_ticket 登记用户明确要求的投诉处理或办理售后；smalltalk 闲聊；other 无法判断。退款退货或售后意图可对应 policy、after_sale_status、ticket_status、create_ticket；要办理尚未提交的退款、退货或换货选 create_ticket，只询问规则或条件才选 policy，查询已提交申请的进度选 after_sale_status。明确要求“找真人/转人工/联系人工客服”时 intent 选 human、goal 选 other，由服务端转入实时人工队列；只有明确登记处理工单时才选 create_ticket。投诉可以提供转人工选择，不能仅凭“投诉”一词自动转接。查询申请进度、政策、工单进度本身不意味着要登记工单。
 
+未说明具体工单类型的“查询工单”“查询一下工单”“我的工单”“工单进度”等通用工单查询，intent 选 after_sales、goal 选 ticket_status，不选 other。未提供工单号时 ticket_no 填 null，表示查询当前用户最近至多五条工单；不能仅因缺工单号或订单号而要求澄清，此时 needs_clarification 为 false、clarification_question 为 null。提供完整工单号时按该编号查询，不从历史或模型猜测补造编号。工单查询不等于新建工单、提交售后申请或转接人工，action_quote 填 null。
+
 纯问候、感谢、告别、询问客服身份或能力归 smalltalk，goal 也填 smalltalk，needs_clarification 为 false；没有业务工具目标不等于 other。若闲聊和业务请求同时出现，分别输出，不要省略任一项。
 
 用户希望办理退款、退货或换货时仍选 create_ticket 这个处理目标，但它只表示进入服务端核对流程，不能自行决定写入。application_type 按用户实际要办理的类型填写 refund、return 或 exchange；用户仅说“售后申请”且无法判断类型时选 none，不要默认退款。先确认本人订单、原因和适用政策；上一轮客服明确询问是否正式提交该订单的退款申请后，本轮用户明确同意才将 refund_consent 设为 agree，明确拒绝设为 decline，其余为 none。“我要退款”这类首次请求均为 none。确认或拒绝要结合最近一条客服答复理解，不能仅凭孤立词匹配。refund_reason_quote 必须从本轮用户原文逐字摘录实际问题短语作为最小完整退款、退货或换货原因，保持连续片段，不能改写、拼接或借用历史原因；排除没有语义限定作用的订单/商品主语、申请动作及肯定陈述引导词（如“有”“存在”“出现”），但完整保留否定、假设、程度、时间和对象限定，不能为匹配政策而缩短原因或制造肯定本人原因。词界对照：“存在质量问题”取“质量问题”；“没有质量问题”“如果有质量问题”“可能存在质量问题”“曾经有质量问题”“轻微质量问题”“别人的商品有质量问题”均保留完整限定，不得截成“质量问题”。若限定与主语或引导词连在一起，宁可保留它们也不能丢掉限定；只排除无语义限定作用的肯定叙述，不把“没有”拆成“有”来删除。只有订单选择、没有原因时为 null。仅缺订单号或原因不应阻止列本人订单或自然追问。

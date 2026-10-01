@@ -626,7 +626,9 @@ llm的天性就是硬凑答案
 
 ## Workflow 编排（已实现）与 ReAct（规划）
 
-### 当前用户问题流程
+
+
+### 用户问题流程
 
 完整流程图见前文“用户输入一条消息的全景”。`build_support_graph()` 注册 `load_context`、`recognize_intent`、`route_intent`、`dispatch_tool_call`、`run_工具名`、`after_tools`、`assess_knowledge`、`finish_request`、`generate`、`save_answer`。
 
@@ -635,6 +637,8 @@ llm的天性就是硬凑答案
 - 没有工具权限的澄清、闲聊、人工队列等项也进入 `finish_request`；知识项先经过 `assess_knowledge`。
 - 每项结果冻结后继续下一项，全部完成才由 `generate` 汇总与引用校验，再由 `save_answer` 保存；SSE 发出最终已校验内容。闲聊由模型自然回复，不是固定话术。
 - 工单登记走 `create_ticket`；明确转人工走会话状态事务，不能将两者混称“创建工单即接通人工”。
+
+
 
 ### 当前 LangGraph 连边摘录
 
@@ -655,6 +659,8 @@ graph.add_edge("save_answer", END)
 ```
 
 工具节点与 `after_tools` 的其他条件边见 `backend/app/agent/graph.py` 的 `build_support_graph()`；这里不是一份可独立运行的图定义。
+
+
 
 ### 主力 Agent：ReAct 循环（规划）
 
@@ -988,7 +994,7 @@ LangChain官方集成，和LangGraph同源，直接设置两个环境变量就�
 
 ### Embedding模型的微调
 
-通用的 Embedding 模型在「满减」「花呗分期」这类电商黑话上召回偏弱，它没怎么见过这些词，在向量空间里摆的位置就不准。拿自家语料微调一下 Embedding，能把这些词的位置校准回来，从源头把 RAG 的召回质量往上提升一点。
+通用的 Embedding 模型在「满减」「花呗分期」这类电商黑话上召回偏弱，它没怎么见过这些词，在向量空间里摆的位置就不准。拿自家语料微调一下 Embedding，能把这些词的位置校准回来，从源头把 RAG 的召回质量往上提升一点
 
 
 
