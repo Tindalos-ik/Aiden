@@ -1,5 +1,5 @@
 import type { AidenApi } from './contracts';
-import type { Actor, Conversation, Message, OrderCard, StreamEvent, AfterSaleApplication, ServiceTicket } from '../types';
+import type { Actor, Conversation, Message, OrderCard, StreamEvent, AfterSaleApplication, ServiceTicket, ServiceProduct } from '../types';
 import { demoAccounts, demoOrdersByUser } from '../data/demoData';
 
 const TICKET_RESOLUTION_REMINDER = '您好，您提交的工单已处理完成，请查看处理结果。';
@@ -8,13 +8,39 @@ const DB_KEY = 'aiden-demo-db-v1';
 const ACTOR_KEY = 'aiden-demo-actor-v1';
 const CHANNEL_NAME = 'aiden-demo-sync-v1';
 
+type StoredAfterSale = Omit<AfterSaleApplication, 'products'> & Partial<Pick<AfterSaleApplication, 'products'>>;
+type StoredTicket = Omit<ServiceTicket, 'products' | 'orderNo' | 'afterSaleRequestNo'>
+  & Partial<Pick<ServiceTicket, 'products' | 'orderNo' | 'afterSaleRequestNo'>>;
+
 interface DemoDatabase {
   version: number;
   conversations: Conversation[];
   messages: Message[];
   ordersByUser: Record<string, OrderCard[]>;
-  afterSales?: AfterSaleApplication[];
-  tickets?: ServiceTicket[];
+  afterSales?: StoredAfterSale[];
+  tickets?: StoredTicket[];
+}
+
+function afterSaleResponse(db: DemoDatabase, row: StoredAfterSale): AfterSaleApplication {
+  if (row.products !== undefined) return { ...row, products: row.products };
+  const order = (db.ordersByUser[row.userId] ?? []).find((item) => item.orderId === row.orderId);
+  const products: ServiceProduct[] = order && (row.orderItemId === null || row.orderItemId === `${order.orderId}-item`)
+    ? [{
+      id: `${order.orderId}-item`, name: order.product, skuName: null,
+      specification: null, quantity: 1, lineTotal: String(order.amount),
+    }]
+    : [];
+  return { ...row, products };
+}
+
+function ticketResponse(db: DemoDatabase, row: StoredTicket): ServiceTicket {
+  const application = (db.afterSales ?? []).find((item) => item.id === row.afterSaleRequestId && item.userId === row.userId);
+  return {
+    ...row,
+    products: application ? afterSaleResponse(db, application).products : [],
+    orderNo: application?.orderNo ?? null,
+    afterSaleRequestNo: application?.requestNo ?? null,
+  };
 }
 
 const makeId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
@@ -48,6 +74,7 @@ function seedDatabase(): DemoDatabase {
       conversationId: 'user-maya-history', issueType: 'complaint',
       description: '演示工单：配送延迟，需要客服核实。', status: 'open',
       assignedStaffId: null, afterSaleRequestId: null, acceptedAt: null,
+      products: [], orderNo: null, afterSaleRequestNo: null,
       resolvedAt: null, closedAt: null, closedById: null, resolutionNote: null,
       createdAt: ago(120), updatedAt: ago(120),
     }],
@@ -409,16 +436,17 @@ export const mockApi: AidenApi = {
     if (sameKey) {
       if (sameKey.orderNo !== input.orderNo || sameKey.orderItemId !== input.orderItemId || sameKey.requestType !== input.requestType || sameKey.reason !== input.reason.trim()) throw new Error('幂等键已用于另一项申请');
       linkTicket(sameKey.id);
-      return { ...sameKey, alreadyExists: true };
+      return { ...afterSaleResponse(db, sameKey), alreadyExists: true };
     }
     const duplicate = rows.find((item) => item.userId === actor.id && item.orderNo === input.orderNo && item.orderItemId === input.orderItemId && !['cancelled', 'rejected', 'completed'].includes(item.status));
     if (duplicate) {
       if (duplicate.requestType !== input.requestType) throw new Error('该商品已有其他类型的未结束售后申请');
-      linkTicket(duplicate.id); return { ...duplicate, alreadyExists: true };
+      linkTicket(duplicate.id); return { ...afterSaleResponse(db, duplicate), alreadyExists: true };
     }
     const now = new Date().toISOString();
     const row: AfterSaleApplication = { id: makeId('as'), requestNo: makeId('AS'), userId: actor.id,
       orderId: input.orderNo, orderNo: input.orderNo, orderItemId: input.orderItemId,
+      products: preview.items.map((item) => ({ ...item, skuName: null, specification: null })),
       requestType: input.requestType, reason: input.reason.trim(), status: 'pending',
       requestedAmount: null, policyReference: input.policyReference, submissionKey: input.submissionKey, reviewedById: null,
       reviewedAt: null, processingAt: null, processingById: null, resolvedById: null,
@@ -426,18 +454,27 @@ export const mockApi: AidenApi = {
     db.afterSales = [...rows, row];
     linkTicket(row.id);
     writeDatabase(db);
-    return row;
+    return afterSaleResponse(db, row);
   },
-  async listAfterSales() { const actor = requireUser(); return (database().afterSales ?? []).filter((item) => item.userId === actor.id); },
+  async listAfterSales() {
+    const actor = requireUser(); const db = database();
+    return (db.afterSales ?? []).filter((item) => item.userId === actor.id).map((item) => afterSaleResponse(db, item));
+  },
   async cancelAfterSale(id) {
     const actor = requireUser(); const db = database();
     const row = (db.afterSales ?? []).find((item) => item.id === id && item.userId === actor.id);
     if (!row) throw new Error('申请不存在');
     if (!['pending', 'approved'].includes(row.status)) throw new Error('非法的申请状态转换');
-    row.status = 'cancelled'; row.resolvedAt = row.updatedAt = new Date().toISOString(); row.resolvedById = actor.id; writeDatabase(db); return row;
+    row.status = 'cancelled'; row.resolvedAt = row.updatedAt = new Date().toISOString(); row.resolvedById = actor.id; writeDatabase(db); return afterSaleResponse(db, row);
   },
-  async listTickets() { const actor = requireUser(); return (database().tickets ?? []).filter((item) => item.userId === actor.id); },
-  async listStaffAfterSales() { requireStaff(); return database().afterSales ?? []; },
+  async listTickets() {
+    const actor = requireUser(); const db = database();
+    return (db.tickets ?? []).filter((item) => item.userId === actor.id).map((item) => ticketResponse(db, item));
+  },
+  async listStaffAfterSales() {
+    requireStaff(); const db = database();
+    return (db.afterSales ?? []).map((item) => afterSaleResponse(db, item));
+  },
   async transitionAfterSale(id, status, note) {
     const actor = requireStaff(); const db = database();
     const row = (db.afterSales ?? []).find((item) => item.id === id);
@@ -449,9 +486,12 @@ export const mockApi: AidenApi = {
     if (['approved', 'rejected'].includes(status)) { row.reviewedAt = now; row.reviewedById = actor.id; }
     if (['processing', 'awaiting_external_refund'].includes(status)) { row.processingAt = now; row.processingById = actor.id; }
     if (['rejected', 'completed'].includes(status)) { row.resolvedAt = now; row.resolvedById = actor.id; }
-    writeDatabase(db); return row;
+    writeDatabase(db); return afterSaleResponse(db, row);
   },
-  async listStaffTickets() { requireStaff(); return database().tickets ?? []; },
+  async listStaffTickets() {
+    requireStaff(); const db = database();
+    return (db.tickets ?? []).map((item) => ticketResponse(db, item));
+  },
   async transitionTicket(id, status, note, afterSaleRequestId) {
     const actor = requireStaff(); const db = database();
     const row = (db.tickets ?? []).find((item) => item.id === id);
@@ -474,7 +514,7 @@ export const mockApi: AidenApi = {
       }
     }
     if (afterSaleRequestId) row.afterSaleRequestId = afterSaleRequestId;
-    writeDatabase(db); return row;
+    writeDatabase(db); return ticketResponse(db, row);
   },
   async resetDemoData() {
     localStorage.removeItem(DB_KEY);

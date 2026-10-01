@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { api, apiMode } from '../api';
 import { PageHeader } from '../components/Common';
-import type { AfterSaleApplication, AfterSalePreview, ServiceTicket, SubmitAfterSaleInput } from '../types';
+import type { AfterSaleApplication, AfterSalePreview, ServiceProduct, ServiceTicket, SubmitAfterSaleInput } from '../types';
 
 const requestText: Record<string, string> = { refund: '退款', return: '退货', exchange: '换货' };
 const requestStatus: Record<string, string> = { pending: '待审核', approved: '审核通过，待处理', rejected: '已驳回', processing: '处理中', awaiting_external_refund: '待外部支付退款', completed: '已完成', cancelled: '已取消' };
@@ -14,10 +14,32 @@ function ErrorLine({ error }: { error: unknown }) {
   return error ? <Alert type="error" showIcon message={error instanceof Error ? error.message : '操作失败'} style={{ margin: '12px 0' }} /> : null;
 }
 
+function ProductSummary({ products, title, emptyText }: { products: ServiceProduct[]; title: string; emptyText: string }) {
+  return <section className="service-product-summary" aria-label={title}>
+    <Typography.Text type="secondary">{title} · 下单时商品信息</Typography.Text>
+    {products.length ? <ul className="service-product-list">{products.map((product) => {
+      const specification = Object.entries(product.specification ?? {}).map(([key, value]) =>
+        `${key}：${typeof value === 'object' ? JSON.stringify(value) : String(value)}`).join(' · ');
+      return <li className="service-product-item" key={product.id}>
+        <span className="service-product-thumb" aria-hidden="true">{product.name.slice(0, 1)}</span>
+        <div className="service-product-details">
+          <Typography.Text strong>{product.name}</Typography.Text>
+          {(product.skuName || specification) && <Typography.Text type="secondary">{[product.skuName, specification].filter(Boolean).join(' · ')}</Typography.Text>}
+        </div>
+        <div className="service-product-amount">
+          <Typography.Text>数量 × {product.quantity}</Typography.Text>
+          <Typography.Text type="secondary">商品金额 ¥{product.lineTotal}</Typography.Text>
+        </div>
+      </li>;
+    })}</ul> : <p className="service-product-empty"><Typography.Text type="secondary">{emptyText}</Typography.Text></p>}
+  </section>;
+}
+
 function ApplicationCard({ row, action }: { row: AfterSaleApplication; action?: React.ReactNode }) {
-  return <Card size="small" style={{ marginBottom: 12 }} title={<Space><b>{row.requestNo}</b><Tag>{requestText[row.requestType]}</Tag><Tag color="blue">{requestStatus[row.status]}</Tag></Space>} extra={action}>
-    <p>订单：{row.orderNo} · 原因：{row.reason}</p>
-    {row.itemName && <p>商品：{row.itemName}</p>}
+  return <Card className="service-record-card" size="small" style={{ marginBottom: 12 }} title={<Space wrap><b>{row.requestNo}</b><Tag>{requestText[row.requestType]}</Tag><Tag color="blue">{requestStatus[row.status]}</Tag></Space>} extra={action}>
+    <p><Typography.Text type="secondary">订单号：</Typography.Text>{row.orderNo ?? '暂无订单信息'}</p>
+    <ProductSummary products={row.products} title={row.orderItemId ? '申请商品' : '订单商品（未指定具体商品）'} emptyText="暂无对应商品信息。" />
+    <p style={{ whiteSpace: 'pre-wrap' }}><Typography.Text strong>申请原因：</Typography.Text>{row.reason}</p>
     {row.policyName && <p>提交依据：{row.policyName}</p>}
     {row.policyEvidence && <p style={{ whiteSpace: 'pre-wrap' }}>政策证据：{row.policyEvidence}</p>}
     {row.decisionNote && <p>处理说明：{row.decisionNote}</p>}
@@ -26,12 +48,14 @@ function ApplicationCard({ row, action }: { row: AfterSaleApplication; action?: 
   </Card>;
 }
 
-function TicketCard({ row, action, linkedRequestNo }: { row: ServiceTicket; action?: React.ReactNode; linkedRequestNo?: string }) {
+function TicketCard({ row, action }: { row: ServiceTicket; action?: React.ReactNode }) {
   const status = ticketStatus[row.status] ?? row.status;
-  return <Card size="small" style={{ marginBottom: 12 }} title={<span style={{ overflowWrap: 'anywhere' }}>{row.ticketNo}</span>} extra={action}>
+  return <Card className="service-record-card" size="small" style={{ marginBottom: 12 }} title={<span style={{ overflowWrap: 'anywhere' }}>{row.ticketNo}</span>} extra={action}>
     <p><Typography.Text strong>当前状态：</Typography.Text><Tag color={row.status === 'closed' ? 'default' : row.status === 'open' ? 'gold' : 'blue'}>{status}</Tag></p>
-    <p>{row.description}</p>
-    {row.afterSaleRequestId && <p>关联售后申请：{linkedRequestNo ?? row.afterSaleRequestId}</p>}
+    {row.orderNo && <p><Typography.Text type="secondary">订单号：</Typography.Text>{row.orderNo}</p>}
+    {row.afterSaleRequestId && <p><Typography.Text type="secondary">关联售后申请：</Typography.Text>{row.afterSaleRequestNo ?? row.afterSaleRequestId}</p>}
+    <ProductSummary products={row.products} title="关联订单商品" emptyText={row.afterSaleRequestId ? '关联申请暂无商品信息。' : '未关联商品：此工单尚未关联售后申请。'} />
+    <p style={{ whiteSpace: 'pre-wrap' }}><Typography.Text strong>问题描述：</Typography.Text>{row.description}</p>
     {row.resolutionNote && <p>处理结果：{row.resolutionNote}</p>}
     <Typography.Text type="secondary">创建：{new Date(row.createdAt).toLocaleString('zh-CN')}</Typography.Text>
   </Card>;
@@ -113,7 +137,7 @@ export function UserServicePage() {
     onSuccess: async () => { message.success('申请已取消'); await client.invalidateQueries({ queryKey: ['after-sales'] }); },
   });
   if (!actor.data) return <Spin />;
-  return <div className="workspace-shell"><PageHeader actor={actor.data} /><main style={{ maxWidth: 1000, margin: '28px auto', padding: 16 }}>
+  return <div className="workspace-shell"><PageHeader actor={actor.data} /><main style={{ width: '100%', maxWidth: 1000, margin: '28px auto', padding: 16 }}>
     <Typography.Title level={3}>我的售后与工单</Typography.Title>
     {apiMode === 'mock' && <Alert type="info" showIcon message="本地演示模式：申请、政策和进度仅保存在浏览器，不代表真实订单或退款。" style={{ marginBottom: 16 }} />}
     <Tabs items={[
@@ -137,7 +161,7 @@ export function UserServicePage() {
         </>}
       </Card> },
       { key: 'applications', label: '申请进度', children: <><ErrorLine error={applications.error ?? cancel.error} />{(applications.data ?? []).length ? applications.data!.map((row) => <ApplicationCard key={row.id} row={row} action={['pending', 'approved'].includes(row.status) && <Button size="small" danger loading={cancel.isPending} onClick={() => cancel.mutate(row.id)}>取消申请</Button>} />) : <Empty description="暂无售后申请" />}</> },
-      { key: 'tickets', label: '工单进度', children: <><ErrorLine error={tickets.error} />{(tickets.data ?? []).length ? tickets.data!.map((row) => <TicketCard key={row.id} row={row} linkedRequestNo={applications.data?.find((app) => app.id === row.afterSaleRequestId)?.requestNo} />) : <Empty description="暂无工单；投诉或异常问题可在会话中请求登记。" />}</> },
+      { key: 'tickets', label: '工单进度', children: <><ErrorLine error={tickets.error} />{(tickets.data ?? []).length ? tickets.data!.map((row) => <TicketCard key={row.id} row={row} />) : <Empty description="暂无工单；投诉或异常问题可在会话中请求登记。" />}</> },
     ]} />
   </main></div>;
 }
@@ -159,7 +183,7 @@ export function StaffServicePage() {
     {apiMode === 'mock' && <Alert type="info" showIcon message="本地演示模式：处理状态仅保存在浏览器。" style={{ marginBottom: 16 }} />}
     <ErrorLine error={requestMutation.error ?? ticketMutation.error} />
     <Tabs items={[
-      { key: 'tickets', label: `工单 ${tickets.data?.length ?? 0}`, children: <><ErrorLine error={tickets.error} />{(tickets.data ?? []).length ? tickets.data!.map((row) => <TicketCard key={row.id} row={row} linkedRequestNo={applications.data?.find((app) => app.id === row.afterSaleRequestId)?.requestNo} action={<Space>
+      { key: 'tickets', label: `工单 ${tickets.data?.length ?? 0}`, children: <><ErrorLine error={tickets.error} />{(tickets.data ?? []).length ? tickets.data!.map((row) => <TicketCard key={row.id} row={row} action={<Space>
         {row.status === 'open' && <Button size="small" onClick={() => ticketMutation.mutate({ id: row.id, status: 'in_progress' })}>接单</Button>}
         {row.status === 'in_progress' && <Button size="small" onClick={() => ticketMutation.mutate({ id: row.id, status: 'resolved' })}>标记已处理</Button>}
         {['in_progress', 'resolved'].includes(row.status) && <Button size="small" onClick={() => ticketMutation.mutate({ id: row.id, status: 'closed' })}>关闭</Button>}

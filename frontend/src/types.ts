@@ -43,9 +43,18 @@ export interface AfterSalePreview extends ServiceOrder {
   items: Array<{ id: string; name: string; quantity: number; lineTotal: string }>;
   policies: Array<{ id: string; name: string; version: string; content: string; snapshot: string }>;
 }
+export interface ServiceProduct {
+  id: string;
+  name: string;
+  skuName: string | null;
+  specification: Record<string, unknown> | null;
+  quantity: number;
+  lineTotal: string;
+}
 export interface AfterSaleApplication {
   id: string; requestNo: string; userId: string; orderId: string; orderNo: string | null;
   orderItemId: string | null; requestType: 'refund' | 'return' | 'exchange'; reason: string;
+  products: ServiceProduct[];
   status: AfterSaleStatus; requestedAmount: string | null; policyReference: string | null;
   reviewedById: string | null; reviewedAt: string | null; processingAt: string | null;
   processingById: string | null; resolvedById: string | null;
@@ -60,6 +69,7 @@ export interface ServiceTicket {
   id: string; ticketNo: string; userId: string; conversationId: string;
   issueType: string; description: string; status: TicketStatus;
   assignedStaffId: string | null; afterSaleRequestId: string | null;
+  products: ServiceProduct[]; orderNo: string | null; afterSaleRequestNo: string | null;
   acceptedAt: string | null; resolvedAt: string | null; closedAt: string | null;
   closedById: string | null; resolutionNote: string | null; createdAt: string; updatedAt: string;
 }

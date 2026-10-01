@@ -456,3 +456,17 @@ button { -webkit-tap-highlight-color: transparent; }
 .eval-answer { margin: 8px 0 18px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.65; }
 .eval-judge { margin: 8px 0 0 !important; white-space: pre-wrap; }
 @media (max-width: 850px) { .eval-strategies, .eval-truth { grid-template-columns: 1fr; } }
+.service-record-card .ant-card-head-title { white-space: normal; overflow-wrap: anywhere; }
+.service-record-card .ant-card-head-wrapper { flex-wrap: wrap; gap: 8px; padding: 6px 0; }
+.service-record-card .ant-card-body { overflow-wrap: anywhere; }
+.service-product-summary { padding: 14px; border: 1px solid #e9ebf2; border-radius: 10px; background: #f7f8fb; }
+.service-product-list { display: grid; gap: 12px; padding: 0; margin: 12px 0 0; list-style: none; }
+.service-product-item { display: flex; align-items: center; gap: 12px; }
+.service-product-thumb { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 auto; border-radius: 10px; color: #696fd0; background: #edeeff; font-size: 18px; font-weight: 700; }
+.service-product-details { display: grid; flex: 1; min-width: 0; gap: 4px; }
+.service-product-amount { display: grid; flex: 0 0 auto; gap: 4px; text-align: right; }
+.service-product-empty { margin: 10px 0 0; }
+@media (max-width: 580px) {
+  .service-product-item { flex-wrap: wrap; align-items: flex-start; }
+  .service-product-amount { width: 100%; padding-left: 56px; text-align: left; }
+}

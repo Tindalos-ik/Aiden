@@ -6,7 +6,7 @@ import json
 from hashlib import sha256
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, tuple_
 from sqlalchemy.orm import Session
 
 from app.persistence.mysql.models import (
@@ -29,10 +29,12 @@ def _iso(value: Any) -> str | None:
     return f"{value.isoformat()}Z" if value is not None else None
 
 
-def request_data(row: AfterSaleRequest, order_no: str | None = None) -> dict[str, Any]:
+def _request_data(row: AfterSaleRequest, order_no: str | None,
+                  products: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "id": row.id, "requestNo": row.request_no, "userId": row.user_id,
         "orderId": row.order_id, "orderNo": order_no, "orderItemId": row.order_item_id,
+        "products": products,
         "requestType": row.request_type, "reason": row.reason, "status": row.status,
         "requestedAmount": str(row.requested_amount) if row.requested_amount is not None else None,
         "policyReference": row.policy_reference, "reviewedById": row.reviewed_by_id,
@@ -43,18 +45,68 @@ def request_data(row: AfterSaleRequest, order_no: str | None = None) -> dict[str
     }
 
 
-def ticket_data(row: Ticket) -> dict[str, Any]:
+def _ticket_data(row: Ticket, request: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "id": row.id, "ticketNo": row.ticket_no, "userId": row.user_id,
         "conversationId": row.conversation_id, "issueType": row.issue_type,
         "description": row.description, "status": row.status,
         "assignedStaffId": row.assigned_staff_id,
         "afterSaleRequestId": row.after_sale_request_id,
+        "products": request["products"] if request else [],
+        "orderNo": request["orderNo"] if request else None,
+        "afterSaleRequestNo": request["requestNo"] if request else None,
         "acceptedAt": _iso(row.accepted_at), "resolvedAt": _iso(row.resolved_at),
         "closedAt": _iso(row.closed_at), "closedById": row.closed_by_id,
         "resolutionNote": row.resolution_note, "createdAt": _iso(row.created_at),
         "updatedAt": _iso(row.updated_at),
     }
+
+
+def requests_data(session: Session, rows: list[AfterSaleRequest]) -> list[dict[str, Any]]:
+    """批量读取同用户订单的购买快照；旧订单级申请保留全部商品。"""
+    if not rows:
+        return []
+    contexts: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+    snapshots = session.execute(select(AfterSaleRequest.id, Order.order_no, OrderItem).join(
+        Order, (Order.id == AfterSaleRequest.order_id) &
+        (Order.user_id == AfterSaleRequest.user_id)).outerjoin(
+        OrderItem, (OrderItem.order_id == Order.id) & or_(
+            AfterSaleRequest.order_item_id.is_(None),
+            OrderItem.id == AfterSaleRequest.order_item_id)
+    ).where(AfterSaleRequest.id.in_([row.id for row in rows])).order_by(OrderItem.id))
+    for request_id, order_no, item in snapshots:
+        _, products = contexts.setdefault(request_id, (order_no, []))
+        if item is not None:
+            products.append({
+                "id": item.id, "name": item.product_name_snapshot,
+                "skuName": item.sku_name_snapshot,
+                "specification": item.specification_snapshot,
+                "quantity": item.quantity, "lineTotal": str(item.line_total),
+            })
+    return [_request_data(row, *contexts.get(row.id, (None, []))) for row in rows]
+
+
+def request_data(session: Session, row: AfterSaleRequest) -> dict[str, Any]:
+    return requests_data(session, [row])[0]
+
+
+def tickets_data(session: Session, rows: list[Ticket]) -> list[dict[str, Any]]:
+    """工单仅通过同用户的申请关联商品，不受售后列表分页影响。"""
+    if not rows:
+        return []
+    # 使用当前事务内的关联值，兼容 autoflush=False 下刚关联申请的状态流转响应。
+    links = {(row.after_sale_request_id, row.user_id) for row in rows if row.after_sale_request_id}
+    if not links:
+        return [_ticket_data(row, None) for row in rows]
+    linked = list(session.scalars(select(AfterSaleRequest).where(
+        tuple_(AfterSaleRequest.id, AfterSaleRequest.user_id).in_(links))))
+    requests = requests_data(session, linked)
+    by_request = {(request["id"], request["userId"]): request for request in requests}
+    return [_ticket_data(row, by_request.get((row.after_sale_request_id, row.user_id))) for row in rows]
+
+
+def ticket_data(session: Session, row: Ticket) -> dict[str, Any]:
+    return tickets_data(session, [row])[0]
 
 
 def _active_policies(session: Session, kind: str) -> list[Policy]:
