@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from .database import get_engine, get_session_factory
@@ -30,14 +30,124 @@ def _row(row: ReviewQueue) -> dict[str, Any]:
     }
 
 
-def list_reviews(status: str, limit: int, offset: int) -> dict[str, Any]:
+ISSUE_TYPES = ("knowledge_gap", "retrieval_miss", "policy_gap", "service_failure", "unclassified")
+
+
+def _original_scope(start_at: datetime | None, end_at: datetime | None) -> list:
+    """时间范围始终作用于原始事件；归并时间和审核时间不是问题发生时间。"""
+    predicates = []
+    if start_at is not None:
+        predicates.append(LowConfidenceQuestion.created_at >= start_at)
+    if end_at is not None:
+        predicates.append(LowConfidenceQuestion.created_at < end_at)
+    return predicates
+
+
+def _original_counts(start_at: datetime | None = None, end_at: datetime | None = None):
+    original = LowConfidenceQuestion
+    feedback_key = case(
+        (original.entrypoint == "user_feedback_unresolved",
+         func.coalesce(original.source_assistant_message_id, original.id)),
+        else_=None,
+    )
+    return select(
+        original.matched_review_id.label("review_id"),
+        func.count().label("original_count"),
+        func.count(func.distinct(feedback_key)).label("feedback_count"),
+        func.max(case((and_(original.entrypoint == "retrieval_low_confidence",
+                            original.retrieval_status == "searched"), 1), else_=0)).label("knowledge_gap"),
+        func.max(case((original.entrypoint == "refund_policy_unavailable", 1), else_=0)).label("policy_gap"),
+        func.max(case((original.retrieval_status == "error", 1), else_=0)).label("service_failure"),
+    ).where(*_original_scope(start_at, end_at)).group_by(original.matched_review_id).subquery()
+
+
+def _issue_predicates(counts) -> dict:
+    # 低分/空召回只是疑似知识缺口，绝不替代人工“已有知识未召回”结论。
+    miss = ReviewQueue.rejection_reason == "existing_knowledge_not_retrieved"
+    knowledge = and_(func.coalesce(counts.c.knowledge_gap, 0) == 1,
+                     func.coalesce(ReviewQueue.rejection_reason, "") != "existing_knowledge_not_retrieved")
+    policy = func.coalesce(counts.c.policy_gap, 0) == 1
+    failure = func.coalesce(counts.c.service_failure, 0) == 1
+    return {"knowledge_gap": knowledge, "retrieval_miss": miss, "policy_gap": policy,
+            "service_failure": failure,
+            "unclassified": and_(func.coalesce(ReviewQueue.rejection_reason, "") !=
+                                "existing_knowledge_not_retrieved",
+                                func.coalesce(counts.c.knowledge_gap, 0) == 0,
+                                func.coalesce(counts.c.policy_gap, 0) == 0,
+                                func.coalesce(counts.c.service_failure, 0) == 0)}
+
+
+def _operational_row(result) -> dict[str, Any]:
+    row, original_count, feedback_count, *flags = result
+    return {**_row(row), "scoped_occurrence_count": original_count,
+            "scoped_feedback_count": feedback_count,
+            "issue_types": [name for name, flag in zip(ISSUE_TYPES, flags) if flag]}
+
+
+def list_reviews(status: str, limit: int, offset: int, *, sort: str = "recent",
+                 category: str | None = None, uncategorized: bool = False,
+                 start_at: datetime | None = None, end_at: datetime | None = None,
+                 issue_type: str | None = None) -> dict[str, Any]:
+    """列表和统计共用过滤集合；统计不随分页变化，反馈按助手消息去重。
+
+    原始问题数只包含列表中归并问题关联的范围内记录，不混入未归并原话。
+    热度沿用全生命周期 occurrence_count；范围内频次单独返回，避免混淆口径。
+    分类可多标签，仅代表可见证据，不表示补库后已复问验证或政策已修复。
+    """
+    counts = _original_counts(start_at, end_at)
+    issues = _issue_predicates(counts)
+    predicates = []
+    if status != "all":
+        predicates.append(ReviewQueue.review_status == status)
+    if category is not None:
+        predicates.append(ReviewQueue.category == category)
+    if uncategorized:
+        predicates.append(or_(ReviewQueue.category.is_(None), ReviewQueue.category == ""))
+    if start_at is not None or end_at is not None:
+        predicates.append(func.coalesce(counts.c.original_count, 0) > 0)
+    if issue_type is not None:
+        predicates.append(issues[issue_type])
+    base = select(ReviewQueue).outerjoin(counts, counts.c.review_id == ReviewQueue.id).where(*predicates)
+    selected = base.with_only_columns(ReviewQueue.id).subquery()
     with get_session_factory()() as session:
-        where = ReviewQueue.review_status == status
-        total = session.scalar(select(func.count()).select_from(ReviewQueue).where(where)) or 0
-        rows = session.scalars(select(ReviewQueue).where(where).order_by(
-            ReviewQueue.created_at.desc(), ReviewQueue.id.desc(),
-        ).limit(limit).offset(offset)).all()
-        return {"items": [_row(row) for row in rows], "total": total}
+        summary = session.execute(base.with_only_columns(
+            func.count(ReviewQueue.id),
+            func.coalesce(func.sum(counts.c.original_count), 0),
+            *[func.sum(case((ReviewQueue.review_status == value, 1), else_=0))
+              for value in ("pending", "approved", "rejected")],
+            *[func.sum(case((ReviewQueue.ingestion_status == value, 1), else_=0))
+              for value in ("not_started", "pending", "ready", "manual_review", "failed")],
+            *[func.sum(case((issues[value], 1), else_=0)) for value in ISSUE_TYPES],
+        )).one()
+        feedback_count = session.scalar(select(func.count(func.distinct(func.coalesce(
+            LowConfidenceQuestion.source_assistant_message_id, LowConfidenceQuestion.id,
+        )))).where(
+            LowConfidenceQuestion.matched_review_id.in_(select(selected.c.id)),
+            LowConfidenceQuestion.entrypoint == "user_feedback_unresolved",
+            *_original_scope(start_at, end_at),
+        )) or 0
+        order = [ReviewQueue.created_at.desc(), ReviewQueue.id.desc()]
+        if sort == "heat":
+            order.insert(0, ReviewQueue.occurrence_count.desc())
+        results = session.execute(base.with_only_columns(
+            ReviewQueue, func.coalesce(counts.c.original_count, 0),
+            func.coalesce(counts.c.feedback_count, 0),
+            *[case((issues[value], True), else_=False) for value in ISSUE_TYPES],
+        ).order_by(*order).limit(limit).offset(offset)).all()
+        # MySQL SUM 返回 Decimal；显式转整型，避免 FastAPI 将统计数序列化成字符串。
+        summary = tuple(int(value or 0) for value in summary)
+        categories = list(session.scalars(select(ReviewQueue.category).distinct().order_by(ReviewQueue.category)))
+        statistics = {
+            "merged_question_count": summary[0], "original_question_count": summary[1],
+            "feedback_count": feedback_count,
+            "review_status_counts": dict(zip(("pending", "approved", "rejected"),
+                                           (value or 0 for value in summary[2:5]))),
+            "ingestion_status_counts": dict(zip(("not_started", "pending", "ready", "manual_review", "failed"),
+                                              (value or 0 for value in summary[5:10]))),
+            "issue_type_counts": dict(zip(ISSUE_TYPES, (value or 0 for value in summary[10:]))),
+        }
+        return {"items": [_operational_row(result) for result in results], "total": summary[0],
+                "statistics": statistics, "categories": categories}
 
 
 def review_detail(review_id: str) -> dict[str, Any]:
@@ -48,7 +158,14 @@ def review_detail(review_id: str) -> dict[str, Any]:
         originals = session.scalars(select(LowConfidenceQuestion).where(
             LowConfidenceQuestion.matched_review_id == review_id,
         ).order_by(LowConfidenceQuestion.created_at, LowConfidenceQuestion.id)).all()
-        return {**_row(row), "originals": [{
+        counts = _original_counts()
+        issues = _issue_predicates(counts)
+        operational = session.execute(select(
+            ReviewQueue, func.coalesce(counts.c.original_count, 0),
+            func.coalesce(counts.c.feedback_count, 0),
+            *[case((issues[value], True), else_=False) for value in ISSUE_TYPES],
+        ).outerjoin(counts, counts.c.review_id == ReviewQueue.id).where(ReviewQueue.id == review_id)).one()
+        return {**_operational_row(operational), "originals": [{
             "id": original.id, "raw_question": original.original_question,
             "created_at": original.created_at, "source": original.entrypoint,
             "reason": original.reason, "retrieval_snapshot": original.retrieval_snapshot,

@@ -158,15 +158,24 @@ export interface RagJob {
   result: unknown;
 }
 
-export type ReviewStatus = 'pending' | 'approved' | 'rejected';
+export type ReviewStatus = 'pending' | 'approved' | 'rejected' | 'all';
+export type ReviewSort = 'recent' | 'heat';
+export type ReviewIssueType = 'knowledge_gap' | 'retrieval_miss' | 'policy_gap' | 'service_failure' | 'unclassified';
 export type RejectionReason = 'existing_knowledge_not_retrieved' | 'not_reusable' | 'outdated' | 'other';
 
 export interface ReviewQueueItem {
   id: string;
   normalized_question: string;
   example_answer: string | null;
+  /** 全生命周期出现次数，不受当前日期筛选影响。 */
   occurrence_count: number;
-  review_status: ReviewStatus;
+  /** 列表按当前筛选范围统计；详情接口覆盖全部关联原话。 */
+  scoped_occurrence_count: number;
+  /** 不满意反馈次数；详情覆盖全部关联反馈。 */
+  scoped_feedback_count: number;
+  /** 按范围内原话证据分类；详情返回全部关联原话的类型。 */
+  issue_types: ReviewIssueType[];
+  review_status: Exclude<ReviewStatus, 'all'>;
   approved_answer: string | null;
   category: string | null;
   review_note: string | null;
@@ -176,6 +185,36 @@ export interface ReviewQueueItem {
   faq_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ReviewQueueStatistics {
+  original_question_count: number;
+  merged_question_count: number;
+  /** 仅 user_feedback_unresolved 不满意反馈，按 source_assistant_message_id 跨归并问题去重。 */
+  feedback_count: number;
+  review_status_counts: Record<Exclude<ReviewStatus, 'all'>, number>;
+  ingestion_status_counts: Record<ReviewQueueItem['ingestion_status'], number>;
+  issue_type_counts: Record<ReviewIssueType, number>;
+}
+
+export interface ReviewQueueResponse {
+  items: ReviewQueueItem[];
+  total: number;
+  statistics: ReviewQueueStatistics;
+  categories: Array<string | null>;
+}
+
+export interface ReviewQueueFilters {
+  status: ReviewStatus;
+  sort: ReviewSort;
+  offset: number;
+  limit?: number;
+  category?: string;
+  uncategorized?: boolean;
+  /** 原始问题创建时间的 UTC 半开区间。 */
+  start_at?: string;
+  end_at?: string;
+  issue_type?: ReviewIssueType;
 }
 
 export interface ReviewOriginal {

@@ -1,4 +1,4 @@
-import type { RagChunk, RagEvalReport, RagJob, RagMilvusSnapshot, RagMiningSnapshot, RagOverview, RejectionReason, ReviewDetail, ReviewQueueItem, ReviewStatus } from '../types';
+import type { RagChunk, RagEvalReport, RagJob, RagMilvusSnapshot, RagMiningSnapshot, RagOverview, RejectionReason, ReviewDetail, ReviewQueueFilters, ReviewQueueResponse } from '../types';
 import { apiMode } from './index';
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
@@ -33,8 +33,15 @@ export const ragApi = {
   }),
   startEmbedding: () => request<{ state: string; managed: boolean }>('/embedding/start', { method: 'POST' }),
   stopEmbedding: () => request<{ state: string; managed: boolean }>('/embedding/stop', { method: 'POST' }),
-  reviewQueue: (status: ReviewStatus, offset: number, limit = 20) =>
-    request<{ items: ReviewQueueItem[]; total: number }>(`/review-queue?status=${status}&limit=${limit}&offset=${offset}`, { cache: 'no-store' }),
+  reviewQueue: (filters: ReviewQueueFilters) => {
+    const params = new URLSearchParams({ status: filters.status, sort: filters.sort, limit: String(filters.limit ?? 20), offset: String(filters.offset) });
+    if (filters.category !== undefined) params.set('category', filters.category);
+    if (filters.uncategorized) params.set('uncategorized', 'true');
+    if (filters.start_at) params.set('start_at', filters.start_at);
+    if (filters.end_at) params.set('end_at', filters.end_at);
+    if (filters.issue_type) params.set('issue_type', filters.issue_type);
+    return request<ReviewQueueResponse>(`/review-queue?${params}`, { cache: 'no-store' });
+  },
   reviewDetail: (id: string) => request<ReviewDetail>(`/review-queue/${encodeURIComponent(id)}`, { cache: 'no-store' }),
   approveReview: (id: string, body: { approved_answer: string; category: string; review_note: string }) =>
     request<ReviewDetail>(`/review-queue/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify(body) }),

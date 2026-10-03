@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -41,11 +42,28 @@ def _review_error(exc: LookupError | review_repo.ReviewConflict) -> HTTPExceptio
 
 @router.get("/review-queue")
 def list_review_queue(
-    status: Literal["pending", "approved", "rejected"] = "pending",
+    status: Literal["pending", "approved", "rejected", "all"] = "pending",
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    sort: Literal["recent", "heat"] = "recent",
+    category: str | None = Query(default=None, min_length=1, max_length=100),
+    uncategorized: bool = False,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+    issue_type: Literal["knowledge_gap", "retrieval_miss", "policy_gap", "service_failure", "unclassified"] | None = None,
 ) -> dict:
-    return review_repo.list_reviews(status, limit, offset)
+    # 数据库时间为 UTC naive；浏览器显式时区先换算，未带时区约定为 UTC。
+    def utc(value: datetime | None) -> datetime | None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None) if value and value.tzinfo else value
+
+    start_at, end_at = utc(start_at), utc(end_at)
+    if category is not None and uncategorized:
+        raise HTTPException(status_code=422, detail="类目与未分类筛选不能同时选择")
+    if start_at is not None and end_at is not None and start_at >= end_at:
+        raise HTTPException(status_code=422, detail="开始时间必须早于结束时间")
+    return review_repo.list_reviews(status, limit, offset, sort=sort, category=category,
+                                    uncategorized=uncategorized, start_at=start_at,
+                                    end_at=end_at, issue_type=issue_type)
 
 
 @router.get("/review-queue/{review_id}")
