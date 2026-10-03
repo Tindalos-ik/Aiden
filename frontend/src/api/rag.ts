@@ -22,6 +22,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const ragApi = {
   evalReport: () => request<RagEvalReport>('/evals/customer-rag-v1', { cache: 'no-store' }),
+  workflowEvalReport: () => request<RagEvalReport>('/evals/customer-workflow-v2', { cache: 'no-store' }),
   overview: () => request<RagOverview>('/overview'),
   milvus: (offset = 0) => request<RagMilvusSnapshot>(`/milvus?limit=20&offset=${offset}`),
   preview: (file: string) => request<{ file: string; title: string; chunks: RagChunk[] }>(`/preview?file=${encodeURIComponent(file)}`),

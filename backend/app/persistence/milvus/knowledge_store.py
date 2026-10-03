@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any, Iterable
@@ -117,6 +118,30 @@ class KnowledgeVectorStore:
     def dimension(self) -> int:
         """当前集合使用的向量维度。"""
         return self._dimension
+
+    def evaluation_manifest(self) -> dict[str, Any]:
+        """只读集合内容快照；包含向量和BM25文本指纹，集合名不是版本。"""
+        schema = self._client.describe_collection(self._collection)
+        iterator = self._client.query_iterator(
+            collection_name=self._collection, batch_size=500,
+            output_fields=[CHUNK_ID_FIELD, VECTOR_FIELD, TEXT_FIELD],
+        )
+        fingerprints: list[tuple[str, str]] = []
+        try:
+            while batch := iterator.next():
+                for row in batch:
+                    digest = hashlib.sha256(json.dumps(
+                        row, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                    ).encode("utf-8")).hexdigest()
+                    fingerprints.append((str(row[CHUNK_ID_FIELD]), digest))
+        finally:
+            iterator.close()
+        canonical = json.dumps({"schema": schema, "rows": sorted(fingerprints)},
+                               ensure_ascii=False, sort_keys=True, default=str)
+        return {"sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+                "count": len(fingerprints), "source": "milvus_schema_and_vector_text_snapshot",
+                "chunk_ids": sorted(key for key, _ in fingerprints)}
+
 
     def ensure_collection(self) -> None:
         """集合不存在时创建；已存在时校验维度和 BM25 字段。

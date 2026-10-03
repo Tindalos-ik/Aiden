@@ -577,34 +577,20 @@ DeepSeek 携带 `tools` 的思考模式请求要求回传既有 `reasoning_conte
 
 ### 数据集、策略与指标口径
 
-`backend/evals/customer_rag_v1.jsonl` 有 15 道人工标注题：12 道有答案、3 道库外题。每行记录问题 ID、原句、`type`、`difficulty`、目标来源文件和章节（`ground_truth`）以及人工核对用的 `answer_facts`。问题类型覆盖具体型号、口语问法、政策边界、多证据和库外拒答；难度为 easy、medium、hard。多证据题可有两个目标章节，库外题没有目标章节。
+`backend/evals/customer_rag_v1.jsonl` 现在保存 `customer_rag_v2` 的扩展题集，按型号/政策语义簇隔离 validation 与 holdout；保留原 `type`、`answer_facts` 与 `ground_truth` 字段，并标注可接受回答、应拒答、拒答条件和证据要求。文件名未改不表示仍是旧的 15 题数据集。旧报告 `backend/evals/reports/customer_rag_v1.md` 与 JSON 是历史快照，不是新题集或新指标的基线，也未因此重写。
 
-`backend/evals/run_customer_rag.py` 对每道题依次运行 `dense`、`bm25`、`hybrid`、`hybrid_rerank`，每种策略最多保留 10 条有效召回，组成 60 条逐题结果。前两种分别测单路 dense 和 BM25，`hybrid` 测 RRF 融合，`hybrid_rerank` 在融合后加本地 BGE 精排。检索都经同一 `semantic_search` 的 MySQL 回表过滤；这组结果用于比较召回与生成表现，不能把不同策略的原始分数直接比较。
+评估明确分成不同路径：
 
-| 指标 | 计算范围与含义 |
-| --- | --- |
-| Recall@1 / @5 / @10 | 只统计可回答题。目标章节在前 K 条中出现的比例；多证据题按每个目标章节分别计数，再对题目取平均。命中要求召回 `source_path` 的最后文件名与标注文件名相同，且标注章节包含在 `section_path` 中。 |
-| MRR | 只统计可回答题。取最先命中的目标章节名次的倒数，完全未命中为 0；多证据题也只看最先命中的那一条。 |
-| Faithfulness | 统计有生成答案及模型评审结果的题。模型逐条判断答案里的可验证事实是否由本次召回证据直接支持；纯拒答且未增加事实可以得 1。它不测答案完整性、业务事实真伪或跨来源冲突。 |
-| 库外拒答率 | 只统计 `ground_truth` 为空的题。脚本检查生成答案是否包含“无法核实”“无法确认”“证据不足”“不能保证”等词，再对 0/1 取平均；这是词面规则，不等于人工判断的拒答质量。 |
+- **离线检索实验**：`run_customer_rag.py --mode offline` 对题集分别运行 `dense`、`bm25`、`hybrid`、`hybrid_rerank`，比较策略召回与生成，不等同于客服在线图。
+- **在线工作流评估**：`--mode online` 执行真实客服图 `assess_knowledge()` / `generate()` 与配置的工具调用；独立工作流题集、退款和人工状态前置条件、只读默认、阈值校准及隔离写入边界见[客服 RAG 评估说明](评估说明.md)。
 
-报告的 `strategies.*.overall`、`by_type`、`by_difficulty` 用同一口径汇总，并保留每桶的题数、可回答题数。`cases` 对每道题和每种策略保存召回排名、答案、Recall、MRR、Faithfulness、评审理由及拒答标记。Faithfulness 来自当前配置的对话模型，是模型评审结果；结合 `answer_facts` 和原始证据人工复核，尤其注意来源冲突与具体时效承诺。初始基线数字与解读见 [`backend/evals/reports/customer_rag_v1.md`](../backend/evals/reports/customer_rag_v1.md)；页面读取的同目录 JSON 可由手动评估更新，二者之后可能不同。初始快照使用 Milvus 2.5 `knowledge_bm25` 和 512 维 `bge-small-zh-v1.5` dense 模型，没有测试 1024 维 BGE-M3 dense 模型，样本量也不足以外推线上胜率。
+新报告 `schema_version=2` 记录 `dataset_version`、hash、语料/集合与配置模型信息，以及 split、答案完整性、误拒答、应拒未拒、延迟、token、独立 judge 与人工抽查状态。旧 15 题结果的 Recall/MRR/Faithfulness 只能说明那次特定集合、模型和小样本快照；它未测 BGE-M3，不能外推线上胜率。四策略的 Recall/MRR 只适用于其离线检索任务，不能作为在线业务表现的替代。
 
-### 运行、重算与页面核对
+### 运行与页面
 
-在 `backend` 目录配置可访问的 MySQL、embedding 服务、Milvus 2.5+ 集合、重排模型及生成模型后运行完整评估；`--collection` 可把评估指向独立集合，不修改在线默认集合。
+详见[客服 RAG 评估说明](评估说明.md)，包括 CLI 参数、独立评审配置、validation 阈值校准、holdout 留出、人工抽查和知识导入边界。离线与在线任务分别由 `/api/rag/jobs/evaluate` 和 `/api/rag/jobs/evaluate-online` 启动；在线工作流报告通过 `/api/rag/evals/customer-workflow-v2` 读取。兼容读取 `/api/rag/evals/customer-rag-v1` 优先返回 v2 offline 报告；只有尚无 v2 报告时才回传旧报告，并显式标记 `schema_version=1`、`legacy=true`，页面应保留可读性但提示其为历史且不含新指标。
 
-```powershell
-# 在 backend 目录，临时指向独立的 Milvus 2.5+ 评估实例
-$env:MILVUS_URI = 'http://127.0.0.1:19531'
-.\.venv\Scripts\python.exe -m evals.run_customer_rag --collection knowledge_bm25 --report evals/reports/customer_rag_v1.json
-```
-
-只需检索指标时加 `--retrieval-only`：报告中 `answer`、`faithfulness`、`judge_reason`、`faithfulness_judge` 为 `null`，库外题的 `refused` 也为 `null`；页面应显示未生成、未评审，而非零分。若只修正标注、问题正文和召回列表未变，可用 `--recompute-from evals/reports/customer_rag_v1.json` 从保存的召回重算检索指标；该模式保留旧答案及评审，不会再次请求生成模型。
-
-员工以 remote 模式登录后，从 `/staff/rag` 进入 `/staff/evals`。点击“运行四策略评估”会通过员工鉴权的 `POST /api/rag/jobs/evaluate` 启动后台任务；服务器使用当前配置的知识库、固定的 `customer_rag_v1.jsonl` 题集，依次运行四种策略的检索、生成与模型评审。任务复用建库控制台的跨进程锁，同一时间只接受一项控制台任务；前端每 2 秒读取 `GET /api/rag/jobs` 显示已完成题数和失败状态。运行较久时页面仍显示上一份报告，失败时也保留旧报告。任务完成后先写同目录临时文件，再原子替换 `backend/evals/reports/customer_rag_v1.json`；页面自动重新请求员工鉴权的 `GET /api/rag/evals/customer-rag-v1`，无需重启服务。“刷新报告”只重新读取文件，不启动评估；命令行输出到其他路径的报告不会显示在该页面。
-
-页面展示四策略总体指标和 `by_type` 分桶对比；按题型、难度筛选 15 道题后，可逐题核对 ground truth、答案要点、四策略召回排名、生成答案、拒答和 Faithfulness 理由。目标章节按上述文件名与章节路径规则标亮。新报告记录 `generated_at`；旧版报告缺少该字段时页面显示“历史报告未记录”。任务进度只保存在当前 API 进程内，服务重启后进度会消失，但已经完成写入的报告仍保留。手动评估不会自动新增或修改测试题，也不会通过线上聊天编排链路验证低置信度入池。
+题集 gold 引用的是实际知识文件章节，不代表这些文件均在目标集合中。当前可复现 remote 演示知识清单仍只导入 `商品FAQ.md`；扩充型号、配送等离线实验须在独立语料环境准备，不能自动扩大或改写现有知识库。缺少来源必须按报告的来源覆盖信息说明，不能伪称在线已验收。
 
 ## 历史对话挖掘
 

@@ -900,15 +900,15 @@ def _route_request(
     return routed
 
 
-def build_support_graph():
-    """构建显式识别、服务端路由、白名单工具调用和最终回答保存流程。"""
+def build_support_graph(*, evaluation: dict[str, Any] | None = None):
+    """构建真实客服图；评估只替换历史/保存边界，默认禁止业务写工具。"""
     kwargs: dict[str, Any] = {
         "model": settings.openai_model,
         "api_key": settings.openai_api_key,
         "temperature": 0.2,
         "streaming": True,
         # 兼容接口的流式响应需要显式请求 usage，回调才能拿到准确的 token 消耗。
-        "stream_usage": settings.langfuse_enabled,
+        "stream_usage": settings.langfuse_enabled or evaluation is not None,
         "max_tokens": 800,
     }
     if settings.openai_base_url:
@@ -933,9 +933,11 @@ def build_support_graph():
 
     async def load_context(state: SupportState) -> dict[str, Any]:
         """加载归属当前用户的有限历史，并在模型 await 前关闭 MySQL Session。"""
-        rows = recent_messages(
-            state["conversation_id"], state["user_id"], state["assistant_message_id"]
-        )
+        rows = ([*evaluation.get("history", []),
+                 {"role": "user", "content": evaluation["query"]}]
+                if evaluation is not None else recent_messages(
+                    state["conversation_id"], state["user_id"], state["assistant_message_id"]
+                ))
         history = [
             msg
             for row in rows
@@ -1153,6 +1155,14 @@ def build_support_graph():
             return {"allowed_tools": [], "direct_reply": _TOOL_REJECTED_REPLY}
 
         name = allowed_names[0]
+        if evaluation is not None and name in {"submit_after_sale", "create_ticket"}:
+            if not evaluation.get("allow_writes"):
+                evaluation.setdefault("blocked_tools", []).append(name)
+                return {"allowed_tools": [], "direct_reply": "评估安全边界：业务写入未授权。"}
+            if (not evaluation.get("isolated_environment")
+                    or state["user_id"] != evaluation.get("isolated_account")
+                    or not state["user_id"].startswith("eval_")):
+                raise ValueError("写评估必须使用明确隔离的环境和 eval_ 账户")
         args: dict[str, Any] = {}
         semantic = state.get("semantic_result", {})
         entities = semantic.get("entities", {}) if isinstance(semantic, dict) else {}
@@ -1235,6 +1245,9 @@ def build_support_graph():
         payload = _faq_tool_payload(state.get("messages", []), state.get("request_tool_start", 0))
         if payload is None:
             return {}
+        await adispatch_custom_event(
+            "support_progress", {"stage": "validation", "message": "正在核验证据是否足以回答"}
+        )
         original = (
             state["requests"][state["request_index"]]["completed_question"].strip()
             or _latest_user_text(state.get("messages", []))
@@ -1245,9 +1258,6 @@ def build_support_graph():
                 "direct_reply": _KNOWLEDGE_REFUSAL,
                 "citations": [],
                 "request_low_confidence": {
-        await adispatch_custom_event(
-            "support_progress", {"stage": "validation", "message": "正在核验证据是否足以回答"}
-        )
                     "original_question": original,
                     "entrypoint": entrypoint,
                     "reason": reason,
@@ -1267,10 +1277,12 @@ def build_support_graph():
             and math.isfinite(item["score"])
         ]
         highest_score = max(scores) if scores else None
-        if highest_score is not None and highest_score < rag_settings.online_min_rerank_score:
+        threshold = (evaluation.get("threshold", rag_settings.online_min_rerank_score)
+                     if evaluation is not None else rag_settings.online_min_rerank_score)
+        if highest_score is not None and highest_score < threshold:
             return refuse(
                 "retrieval_low_confidence",
-                f"最高重排分数 {highest_score:.3f} 低于阈值 {rag_settings.online_min_rerank_score:.2f}",
+                f"最高重排分数 {highest_score:.3f} 低于阈值 {threshold:.2f}",
             )
 
         question = original
@@ -1417,6 +1429,10 @@ def build_support_graph():
                     if settings.langfuse_enabled else None
                 ))
                 reply = _content_as_text(response.content).strip()
+                # 引用检查发生在草稿生成后；进度只带阶段，不泄露尚未通过检查的文字。
+                await adispatch_custom_event(
+                    "support_progress", {"stage": "validation", "message": "正在核验回答引用"}
+                )
                 if local_citations:
                     used_numbers = {int(value) for value in re.findall(r"\[(\d+)\]", reply)}
                     permitted = {offset + int(row["number"]) for row in local_citations}
@@ -1429,10 +1445,6 @@ def build_support_graph():
                             **snapshot,
                         })
                     else:
-                # 引用检查发生在草稿生成后；进度只带阶段，不泄露尚未通过检查的文字。
-                await adispatch_custom_event(
-                    "support_progress", {"stage": "validation", "message": "正在核验回答引用"}
-                )
                         all_citations.extend(
                             {**row, "number": offset + int(row["number"])}
                             for row in local_citations if offset + int(row["number"]) in used_numbers
@@ -1597,6 +1609,8 @@ def build_support_graph():
         answer = state["answer"]
         if not answer:
             raise RuntimeError("模型没有生成可显示的回答。")
+        if evaluation is not None:
+            return {"answer": answer, "handoff_committed": False}
         handoff_committed = finish_assistant_message(
             state["assistant_message_id"],
             state["conversation_id"],

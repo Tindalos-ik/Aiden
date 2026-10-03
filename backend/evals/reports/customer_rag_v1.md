@@ -36,9 +36,11 @@ Recall 与 MRR 只统计 12 道可回答题；Recall@K 是目标章节在前 K �
 - 语料有跨来源冲突：`product-faq.md` 写未满 99 元运费为 10 元，`billing-shipping.md` 写为 6 元；本次 Faithfulness 不检测这种冲突。`退货政策.md` 也含退款时效参考范围，而生成提示禁止承诺具体到账时间，评审需结合逐题答案人工复核。
 - 原始生成答案和 Faithfulness 评审保留在 JSON 中。三道政策题曾误标为未入库的 `returns-policy.md`；修正为实际已入库的 `退货政策.md` 后，只用保存的召回列表重算检索指标，没有重跑生成模型。重算命令见下文。
 
-## 复现
+## 历史运行记录（当前勿执行）
 
-在 `backend` 目录配置可访问的 MySQL、embedding 服务、Milvus 2.5+ 集合和模型后，运行完整评估：
+以下记录对应本报告当时的 15 题 `customer_rag_v1` 题集、历史 runner 与 `customer_rag_v1.json`；仅匹配那套旧代码和题集版本时才可复现。当前 `customer_rag_v1.jsonl` 已更新为 `customer_rag_v2` 题目，新 runner 会拒绝用不同题集 hash 对旧报告重算，因此**不要在当前 checkout 执行下面命令，也不要把旧 JSON 作为新基线覆写**。新版离线/在线运行、校准与人工抽查请看[客服 RAG 评估说明](../../../docs/评估说明.md)。
+
+当时使用的原运行参数（留作历史记录）：
 
 ```powershell
 $env:MILVUS_URI = 'http://127.0.0.1:19531'
@@ -47,7 +49,7 @@ $env:HF_HOME = 'D:\hf-cache'
 .\.venv\Scripts\python.exe -m evals.run_customer_rag --collection knowledge_bm25 --report evals/reports/customer_rag_v1.json
 ```
 
-仅在标注变化、问题正文及召回不变时，可从已有报告重算检索指标，并保留已有答案与评审：
+当时从已保存报告重算检索指标的参数（当前 runner 会因题集版本/hash 不匹配而拒绝，不要执行）：
 
 ```powershell
 .\.venv\Scripts\python.exe -m evals.run_customer_rag --recompute-from evals/reports/customer_rag_v1.json --report evals/reports/customer_rag_v1.json

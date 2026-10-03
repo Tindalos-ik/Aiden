@@ -306,8 +306,23 @@ export interface RagEvalMetrics {
   'recall@10': number | null;
   mrr: number | null;
   faithfulness: number | null;
+  completeness?: number | null;
+  false_refusal?: number | null;
+  unsafe_answer?: number | null;
+  latency_ms?: number | null;
+  intent_correct?: number | null;
+  tool_correct?: number | null;
+  refund_correct?: number | null;
+  handoff_correct?: number | null;
+  blocked_tool_correct?: number | null;
   unanswerable_refusal_rate: number | null;
+  scored_count?: number;
+  preconditions_unmet_count?: number;
+  tokens?: { input: number | null; output: number | null; total: number | null };
+  judge_tokens?: { input: number | null; output: number | null; total: number | null };
+  judge_latency_ms?: number | null;
 }
+ 
 
 export interface RagEvalCase {
   strategy: string;
@@ -315,28 +330,105 @@ export interface RagEvalCase {
   query: string;
   type: string;
   difficulty: string;
-  ground_truth: Array<{ source_path: string; section: string }>;
+  dataset_version?: string;
+  split?: 'validation' | 'holdout';
+  semantic_cluster?: string;
+  ground_truth: Array<{ source_path: string; section: string; authority_note?: string }>;
   answer_facts: string[];
-  retrieved: Array<{ chunk_id: string; source_path: string | null; section_path: string; score: number }>;
+  acceptable_answers?: string[];
+  refusal_conditions?: string[];
+  evidence_requirements?: string[];
+  expected_refusal?: boolean;
+  retrieved: Array<{ chunk_id?: string; source_path: string | null; section_path: string; score: number | null; content?: string }>;
   'recall@1': number | null;
   'recall@5': number | null;
   'recall@10': number | null;
   mrr: number | null;
   answer: string | null;
   faithfulness: number | null;
+  completeness?: number | null;
+  false_refusal?: number | null;
+  unsafe_answer?: number | null;
+  latency_ms?: number | null;
+  tokens?: { input: number | null; output: number | null; total: number | null };
+  judge_tokens?: { input: number | null; output: number | null; total: number | null };
   judge_reason: string | null;
   refused: 0 | 1 | null;
-}
+  manual_review?: { status: 'pending' | 'accepted' | 'disagreed'; reviewer?: string; notes?: string };
+  actual_intents?: string[];
+  actual_tools?: string[];
+  refund_stage?: string | null;
+  handoff?: boolean;
+  handoff_committed?: boolean;
+  node_trace?: string[];
+  precondition_source?: string;
+  preconditions?: {
+    status: 'not_required' | 'missing_account' | 'account_not_found' | 'order_not_found' | 'satisfied';
+    account_exists?: boolean;
+  };
+  persistence_disabled?: boolean;
+  intent_correct?: number | null;
+  tool_correct?: number | null;
+  refund_correct?: number | null;
+  blocked_tool_correct?: number | null;
+  judge_latency_ms?: number | null;
+  judge_evidence?: Array<Record<string, unknown>>;
+  handoff_correct?: number | null;
+  blocked_tools?: string[];
+  workflow?: { expected_intents?: string[]; expected_tools?: string[]; expected_refund_stage?: string | null; expected_handoff?: boolean };
 
+}
 export interface RagEvalReport {
+  schema_version?: 1 | 2;
+  legacy?: boolean;
+  evaluation_mode?: 'offline_retrieval' | 'online_workflow';
+  execution_environment?: 'real' | 'fixture' | 'historical_unverified';
   dataset: string;
   collection: string;
   generated_at?: string;
   faithfulness_judge: string | null;
+  metadata?: {
+    effective_collection_sources?: string[];
+    effective_collection_chunks?: number;
+    dataset_version?: string;
+    dataset_sha256?: string;
+    corpus_version?: string | null;
+    corpus_version_label?: string | null;
+    corpus_manifest?: { sha256: string; count: number; chunks?: Array<{ id: string; source_path: string; section_path: string; content_hash: string; embedding_fingerprint: string; actual_content_sha256: string }>; sources: string[]; source: string };
+    collection?: string;
+    collection_version?: string | null;
+    collection_manifest?: { sha256: string; count: number; source: string; chunk_ids?: string[] };
+    embedding_model?: string;
+    embedding_dimension?: number;
+    generation_model?: string | null;
+    judge_model?: string | null;
+    judge_independent?: boolean | null;
+    reranker_model?: string | null;
+    online_threshold?: number | null;
+    handoff_boundary?: string;
+    model_metadata_source?: string;
+    retrieved_sources?: string[];
+    expected_sources?: string[];
+    unobserved_sources?: string[];
+    corpus_coverage_basis?: string;
+    persistence_disabled?: boolean;
+    allow_writes?: boolean;
+    isolated_environment?: string | null;
+  };
   strategies: Record<string, {
     overall: RagEvalMetrics;
     by_type: Record<string, RagEvalMetrics>;
     by_difficulty: Record<string, RagEvalMetrics>;
+    by_split?: Record<string, RagEvalMetrics>;
   }>;
+  workflows?: RagEvalMetrics | null;
+  threshold_selection?: {
+    validation_count: number;
+    holdout_count: number;
+    candidates: Array<{ threshold: number; loss: number; summary: RagEvalMetrics }>;
+    selected_threshold: number;
+    validation: RagEvalMetrics;
+    holdout: RagEvalMetrics;
+  } | null;
   cases: RagEvalCase[];
 }

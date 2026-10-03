@@ -27,7 +27,7 @@ from app.persistence.mysql import knowledge as knowledge_repo
 from app.services.rag import indexing
 from app.services.rag.runtime_control import AlreadyRunningError, MiningRuntimeControl, default_lock_path
 
-_JOB_TYPES = {"import-markdown", "import-markdown-all", "import-faq", "mine", "vectorize", "cleanup", "evaluate", "low-confidence-review"}
+_JOB_TYPES = {"import-markdown", "import-markdown-all", "import-faq", "mine", "vectorize", "cleanup", "evaluate", "evaluate-online", "low-confidence-review"}
 _lock = Lock()
 _jobs: list[dict[str, Any]] = []
 _process: subprocess.Popen[bytes] | None = None
@@ -403,17 +403,19 @@ def _execute_job(kind: str, job: dict[str, Any], control: MiningRuntimeControl, 
             result = asyncio.run(organize(on_progress=lambda note: _set_progress(job, note)))
         elif kind == "vectorize":
             result = indexing.vectorize_pending()
-        elif kind == "evaluate":
+        elif kind in {"evaluate", "evaluate-online"}:
             # 与建库任务共用锁，避免控制台在评估期间改动知识块和向量。
             from evals.run_customer_rag import run, write_report
 
             report = run(
                 collection=rag_settings.milvus_collection,
+                mode="online" if kind == "evaluate-online" else "offline",
                 on_progress=lambda done, total, strategy, case_id: _set_progress(
                     job, f"已完成 {done}/{total}：{strategy} · {case_id}"
                 ),
             )
-            write_report(report, BACKEND_DIR / "evals" / "reports" / "customer_rag_v1.json")
+            filename = "customer_workflow_v2.json" if kind == "evaluate-online" else "customer_rag_v2.json"
+            write_report(report, BACKEND_DIR / "evals" / "reports" / filename)
             strategy_count = len(report["strategies"])
             result = {"questions": len(report["cases"]) // strategy_count,
                       "strategies": strategy_count, "generatedAt": report["generated_at"]}

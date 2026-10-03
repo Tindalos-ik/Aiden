@@ -440,6 +440,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .rag-status-tags { margin-bottom: 12px; }
 @media (max-width: 850px) { .rag-grid { grid-template-columns: 1fr; } .rag-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 580px) { .rag-main { width: calc(100% - 24px); padding-top: 18px; } .rag-heading { flex-direction: column; } .rag-file-select { min-width: 180px; max-width: 100%; } .rag-config { grid-template-columns: 1fr; } }
+.eval-main { grid-template-columns: minmax(0, 1fr); }
 .eval-main .ant-card-body { min-width: 0; }
 .eval-bucket-value { display: inline-block; line-height: 1.65; white-space: nowrap; }
 .eval-truth { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }

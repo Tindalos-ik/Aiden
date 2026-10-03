@@ -111,12 +111,26 @@ def retry_ingestion(review_id: str) -> dict:
 
 @router.get("/evals/customer-rag-v1")
 def customer_rag_v1_report(response: Response) -> dict:
-    """读取最近一次完整报告；评估任务原子替换文件后立即可见。"""
-    if not _EVAL_REPORT.is_file():
-        raise HTTPException(status_code=404, detail="客服 RAG 评估报告不存在")
+    """优先新离线报告；旧文件仅加历史标记，不能冒充当前题集基线。"""
+    current = _EVAL_REPORT.with_name("customer_rag_v2.json")
+    path = current if current.is_file() else _EVAL_REPORT
+    return _read_eval_report(path, response)
+
+def _read_eval_report(path: Path, response: Response) -> dict:
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="评估报告不存在")
     response.headers["Cache-Control"] = "no-store"
-    with _EVAL_REPORT.open(encoding="utf-8") as report_file:
-        return json.load(report_file)
+    with path.open(encoding="utf-8") as report_file:
+        report = json.load(report_file)
+    if "schema_version" not in report:
+        report.update(schema_version=1, legacy=True, evaluation_mode="offline_retrieval",
+                      execution_environment="historical_unverified")
+    return report
+
+
+@router.get("/evals/customer-workflow-v2")
+def customer_workflow_report(response: Response) -> dict:
+    return _read_eval_report(_EVAL_REPORT.with_name("customer_workflow_v2.json"), response)
 
 
 @router.get("/overview")
