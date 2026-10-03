@@ -114,8 +114,15 @@ function citationsFrom(value: unknown): Citation[] | undefined {
     && typeof item.sectionPath === 'string');
 }
 
+const streamEventTypes: Record<StreamEvent['type'], true> = {
+  start: true, progress: true, tool_status: true, order_card: true, delta: true,
+  citations: true, handoff: true, done: true, error: true,
+};
+const progressStages: Record<NonNullable<StreamEvent['stage']>, true> = {
+  recognition: true, query: true, retrieval: true, validation: true,
+};
+
 function normalizedEvent(raw: RawSseEvent): StreamEvent | null {
-  const known = new Set<StreamEvent['type']>(['start', 'tool_status', 'order_card', 'delta', 'citations', 'handoff', 'done', 'error']);
   let payload: Record<string, unknown> = {};
   try {
     const parsed: unknown = JSON.parse(raw.data);
@@ -125,15 +132,19 @@ function normalizedEvent(raw: RawSseEvent): StreamEvent | null {
     payload = { text: raw.data };
   }
   const candidate = typeof payload.type === 'string' ? payload.type : raw.event;
-  if (!known.has(candidate as StreamEvent['type'])) return null;
+  if (!Object.prototype.hasOwnProperty.call(streamEventTypes, candidate)) return null;
   const type = candidate as StreamEvent['type'];
   const order = (payload.order ?? payload.orderCard ?? payload.card) as OrderCard | undefined;
   const conversation = (payload.conversation ?? payload.data) as Conversation | undefined;
+  const stage = payload.stage;
+  if (type === 'progress' && (typeof stage !== 'string' || !Object.prototype.hasOwnProperty.call(progressStages, stage) || typeof payload.message !== 'string')) return null;
   return {
     type,
     messageId: String(payload.messageId ?? payload.assistantMessageId ?? '') || undefined,
     text: typeof payload.text === 'string' ? payload.text : typeof payload.delta === 'string' ? payload.delta : undefined,
     status: typeof payload.status === 'string' ? payload.status : typeof payload.message === 'string' && type === 'tool_status' ? payload.message : undefined,
+    stage: type === 'progress' ? stage as StreamEvent['stage'] : undefined,
+    message: type === 'progress' ? payload.message as string : undefined,
     order,
     error: typeof payload.error === 'string' ? payload.error : typeof payload.message === 'string' && type === 'error' ? payload.message : undefined,
     conversation,

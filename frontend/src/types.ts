@@ -102,11 +102,16 @@ export interface Message {
   citations?: Citation[];
 }
 
+/** remote 进度仅用于瞬态界面；delta 仅承载服务端完成校验并落库后的整轮回答。 */
+export type ProgressStage = 'recognition' | 'query' | 'retrieval' | 'validation';
+
 export interface StreamEvent {
-  type: 'start' | 'tool_status' | 'order_card' | 'delta' | 'citations' | 'handoff' | 'done' | 'error';
+  type: 'start' | 'progress' | 'tool_status' | 'order_card' | 'delta' | 'citations' | 'handoff' | 'done' | 'error';
   messageId?: string;
   text?: string;
   status?: string;
+  stage?: ProgressStage;
+  message?: string;
   order?: OrderCard;
   error?: string;
   conversation?: Conversation;

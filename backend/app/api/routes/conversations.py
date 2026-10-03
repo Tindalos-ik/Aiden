@@ -11,7 +11,7 @@ from app.api.deps import current_actor
 from app.api.schemas import (
     CreateConversationRequest, HumanMessageRequest, MessageFeedbackRequest, StreamMessageRequest,
 )
-from app.api.sse import sse_event
+from app.api.sse import progress_payload, sse_event
 from app.persistence.mysql.chat import (
     create_conversation as create_mysql_conversation,
     create_message_pair,
@@ -100,8 +100,8 @@ async def stream_message(
 ) -> StreamingResponse:
     """先原子落库用户消息和助手占位行，再在无 Session 的状态下生成 SSE。
 
-    start 的 messageId 是 MySQL 助手行主键；delta 的 text 为每次新增文本；
-    模型失败或配置缺失使用 error 事件，正常结束使用 done 事件，供 remote.ts 直接解析。
+    start 的 messageId 是 MySQL 助手行主键；progress 只显示实际阶段，delta 只含
+    全轮校验并落库后的答案。error/done 是互斥终态；断线不发送终态，只收尾数据库。
     """
     conversation = get_owned_conversation(conversation_id, actor["id"])
     if not conversation:
@@ -155,7 +155,11 @@ async def stream_message(
                     "user_id": actor["id"],
                 }
                 async for event in graph.astream_events(initial_state, version="v2"):
-                    if event.get("event") == "on_chain_end" and event.get("name") == "save_answer":
+                    progress = progress_payload(event)
+                    if progress is not None:
+                        yield sse_event("progress", progress)
+                    if (event.get("event") == "on_chain_end" and event.get("name") == "save_answer"
+                            and event.get("metadata", {}).get("langgraph_node") == "save_answer"):
                         output = event.get("data", {}).get("output", {})
                         answer = output.get("answer") if isinstance(output, dict) else None
                         if isinstance(answer, str):

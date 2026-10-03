@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urlencode
 from uuid import uuid4
 
+from langchain_core.callbacks.manager import adispatch_custom_event
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -971,6 +972,9 @@ def build_support_graph():
         """先按本轮原话识别；格式异常重试一次，指代不明时再借助历史。"""
         current_message = HumanMessage(content=_latest_user_text(state["messages"]))
         current_only = _structured_messages([current_message], MULTI_REQUEST_PROMPT, SupportRequests)
+        await adispatch_custom_event(
+            "support_progress", {"stage": "recognition", "message": "正在识别您的服务诉求"}
+        )
         requests: SupportRequests | None = None
         for attempt in range(2):
             messages = current_only
@@ -1241,6 +1245,9 @@ def build_support_graph():
                 "direct_reply": _KNOWLEDGE_REFUSAL,
                 "citations": [],
                 "request_low_confidence": {
+        await adispatch_custom_event(
+            "support_progress", {"stage": "validation", "message": "正在核验证据是否足以回答"}
+        )
                     "original_question": original,
                     "entrypoint": entrypoint,
                     "reason": reason,
@@ -1422,6 +1429,10 @@ def build_support_graph():
                             **snapshot,
                         })
                     else:
+                # 引用检查发生在草稿生成后；进度只带阶段，不泄露尚未通过检查的文字。
+                await adispatch_custom_event(
+                    "support_progress", {"stage": "validation", "message": "正在核验回答引用"}
+                )
                         all_citations.extend(
                             {**row, "number": offset + int(row["number"])}
                             for row in local_citations if offset + int(row["number"]) in used_numbers

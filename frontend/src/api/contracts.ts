@@ -11,7 +11,7 @@ export interface AidenApi {
   submitFeedback(conversationId: string, messageId: string, rating: 'satisfied' | 'unsatisfied'): Promise<{ rating: 'satisfied' | 'unsatisfied' }>;
   listStaffMessages(conversationId: string): Promise<Message[]>;
   sendHumanMessage(conversationId: string, text: string): Promise<Message>;
-  /** citations SSE 事件的 payload 为 { citations: Citation[] }，编号与回答中的 [n] 一致。 */
+  /** remote 进度仅用于瞬态界面；delta 是服务端完成校验并落库后的整轮回答，引用编号与正文中的 [n] 对应。 */
   sendMessageStream(
     conversationId: string,
     text: string,

@@ -281,32 +281,46 @@ cd ..
 
 Conversation 建议包含 `id`、`userId`、`userName`（队列展示用，可选）、`subject`、`status`（`bot | waiting | staff | closed`）、`createdAt`、`updatedAt`、`assignedStaffId`、`assignedStaffName`、`lastMessagePreview`。时间用 ISO 8601 字符串。Message 包含 `id`、`conversationId`、`role`（`user | assistant | staff | system`）、`content`、`createdAt`、`status`（`complete | streaming | error | stopped`），订单回答可提供 `orderCard` 与 `toolStatuses`。`orderCard` 包含 `orderId`、`product`、`amount`、`status`（`物流中 | 已签收 | 退款中`）、`logistics`，以及可选的 `carrier`、`updatedAt`。
 
-SSE 至少支持以下事件。每个事件一行 `event:`，数据放在一行或多行 `data:` 中；多行 data 会按 SSE 规则拼接后解析。也可以在 JSON 中用 `type` 指定事件类型。
+remote SSE 的阶段事件是 `progress`，data 必须包含 `stage` 与中文 `message`；stage 只能是 `recognition | query | retrieval | validation`。事件只表示真实执行：查询阶段来自实际工具启动（缓存命中而跳过的工具不虚报），检索/校验阶段对应实际证据评估与最终引用检查。进度仅显示在当前会话的瞬态提示中，不写入消息正文或工具结果。
+
+远端正常流顺序为 `start → progress* → delta → citations? → handoff? → done`；允许重复 `progress`，`error` 是独立终态。远端 `delta` 只在整轮回答通过证据和引用检查并落库后发送，且是整轮完整正文，不是模型草稿或 token 片段。
 
 ```text
 event: start
 data: {"messageId":"assistant-message-id"}
 
-event: tool_status
-data: {"status":"正在查询订单…"}
+event: progress
+data: {"stage":"recognition","message":"正在识别本轮诉求…"}
 
-event: order_card
-data: {"order":{"orderId":"AD-...","product":"商品","amount":269,"status":"物流中","logistics":"运输中"}}
+event: progress
+data: {"stage":"validation","message":"正在检查证据与引用…"}
 
 event: delta
-data: {"text":"订单正在"}
+data: {"text":"已经完成校验并保存的整轮回答。"}
 
-event: handoff
-data: {}
+event: citations
+data: {"citations":[]}
 
 event: done
 data: {}
+
+```
+
+异常流以独立 `error` 终态结束，不与正常流的 `done` 连发，例如：
+
+```text
+event: start
+data: {"messageId":"assistant-message-id"}
 
 event: error
 data: {"error":"订单服务暂时不可用"}
 ```
 
-解析器支持 UTF-8 分片、LF/CRLF/CR 行结束、多行 data、注释行、分片中的未完成行，以及流结束时最后一个没有空行终止的事件。建议服务端在客户端断开流时也将助手消息状态落为 `stopped`，以便刷新后保持一致。转人工后用户仍可在原会话继续留言：用户侧 `POST /api/conversations/{id}/messages` 在 `waiting`/`staff` 阶段写入留言（`backend/app/api/routes/conversations.py` 中的 `send_user_human_message()`），用户页输入框保持可用，`frontend/src/pages/UserWorkspace.tsx` 的 `send()` 在这两个状态下改调 `api.sendHumanMessage`。
+mock 不模拟上述真实阶段：它保留本地演示的 `tool_status`、`order_card` 和分段 `delta` 语义。它们不代表远端工具进度或经过后端证据校验的输出。
+
+用户点击“停止生成”会取消当前 remote 请求；断线或无 `done`/`error` 的 EOF 也按未完成处理。此类中断没有终止 SSE 事件，服务端仅将尚未完成的 `streaming` 助手消息记为 `stopped`，已落库的 `complete` 不降级。remote 错误或停止后，用户可在原会话手动重试最新一轮；重试复用原文与 `clientMessageId`，依赖服务端幂等配对，不重复插入用户消息。历史刷新恢复 `complete` 后清除重试入口；相同 key 的已完成回答直接重放，不再发送执行阶段 `progress`。不会自动重试，也不会静默切换到 mock。`done` 或 `error` 结束本轮界面状态，但解析器仍读取到 reader EOF；随后断线不覆盖已收到的终态。
+
+解析器支持 UTF-8 分片、LF/CRLF/CR 行结束、多行 data、注释行、分片中的未完成行，以及流结束时最后一个没有空行终止的事件。转人工后用户仍可在原会话继续留言：用户侧 `POST /api/conversations/{id}/messages` 在 `waiting`/`staff` 阶段写入留言（`backend/app/api/routes/conversations.py` 中的 `send_user_human_message()`），用户页输入框保持可用，`frontend/src/pages/UserWorkspace.tsx` 的 `send()` 在这两个状态下改调 `api.sendHumanMessage`。
 
 ## 代码组织
 

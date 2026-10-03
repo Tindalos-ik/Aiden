@@ -9,6 +9,7 @@ import { PageHeader, StatusPill } from '../components/Common';
 import type { Actor, Citation, Conversation, Message as ChatMessageType, OrderCard, StreamEvent } from '../types';
 
 type AnswerFeedback = 'satisfied' | 'unsatisfied';
+type RetryTurn = { conversationId: string; text: string; clientMessageId: string; assistantId: string };
 
 function FeedbackControls({ item }: { item: ChatMessageType }) {
   const queryClient = useQueryClient();
@@ -169,12 +170,16 @@ export function UserWorkspace() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { conversationId } = useParams();
+  const activeConversationIdRef = useRef(conversationId);
+  activeConversationIdRef.current = conversationId;
   const [draft, setDraft] = useState('');
   const [mobileListOpen, setMobileListOpen] = useState(false);
   const [streamingText, setStreamingText] = useState('');
+  const [retryTurn, setRetryTurn] = useState<RetryTurn | null>(null);
   const [humanSending, setHumanSending] = useState(false);
   const humanSendingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  const activeRequestRef = useRef<object | null>(null);
   const actorQuery = useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: Infinity });
   const actor = actorQuery.data as Actor | undefined;
   const conversationQuery = useQuery({
@@ -188,6 +193,12 @@ export function UserWorkspace() {
     refetchInterval: apiMode === 'remote' ? 3_000 : false,
   });
   const messages = messagesQuery.data ?? [];
+  useEffect(() => {
+    const completedRetry = retryTurn;
+    if (!completedRetry || completedRetry.conversationId !== conversationId
+      || !messages.some((item) => item.id === completedRetry.assistantId && item.role === 'assistant' && item.status === 'complete')) return;
+    setRetryTurn((current) => current?.conversationId === completedRetry.conversationId && current.clientMessageId === completedRetry.clientMessageId ? null : current);
+  }, [conversationId, messages, retryTurn]);
 
   const createConversation = useMutation({
     mutationFn: api.createConversation,
@@ -212,16 +223,26 @@ export function UserWorkspace() {
     if (!conversationId && !conversationQuery.isLoading && conversations.length) navigate(`/app/${conversations[0].id}`, { replace: true });
     else if (conversationId && !conversationQuery.isLoading && conversations.length && !conversations.some((item) => item.id === conversationId)) navigate(`/app/${conversations[0].id}`, { replace: true });
   }, [conversationId, conversationQuery.isLoading, conversations, navigate]);
-  useEffect(() => () => abortRef.current?.abort(), []);
-  useEffect(() => { setStreamingText(''); }, [conversationId]);
+  useEffect(() => () => {
+    activeRequestRef.current = null;
+    abortRef.current?.abort();
+  }, []);
+  useEffect(() => {
+    activeRequestRef.current = null;
+    const controller = abortRef.current;
+    abortRef.current = null;
+    controller?.abort();
+    setStreamingText('');
+    setRetryTurn(null);
+  }, [conversationId]);
 
   const selectedMessages = useMemo(() => messages, [messages]);
   const updateAssistant = (assistantId: string, update: (item: ChatMessageType) => ChatMessageType) => {
     queryClient.setQueryData<ChatMessageType[]>(['messages', conversationId], (items = []) => items.map((item) => item.id === assistantId ? update(item) : item));
   };
-  const send = async (raw: string) => {
-    const text = raw.trim();
-    if (!text || !conversationId || !conversation || abortRef.current || humanSendingRef.current || conversation.status === 'closed') return;
+  const send = async (raw: string, retry?: RetryTurn) => {
+    const text = retry?.text ?? raw.trim();
+    if (!text || !conversationId || !conversation || (retry && retry.conversationId !== conversationId) || abortRef.current || humanSendingRef.current || conversation.status === 'closed') return;
     if (conversation.status === 'waiting' || conversation.status === 'staff') {
       humanSendingRef.current = true;
       setHumanSending(true);
@@ -242,19 +263,32 @@ export function UserWorkspace() {
       }
       return;
     }
-    setDraft('');
+
+    const streamConversationId = conversationId;
+    const requestIdentity = {};
+    activeRequestRef.current = requestIdentity;
+    const isCurrentSend = () => activeConversationIdRef.current === streamConversationId && activeRequestRef.current === requestIdentity;
+    const clientMessageId = retry?.clientMessageId
+      ?? (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `client-${Date.now()}`);
+    const assistantLocalId = retry?.assistantId ?? `pending-${clientMessageId}`;
+    if (retry) {
+      updateAssistant(assistantLocalId, (item) => ({ ...item, status: 'streaming', content: '', citations: undefined }));
+    } else {
+      setDraft('');
+      setRetryTurn(null);
+      const now = new Date().toISOString();
+      const optimisticUser: ChatMessageType = { id: clientMessageId, conversationId, role: 'user', content: text, createdAt: now, status: 'complete' };
+      const optimisticAssistant: ChatMessageType = { id: assistantLocalId, conversationId, role: 'assistant', content: '', createdAt: new Date(Date.now() + 1).toISOString(), status: 'streaming', toolStatuses: [] };
+      queryClient.setQueryData<ChatMessageType[]>(['messages', conversationId], (items = []) => [...items, optimisticUser, optimisticAssistant]);
+    }
     setStreamingText('正在连接 Aiden…');
-    const clientMessageId = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `client-${Date.now()}`;
-    const assistantLocalId = `pending-${clientMessageId}`;
-    const now = new Date().toISOString();
-    const optimisticUser: ChatMessageType = { id: clientMessageId, conversationId, role: 'user', content: text, createdAt: now, status: 'complete' };
-    const optimisticAssistant: ChatMessageType = { id: assistantLocalId, conversationId, role: 'assistant', content: '', createdAt: new Date(Date.now() + 1).toISOString(), status: 'streaming', toolStatuses: [] };
-    queryClient.setQueryData<ChatMessageType[]>(['messages', conversationId], (items = []) => [...items, optimisticUser, optimisticAssistant]);
     const controller = new AbortController();
     abortRef.current = controller;
     let assistantId = assistantLocalId;
+    let terminalReceived = false;
     try {
-      await api.sendMessageStream(conversationId, text, clientMessageId, (event: StreamEvent) => {
+      await api.sendMessageStream(streamConversationId, text, clientMessageId, (event: StreamEvent) => {
+        if (!isCurrentSend()) return;
         if (event.type === 'start') {
           if (event.messageId && event.messageId !== assistantId) {
             const previous = assistantId;
@@ -262,43 +296,68 @@ export function UserWorkspace() {
             queryClient.setQueryData<ChatMessageType[]>(['messages', conversationId], (items = []) => items.map((item) => item.id === previous ? { ...item, id: assistantId } : item));
           }
           setStreamingText('Aiden 正在组织回答…');
-        } else if (event.type === 'tool_status') {
-          setStreamingText(event.status || '正在核对信息…');
+        } else if (event.type === 'progress' && apiMode === 'remote') {
+          setStreamingText(event.message ?? '正在处理…');
+        } else if (event.type === 'tool_status' && apiMode === 'mock') {
+          setStreamingText(event.status || '正在处理演示数据…');
           updateAssistant(assistantId, (item) => ({ ...item, toolStatuses: [...(item.toolStatuses ?? []), event.status || '正在处理'] }));
         } else if (event.type === 'order_card' && event.order) {
           updateAssistant(assistantId, (item) => ({ ...item, orderCard: event.order }));
         } else if (event.type === 'delta') {
           setStreamingText('Aiden 正在回复…');
-          updateAssistant(assistantId, (item) => ({ ...item, content: item.content + (event.text ?? '') }));
+          updateAssistant(assistantId, (item) => ({ ...item, content: apiMode === 'remote' ? event.text ?? '' : item.content + (event.text ?? '') }));
         } else if (event.type === 'citations' && event.citations) {
           updateAssistant(assistantId, (item) => ({ ...item, citations: event.citations }));
         } else if (event.type === 'handoff') {
           setStreamingText('已进入人工客服队列');
           void queryClient.invalidateQueries({ queryKey: ['conversations'] });
         } else if (event.type === 'done') {
-          updateAssistant(assistantId, (item) => ({ ...item, status: item.status === 'stopped' ? 'stopped' : 'complete', citations: event.citations ?? item.citations }));
+          terminalReceived = true;
+          updateAssistant(assistantId, (item) => ({ ...item, status: apiMode === 'mock' && controller.signal.aborted ? 'stopped' : 'complete', citations: event.citations ?? item.citations }));
+          setRetryTurn(null);
           setStreamingText('');
         } else if (event.type === 'error') {
-          updateAssistant(assistantId, (item) => ({ ...item, status: 'error', content: event.error || '生成失败，请重试。' }));
+          terminalReceived = true;
+          const detail = event.error || '生成失败，请重试。';
+          updateAssistant(assistantId, (item) => ({ ...item, status: 'error', content: detail }));
+          if (apiMode === 'remote') setRetryTurn({ conversationId: streamConversationId, text, clientMessageId, assistantId });
           setStreamingText('');
         }
       }, controller.signal);
-    } catch (error) {
-      if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
-        updateAssistant(assistantId, (item) => ({ ...item, status: 'stopped', content: item.content || '已停止生成。' }));
-      } else {
-        const detail = error instanceof Error ? error.message : '连接失败，请检查服务后重试';
+      if (!terminalReceived && !controller.signal.aborted && isCurrentSend()) {
+        const detail = '连接已中断，回答未完成。可以重试本条消息。';
         updateAssistant(assistantId, (item) => ({ ...item, status: 'error', content: detail }));
         setStreamingText('');
-        message.error(detail);
+        if (apiMode === 'remote') setRetryTurn({ conversationId: streamConversationId, text, clientMessageId, assistantId });
+      }
+    } catch (error) {
+      if (!terminalReceived && isCurrentSend()) {
+        if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+          updateAssistant(assistantId, (item) => ({ ...item, status: 'stopped' }));
+          setStreamingText('');
+          if (apiMode === 'remote') setRetryTurn({ conversationId: streamConversationId, text, clientMessageId, assistantId });
+        } else {
+          const detail = error instanceof Error ? error.message : '连接失败，请检查服务后重试';
+          updateAssistant(assistantId, (item) => ({ ...item, status: 'error', content: detail }));
+          setStreamingText('');
+          if (apiMode === 'remote') setRetryTurn({ conversationId: streamConversationId, text, clientMessageId, assistantId });
+        }
       }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
-      setStreamingText('');
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['messages', conversationId] }),
+        queryClient.invalidateQueries({ queryKey: ['messages', streamConversationId] }),
         queryClient.invalidateQueries({ queryKey: ['conversations'] }),
       ]);
+      if (isCurrentSend()) {
+        setStreamingText('');
+        const persistedAssistant = queryClient.getQueryData<ChatMessageType[]>(['messages', streamConversationId])
+          ?.find((item) => item.id === assistantId && item.role === 'assistant');
+        if (persistedAssistant?.status === 'complete') {
+          setRetryTurn((current) => current?.conversationId === streamConversationId && current.clientMessageId === clientMessageId ? null : current);
+        }
+      }
+      if (activeRequestRef.current === requestIdentity) activeRequestRef.current = null;
     }
   };
   const onInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -330,6 +389,7 @@ export function UserWorkspace() {
             {conversation.status === 'staff' && <div className="staff-banner"><span className="staff-banner-icon"><CustomerServiceOutlined /></span><div><b>{conversation.assignedStaffName || '人工客服'}已接入</b><span>你可以在此继续与客服交流。</span></div></div>}
             {conversation.status === 'closed' && <div className="closed-banner"><span>本次人工服务已结束。</span><Button size="small" onClick={() => createConversation.mutate()}>新建咨询</Button></div>}
             <MessageTimeline messages={selectedMessages} loading={messagesQuery.isLoading} error={messagesQuery.error} retry={() => void messagesQuery.refetch()} feedbackUserId={actor.id} />
+            {apiMode === 'remote' && retryTurn && !isBusy && <Alert className="inline-alert" type="warning" showIcon message="本条回复未完成" description={<Button type="link" onClick={() => void send(retryTurn.text, retryTurn)}>使用同一消息编号重试</Button>} />}
             {messages.length === 0 && !messagesQuery.isLoading && <WelcomePanel onAsk={(text) => void send(text)} />}
             {isBusy && <div className="streaming-indicator"><span className="streaming-bars"><i /><i /><i /></span>{streamingText || '正在生成回复…'}{apiMode === 'mock' && <span className="streaming-mode">本地模拟</span>}</div>}
           </div>
