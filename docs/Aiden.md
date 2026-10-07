@@ -115,9 +115,10 @@ graph TD
     after["after_tools：订单选择或退款核验下一步"]
     assess["assess_knowledge：知识证据闸门"]
     finish["finish_request：冻结本项结果"]
-    gen["generate：汇总并校验引用编号"]
+    gen["generate：实时正文草稿并校验引用编号"]
     save["save_answer：保存最终回答与证据"]
-    sse["SSE：发送已校验回答与引用"]
+    draft_sse["SSE delta：临时未核验草稿"]
+    final_sse["SSE final：已核验落库正文与引用"]
     ui --> api --> ctx --> intent --> route
     route -->|有工具权限| dispatch
     route -->|澄清或直接回复| finish
@@ -128,14 +129,22 @@ graph TD
     assess --> finish
     finish -->|还有诉求| route
     finish -->|全部完成| gen
-    gen --> save --> sse
+    gen --> draft_sse
+    gen --> save --> final_sse
 ```
 
 - 知识类通过 `search_faq` 检索后再判断证据充分性；生成后检查引用编号是否有效，不是逐句 NLI 事实证明。
 - 对话退款先查询本人订单和有效商家退款政策，原因被政策正文覆盖才进入确认阶段；原文“确认提交”后由 `submit_after_sale` 再次核验并创建待审核申请，不执行支付退款。
 - 查订单、物流、售后、工单均由服务端按意图选择固定工具；闲聊使用模型自然回应，不查询业务数据。投诉、登记工单和站内转人工是不同处理目标。
 - 明确转人工可通过按钮或对话进入站内队列；客服接单后双方在原会话留言，waiting / staff 状态不继续触发机器人回答。
-- 当前 remote SSE 用瞬态 `progress` 展示真实识别、工具查询、检索与校验阶段；`delta` 在整轮回答校验并保存后一次发送，不是把模型草稿逐 token 展示。mock 仍使用模拟 `tool_status` 与分段输出。低置信度和负反馈进入人工审核问题池，历史对话挖掘另走独立流程。
+- 当前 remote SSE 用瞬态 `progress` 展示真实识别、工具查询、检索与校验阶段；`generate` 经 `model.astream` 逐段发正文自定义事件，路由仅把 generate 的 `support_answer_delta` 转为 `delta`。直接答复、多项编号/换行及退款固定确认也使用同一事件；不转发原生模型流、推理/工具块或内部 JSON。
+- `delta` 是可见但尚未核验的草稿，已经展示的内容无法撤回；引用校验可改写为拒答或去掉悬空标记。`save_answer` 核验结果落库成功后发一次 `final {text,citations}`（引用可为空数组），以完整权威正文与引用替换草稿，再发可选 `handoff` 和 `done`，保存后不再发 delta/citations。完成重放只发 start→final→done，不调用模型、不重复用户行。
+- 取消/断线不伪造 final/done，错误只发 error，不再发 done。保留原持久化语义：草稿不进入 `answer_so_far`，未完成取消保存空正文 stopped；仓储只修改 streaming，已保存 complete 不被迟到取消降级。mock 仍使用本地模拟 `tool_status`、卡片与分段输出，不代表真实模型和数据库。低置信度和负反馈进入人工审核问题池，历史对话挖掘另走独立流程。
+- 2026-10-07 后端定向验收：真实 FastAPI/Uvicorn TCP HTTP/SSE 配受控模型、工具和内存仓储，观察正常前两段实时 delta 时模型未结束且 save=0；直接答复、多项全轮引用偏移、坏引用草稿→拒答 final 并保存拒答、退款确认、私有输出隔离、错误终态互斥、取消 stopped 空正文、同 key 重试/重放及保存后断线 complete 均通过。关键消费者测试 2 项通过；既有多请求 runner 为 `Ran 30 tests`、`FAILED (failures=2)`，两处失败是退货/换货同一测试的子例，当前 generate 前订单查询与测试无查询期待冲突，未修改用户已有意图代码或运行修改前基线。独立外部模型探测收到两个正文片段“你好。”；随后真实外部模型驱动生产 generate，经 TCP SSE 收到 6 个实时 delta → final → done。最终路由守卫另以当前源码 TCP 烟测验证：注入迟到 delta 和重复保存事件后仍只一次 final，final 后无 delta；异常和取消不伪造 done/final。工具与仓储仍受控，不等同真实 MySQL/Milvus 业务全链路验收。
+- 同日真实 React/系统 Chrome 经 FastAPI TCP SSE 验收：DOM 已显示多个草稿片段时模型未完成、save=0、仓储正文为空且 streaming；正常、直接、多项顺序、[1]/[2] 点击引用 Popover 和缓存来源正确，坏引用 [99] 草稿被拒答 final 替换并清空引用，私有块不显示，首段停止后 stopped 空正文及同 key 重试重新建立草稿均已观察。真实外部模型浏览器场景收到 16 个 delta，最终 DOM 与 HTTP 历史正文一致；工具/仓储仍受控。
+- 真实浏览器时序验收还观察到：3 秒历史轮询不抹 streaming 草稿且员工消息继续到达；仓储 complete 早于 final 时不重复；final 先于迟到历史时正文不回退；旧 stopped 历史迟到不抹重试草稿；final 后、done 前仍保留忙状态，done 后才释放；同会话旧 finally 和跨会话故意迟到的真实 SSE 回调不污染新草稿或释放新请求忙状态。乱序由临时浏览器 fetch/取消控制构造，不修改生产后端来制造竞态。
+- 实际生成取消另经独立 TCP 场景验证：首段后真实 HTTP abort，受控模型异步生成器捕获 `CancelledError` 且 finally 关闭，原生成没有完成；仓储 stopped 空正文、无 final/done。同 key HTTP 重试启动不同生成实例，只有新实例完成并复用原消息对。此证据验证取消传播到模型任务，不仅是界面停止或 HTTP 断线。
+- 真实浏览器补充验收：完成记录的手动同 key 重试，两次 POST 正文/键完全相同，第二次仅 start→final→done、助手 ID 相同且 save_count=1；历史 complete 后通过浏览器注入迟到 delta，DOM 与缓存保持权威正文；remote 错误仅 start/error，DOM 同步仓储错误正文并显示重试。mock 独立回归保留模拟工具轨迹与订单卡片、不显示 remote 草稿提示，模拟错误正文未改变；这些 mock 观察不是外部模型或数据库验收。
 
 
 
@@ -635,7 +644,7 @@ llm的天性就是硬凑答案
 - `recognize_intent` 识别单轮最多四项诉求；`route_intent` 逐项收窄白名单并核对原文授权。
 - `dispatch_tool_call` 由服务端构造唯一允许的调用，`ToolNode` 执行；`after_tools` 处理订单选择、退款订单/政策/提交阶段等固定下一步，不让模型随意探索工具。
 - 没有工具权限的澄清、闲聊、人工队列等项也进入 `finish_request`；知识项先经过 `assess_knowledge`。
-- 每项结果冻结后继续下一项，全部完成才由 `generate` 汇总与引用校验，再由 `save_answer` 保存；SSE 发出最终已校验内容。闲聊由模型自然回复，不是固定话术。
+- 每项结果冻结后继续下一项，全部完成才由 `generate` 逐项流式汇总并核验引用，再由 `save_answer` 保存；SSE delta 是未核验草稿，保存成功后 final 替换为已核验正文与引用。闲聊由模型自然回复，不是固定话术。
 - 工单登记走 `create_ticket`；明确转人工走会话状态事务，不能将两者混称“创建工单即接通人工”。
 
 

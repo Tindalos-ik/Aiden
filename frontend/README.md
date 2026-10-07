@@ -283,7 +283,7 @@ Conversation 建议包含 `id`、`userId`、`userName`（队列展示用，可�
 
 remote SSE 的阶段事件是 `progress`，data 必须包含 `stage` 与中文 `message`；stage 只能是 `recognition | query | retrieval | validation`。事件只表示真实执行：查询阶段来自实际工具启动（缓存命中而跳过的工具不虚报），检索/校验阶段对应实际证据评估与最终引用检查。进度仅显示在当前会话的瞬态提示中，不写入消息正文或工具结果。
 
-远端正常流顺序为 `start → progress* → delta → citations? → handoff? → done`；允许重复 `progress`，`error` 是独立终态。远端 `delta` 只在整轮回答通过证据和引用检查并落库后发送，且是整轮完整正文，不是模型草稿或 token 片段。
+远端正常流顺序为 `start → (progress | delta)* → final → handoff? → done`；`start` 给出数据库助手消息 ID，`delta` 是真实生成阶段的增量片段，前端追加为“生成草稿 · 尚未核验”。`final` 携带核验且落库后的完整权威正文及引用数组，替换草稿和引用（空数组也清空旧引用），不是终止事件；`done` 标记本轮完成。`error` 是独立终态，不能与 `done` 连发。remote 不发送独立 `citations` 事件，也不展示内部意图、reasoning 或工具结果为回答正文。
 
 ```text
 event: start
@@ -292,14 +292,17 @@ data: {"messageId":"assistant-message-id"}
 event: progress
 data: {"stage":"recognition","message":"正在识别本轮诉求…"}
 
+event: delta
+data: {"text":"正在生成的"}
+
+event: delta
+data: {"text":"临时草稿。"}
+
 event: progress
 data: {"stage":"validation","message":"正在检查证据与引用…"}
 
-event: delta
-data: {"text":"已经完成校验并保存的整轮回答。"}
-
-event: citations
-data: {"citations":[]}
+event: final
+data: {"text":"已经完成校验并保存的整轮回答。","citations":[]}
 
 event: done
 data: {}
@@ -316,9 +319,11 @@ event: error
 data: {"error":"订单服务暂时不可用"}
 ```
 
-mock 不模拟上述真实阶段：它保留本地演示的 `tool_status`、`order_card` 和分段 `delta` 语义。它们不代表远端工具进度或经过后端证据校验的输出。
+mock 不模拟上述真实阶段与权威 `final`：它保留本地演示的 `tool_status`、`order_card` 和分段 `delta` 语义，仍由本地 `done` 完成回答。它们不代表远端工具进度或经过后端证据校验的输出，remote 失败不会回退 mock。
 
-用户点击“停止生成”会取消当前 remote 请求；断线或无 `done`/`error` 的 EOF 也按未完成处理。此类中断没有终止 SSE 事件，服务端仅将尚未完成的 `streaming` 助手消息记为 `stopped`，已落库的 `complete` 不降级。remote 错误或停止后，用户可在原会话手动重试最新一轮；重试复用原文与 `clientMessageId`，依赖服务端幂等配对，不重复插入用户消息。历史刷新恢复 `complete` 后清除重试入口；相同 key 的已完成回答直接重放，不再发送执行阶段 `progress`。不会自动重试，也不会静默切换到 mock。`done` 或 `error` 结束本轮界面状态，但解析器仍读取到 reader EOF；随后断线不覆盖已收到的终态。
+草稿可能含不可靠断言或非法引用，证据检查失败时 `final` 可用拒答完整替换；已经显示给用户的草稿无法撤回，应以最终核验回答为准。用户点击“停止生成”实际 abort 当前 remote 请求；断线或无终态 EOF 也按未完成处理。未保存的草稿不落库，服务端仅将尚未完成的 `streaming` 助手消息记为 `stopped`，已落库的 `complete` 不降级。页面停止/错误时保留瞬态草稿说明，流结束后同步数据库，历史可能因此恢复空正文 `stopped` 或服务端错误正文。手动重试复用原文和 `clientMessageId`，清空本轮草稿、引用与进度；服务端幂等配对不重复插入用户消息。已完成同 key 请求重放 `start → final → done`，不再执行模型或发送阶段进度；历史恢复 `complete` 后清除重试入口。不会自动重试。
+
+remote 历史仍每 3 秒轮询全部消息，会话状态每 5 秒刷新，保留人工留言与接管/结单同步。当前活动流的 `streaming` 历史不能抹去草稿，`final` 或数据库 `complete` 先到后都禁止迟到增量再追加或状态降级；两者任意顺序只显示一条权威助手回答并保留引用。结束后重新读取数据库。会话切换会取消旧请求；请求身份同时隔离旧回调和旧 `finally`，防止其修改新会话或同会话的新草稿。
 
 解析器支持 UTF-8 分片、LF/CRLF/CR 行结束、多行 data、注释行、分片中的未完成行，以及流结束时最后一个没有空行终止的事件。转人工后用户仍可在原会话继续留言：用户侧 `POST /api/conversations/{id}/messages` 在 `waiting`/`staff` 阶段写入留言（`backend/app/api/routes/conversations.py` 中的 `send_user_human_message()`），用户页输入框保持可用，`frontend/src/pages/UserWorkspace.tsx` 的 `send()` 在这两个状态下改调 `api.sendHumanMessage`。
 

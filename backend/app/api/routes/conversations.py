@@ -101,8 +101,8 @@ async def stream_message(
 ) -> StreamingResponse:
     """先原子落库用户消息和助手占位行，再在无 Session 的状态下生成 SSE。
 
-    start 的 messageId 是 MySQL 助手行主键；progress 只显示实际阶段，delta 只含
-    全轮校验并落库后的答案。error/done 是互斥终态；断线不发送终态，只收尾数据库。
+    start 的 messageId 是 MySQL 助手行主键；delta 是未核验的实时正文草稿，
+    final 是核验并落库后的权威正文和引用。error/done 互斥；断线只收尾数据库。
     """
     conversation = get_owned_conversation(conversation_id, actor["id"])
     if not conversation:
@@ -128,10 +128,9 @@ async def stream_message(
             if not pair.should_generate:
                 # 重放不拥有这条已完成记录的状态，播放中断也不能把原回答改成 stopped。
                 finished = True
-                if pair.replay_content:
-                    yield sse_event("delta", {"text": pair.replay_content})
-                if pair.replay_citations:
-                    yield sse_event("citations", {"citations": pair.replay_citations})
+                yield sse_event("final", {
+                    "text": pair.replay_content, "citations": pair.replay_citations or [],
+                })
                 yield sse_event("done", {})
                 return
 
@@ -159,18 +158,25 @@ async def stream_message(
                     progress = progress_payload(event)
                     if progress is not None:
                         yield sse_event("progress", progress)
+                    if (event.get("event") == "on_custom_event"
+                            and event.get("name") == "support_answer_delta"
+                            and event.get("metadata", {}).get("langgraph_node") == "generate"
+                            and not finished):
+                        delta = event.get("data", {}).get("text")
+                        if isinstance(delta, str) and delta:
+                            yield sse_event("delta", {"text": delta})
                     if (event.get("event") == "on_chain_end" and event.get("name") == "save_answer"
-                            and event.get("metadata", {}).get("langgraph_node") == "save_answer"):
+                            and event.get("metadata", {}).get("langgraph_node") == "save_answer"
+                            and not finished):
                         output = event.get("data", {}).get("output", {})
                         answer = output.get("answer") if isinstance(output, dict) else None
                         if isinstance(answer, str):
                             answer_so_far = answer
-                            if answer:
-                                # 只发送经过引用校验的最终文本，避免模型草稿先于拒答流出。
-                                yield sse_event("delta", {"text": answer})
-                            citations = output.get("citations", []) if isinstance(output, dict) else []
-                            if citations:
-                                yield sse_event("citations", {"citations": citations})
+                            # 保存已完成；从此不再拥有取消收尾权，避免迟到断线降级 complete。
+                            finished = True
+                            yield sse_event("final", {
+                                "text": answer, "citations": output.get("citations", []),
+                            })
                             if output.get("handoff_committed"):
                                 yield sse_event("handoff", {})
 
@@ -201,7 +207,8 @@ async def stream_message(
                 finished = True
                 yield sse_event("error", {"error": detail})
         finally:
-            # 仅在本次 SSE 未正常完成或持久化错误时收尾，避免遗留 streaming 状态。
+            # 草稿不落库：取消前未收到保存结果时仍用空正文 stopped；仓储终态闸门
+            # 保护已提交但保存事件尚未送达的 complete，不会被迟到取消降级。
             if not finished:
                 finish_assistant_message(
                     pair.assistant_message_id,

@@ -59,6 +59,9 @@ class FakeModel:
         suffix = f" {citations[0]}" if should_cite and citations else ""
         return AIMessage(content=f"已回答：{data['question']}{suffix}{self.answer_suffix}")
 
+    async def astream(self, messages, config=None):
+        yield await self.ainvoke(messages, config=config)
+
 
 class FakeToolNode:
     calls = []

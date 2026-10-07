@@ -117,6 +117,7 @@ export function MessageBubble({ item, feedbackUserId, viewerRole = 'user', userN
         {item.orderCard && <OrderCardView order={item.orderCard} />}
         {item.toolStatuses && item.toolStatuses.length > 0 && <div className="tool-trail">{item.toolStatuses.map((status, index) => <div key={`${status}-${index}`}><CheckCircleFilled />{status}</div>)}</div>}
         {item.status === 'streaming' && <span className="stream-cursor" />}
+        {apiMode === 'remote' && item.role === 'assistant' && item.status !== 'complete' && item.content && <div className="message-state-note">{item.verified ? '回答已核验并保存 · 正在同步会话' : '生成草稿 · 尚未核验，最终回答可能替换此内容'}</div>}
         {item.status === 'stopped' && <div className="message-state-note"><StopOutlined /> 已停止生成</div>}
         {item.status === 'error' && <div className="message-state-note message-state-error"><span /> 这条回复没有完成</div>}
       </div>
@@ -175,11 +176,14 @@ export function UserWorkspace() {
   const [draft, setDraft] = useState('');
   const [mobileListOpen, setMobileListOpen] = useState(false);
   const [streamingText, setStreamingText] = useState('');
+  const [isBusy, setIsBusy] = useState(false);
   const [retryTurn, setRetryTurn] = useState<RetryTurn | null>(null);
   const [humanSending, setHumanSending] = useState(false);
   const humanSendingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const activeRequestRef = useRef<object | null>(null);
+  const optimisticUserIdsRef = useRef(new Set<string>());
+  const streamStateRef = useRef<{ conversationId: string; assistantId: string; active: boolean; authoritative: boolean } | null>(null);
   const actorQuery = useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: Infinity });
   const actor = actorQuery.data as Actor | undefined;
   const conversationQuery = useQuery({
@@ -189,7 +193,40 @@ export function UserWorkspace() {
   const conversations = conversationQuery.data ?? [];
   const conversation = conversations.find((item) => item.id === conversationId);
   const messagesQuery = useQuery({
-    queryKey: ['messages', conversationId], queryFn: () => api.listMessages(conversationId!), enabled: Boolean(conversationId),
+    queryKey: ['messages', conversationId], queryFn: async () => {
+      const id = conversationId!;
+      const historyRequestIdentity = activeRequestRef.current;
+      const incoming = await api.listMessages(id);
+      if (apiMode !== 'remote') return incoming;
+      // 在请求完成时读取最新缓存，而非发起轮询时的快照，避免迟到历史抹去新草稿/final。
+      const local = queryClient.getQueryData<ChatMessageType[]>(['messages', id]) ?? [];
+      const merged = incoming.map((item) => {
+        const cached = local.find((candidate) => candidate.id === item.id);
+        if (!cached || item.status === 'complete') return item;
+        const turn = streamStateRef.current;
+        if (cached.status === 'complete'
+          || ((cached.status === 'stopped' || cached.status === 'error') && item.status === 'streaming')
+          || (turn?.conversationId === id && turn.assistantId === cached.id
+            && (turn.authoritative || (turn.active && (item.status === 'streaming'
+              || historyRequestIdentity !== activeRequestRef.current))))) return cached;
+        return item;
+      });
+      for (const item of local) {
+        if (merged.some((candidate) => candidate.id === item.id)) continue;
+        if (optimisticUserIdsRef.current.has(item.id)) {
+          const previousCount = local.filter((candidate) => candidate.role === 'user' && candidate.content === item.content && !optimisticUserIdsRef.current.has(candidate.id)).length;
+          if (incoming.filter((candidate) => candidate.role === 'user' && candidate.content === item.content).length > previousCount) {
+            optimisticUserIdsRef.current.delete(item.id);
+            continue;
+          }
+          merged.push(item);
+        } else if (streamStateRef.current?.conversationId === id && streamStateRef.current.assistantId === item.id
+          && (streamStateRef.current.active || streamStateRef.current.authoritative)) {
+          merged.push(item);
+        }
+      }
+      return merged.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    }, enabled: Boolean(conversationId),
     refetchInterval: apiMode === 'remote' ? 3_000 : false,
   });
   const messages = messagesQuery.data ?? [];
@@ -229,16 +266,19 @@ export function UserWorkspace() {
   }, []);
   useEffect(() => {
     activeRequestRef.current = null;
+    streamStateRef.current = null;
     const controller = abortRef.current;
     abortRef.current = null;
     controller?.abort();
     setStreamingText('');
+    setIsBusy(false);
     setRetryTurn(null);
   }, [conversationId]);
 
   const selectedMessages = useMemo(() => messages, [messages]);
-  const updateAssistant = (assistantId: string, update: (item: ChatMessageType) => ChatMessageType) => {
-    queryClient.setQueryData<ChatMessageType[]>(['messages', conversationId], (items = []) => items.map((item) => item.id === assistantId ? update(item) : item));
+  const updateAssistant = (assistantId: string, update: (item: ChatMessageType) => ChatMessageType, authoritative = false) => {
+    queryClient.setQueryData<ChatMessageType[]>(['messages', conversationId], (items = []) => items.map((item) =>
+      item.id === assistantId && (authoritative || (item.status !== 'complete' && !streamStateRef.current?.authoritative)) ? update(item) : item));
   };
   const send = async (raw: string, retry?: RetryTurn) => {
     const text = retry?.text ?? raw.trim();
@@ -271,29 +311,38 @@ export function UserWorkspace() {
     const clientMessageId = retry?.clientMessageId
       ?? (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `client-${Date.now()}`);
     const assistantLocalId = retry?.assistantId ?? `pending-${clientMessageId}`;
+    streamStateRef.current = { conversationId: streamConversationId, assistantId: assistantLocalId, active: true, authoritative: false };
     if (retry) {
-      updateAssistant(assistantLocalId, (item) => ({ ...item, status: 'streaming', content: '', citations: undefined }));
+      updateAssistant(assistantLocalId, (item) => ({ ...item, status: 'streaming', content: '', citations: [], toolStatuses: [], verified: false }));
     } else {
       setDraft('');
       setRetryTurn(null);
       const now = new Date().toISOString();
       const optimisticUser: ChatMessageType = { id: clientMessageId, conversationId, role: 'user', content: text, createdAt: now, status: 'complete' };
       const optimisticAssistant: ChatMessageType = { id: assistantLocalId, conversationId, role: 'assistant', content: '', createdAt: new Date(Date.now() + 1).toISOString(), status: 'streaming', toolStatuses: [] };
+      optimisticUserIdsRef.current.add(clientMessageId);
       queryClient.setQueryData<ChatMessageType[]>(['messages', conversationId], (items = []) => [...items, optimisticUser, optimisticAssistant]);
     }
     setStreamingText('正在连接 Aiden…');
+    setIsBusy(true);
     const controller = new AbortController();
     abortRef.current = controller;
     let assistantId = assistantLocalId;
     let terminalReceived = false;
     try {
       await api.sendMessageStream(streamConversationId, text, clientMessageId, (event: StreamEvent) => {
-        if (!isCurrentSend()) return;
+        if (!isCurrentSend() || terminalReceived || (apiMode === 'remote' && controller.signal.aborted)) return;
         if (event.type === 'start') {
           if (event.messageId && event.messageId !== assistantId) {
             const previous = assistantId;
             assistantId = event.messageId;
-            queryClient.setQueryData<ChatMessageType[]>(['messages', conversationId], (items = []) => items.map((item) => item.id === previous ? { ...item, id: assistantId } : item));
+            if (streamStateRef.current) streamStateRef.current.assistantId = assistantId;
+            queryClient.setQueryData<ChatMessageType[]>(['messages', conversationId], (items = []) => {
+              const persisted = items.find((item) => item.id === assistantId);
+              return items.flatMap((item) => item.id === previous
+                ? persisted ? [] : [{ ...item, id: assistantId }]
+                : [item]);
+            });
           }
           setStreamingText('Aiden 正在组织回答…');
         } else if (event.type === 'progress' && apiMode === 'remote') {
@@ -305,28 +354,36 @@ export function UserWorkspace() {
           updateAssistant(assistantId, (item) => ({ ...item, orderCard: event.order }));
         } else if (event.type === 'delta') {
           setStreamingText('Aiden 正在回复…');
-          updateAssistant(assistantId, (item) => ({ ...item, content: apiMode === 'remote' ? event.text ?? '' : item.content + (event.text ?? '') }));
-        } else if (event.type === 'citations' && event.citations) {
+          updateAssistant(assistantId, (item) => ({ ...item, content: item.content + (event.text ?? '') }));
+        } else if (event.type === 'final' && apiMode === 'remote') {
+          if (streamStateRef.current) streamStateRef.current.authoritative = true;
+          updateAssistant(assistantId, (item) => ({ ...item, verified: true, content: event.text ?? '', citations: event.citations ?? [] }), true);
+          setRetryTurn(null);
+          setStreamingText('回答已核验并保存，正在同步会话…');
+        } else if (event.type === 'citations' && apiMode === 'mock' && event.citations) {
           updateAssistant(assistantId, (item) => ({ ...item, citations: event.citations }));
         } else if (event.type === 'handoff') {
           setStreamingText('已进入人工客服队列');
           void queryClient.invalidateQueries({ queryKey: ['conversations'] });
         } else if (event.type === 'done') {
           terminalReceived = true;
-          updateAssistant(assistantId, (item) => ({ ...item, status: apiMode === 'mock' && controller.signal.aborted ? 'stopped' : 'complete', citations: event.citations ?? item.citations }));
+          updateAssistant(assistantId, (item) => ({ ...item, status: apiMode === 'mock' && controller.signal.aborted ? 'stopped' : 'complete', citations: apiMode === 'mock' ? event.citations ?? item.citations : item.citations }), true);
           setRetryTurn(null);
           setStreamingText('');
         } else if (event.type === 'error') {
           terminalReceived = true;
+          if (streamStateRef.current) streamStateRef.current.active = false;
           const detail = event.error || '生成失败，请重试。';
-          updateAssistant(assistantId, (item) => ({ ...item, status: 'error', content: detail }));
+          updateAssistant(assistantId, (item) => ({ ...item, status: 'error', content: apiMode === 'mock' ? detail : item.content }));
+          if (apiMode === 'remote') message.error(detail);
           if (apiMode === 'remote') setRetryTurn({ conversationId: streamConversationId, text, clientMessageId, assistantId });
           setStreamingText('');
         }
       }, controller.signal);
       if (!terminalReceived && !controller.signal.aborted && isCurrentSend()) {
         const detail = '连接已中断，回答未完成。可以重试本条消息。';
-        updateAssistant(assistantId, (item) => ({ ...item, status: 'error', content: detail }));
+        updateAssistant(assistantId, (item) => ({ ...item, status: 'error' }));
+        message.error(detail);
         setStreamingText('');
         if (apiMode === 'remote') setRetryTurn({ conversationId: streamConversationId, text, clientMessageId, assistantId });
       }
@@ -338,26 +395,32 @@ export function UserWorkspace() {
           if (apiMode === 'remote') setRetryTurn({ conversationId: streamConversationId, text, clientMessageId, assistantId });
         } else {
           const detail = error instanceof Error ? error.message : '连接失败，请检查服务后重试';
-          updateAssistant(assistantId, (item) => ({ ...item, status: 'error', content: detail }));
+          updateAssistant(assistantId, (item) => ({ ...item, status: 'error' }));
+          message.error(detail);
           setStreamingText('');
           if (apiMode === 'remote') setRetryTurn({ conversationId: streamConversationId, text, clientMessageId, assistantId });
         }
       }
     } finally {
-      if (abortRef.current === controller) abortRef.current = null;
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['messages', streamConversationId] }),
-        queryClient.invalidateQueries({ queryKey: ['conversations'] }),
-      ]);
+      // 旧请求的 finally 不发起共享缓存刷新，也不释放新请求的 controller。
       if (isCurrentSend()) {
-        setStreamingText('');
-        const persistedAssistant = queryClient.getQueryData<ChatMessageType[]>(['messages', streamConversationId])
-          ?.find((item) => item.id === assistantId && item.role === 'assistant');
-        if (persistedAssistant?.status === 'complete') {
-          setRetryTurn((current) => current?.conversationId === streamConversationId && current.clientMessageId === clientMessageId ? null : current);
+        if (streamStateRef.current) streamStateRef.current.active = false;
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['messages', streamConversationId] }),
+          queryClient.invalidateQueries({ queryKey: ['conversations'] }),
+        ]);
+        if (isCurrentSend()) {
+          if (abortRef.current === controller) abortRef.current = null;
+          setStreamingText('');
+          setIsBusy(false);
+          const persistedAssistant = queryClient.getQueryData<ChatMessageType[]>(['messages', streamConversationId])
+            ?.find((item) => item.id === assistantId && item.role === 'assistant');
+          if (persistedAssistant?.status === 'complete') {
+            setRetryTurn((current) => current?.conversationId === streamConversationId && current.clientMessageId === clientMessageId ? null : current);
+          }
+          activeRequestRef.current = null;
         }
       }
-      if (activeRequestRef.current === requestIdentity) activeRequestRef.current = null;
     }
   };
   const onInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -366,7 +429,6 @@ export function UserWorkspace() {
       void send(draft);
     }
   };
-  const isBusy = Boolean(abortRef.current);
 
   const listPane = <ConversationList conversations={conversations} selectedId={conversationId} onSelect={(id) => { navigate(`/app/${id}`); setMobileListOpen(false); }} onCreate={() => createConversation.mutate()} />;
 

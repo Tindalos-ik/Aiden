@@ -100,13 +100,15 @@ export interface Message {
   orderCard?: OrderCard;
   toolStatuses?: string[];
   citations?: Citation[];
+  /** 仅当前 remote 流使用：final 已核验，但仍在等待 done。 */
+  verified?: boolean;
 }
 
-/** remote 进度仅用于瞬态界面；delta 仅承载服务端完成校验并落库后的整轮回答。 */
+/** remote delta 是未核验的追加草稿；final 是核验并落库后的权威正文与引用。 */
 export type ProgressStage = 'recognition' | 'query' | 'retrieval' | 'validation';
 
 export interface StreamEvent {
-  type: 'start' | 'progress' | 'tool_status' | 'order_card' | 'delta' | 'citations' | 'handoff' | 'done' | 'error';
+  type: 'start' | 'progress' | 'tool_status' | 'order_card' | 'delta' | 'final' | 'citations' | 'handoff' | 'done' | 'error';
   messageId?: string;
   text?: string;
   status?: string;

@@ -8,7 +8,6 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.runnables import Runnable
 from langgraph.graph.state import StateNode
 
-from app.agent.messages import _content_as_text
 from app.agent.order_selection import _parse_order_list
 from app.agent.prompt import (
     SYSTEM_PROMPT,
@@ -28,13 +27,48 @@ def _edge_ordered_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]
     return [results[0], *results[2:], results[1]]
 
 
+def _display_text(content: Any) -> str:
+    """只展示正文文本块；推理、工具调用和其他内部块不属于客服答复。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part if isinstance(part, str) else part["text"]
+            for part in content
+            if isinstance(part, str) or (
+                isinstance(part, dict) and part.get("type") in {"text", "output_text"}
+                and isinstance(part.get("text"), str)
+            )
+        )
+    return ""
+
+
 def make_generate(model: Runnable[LanguageModelInput, BaseMessage]) -> StateNode[SupportState, None]:
     """绑定流式答复模型，按单项证据生成并核验全轮引用。"""
     async def generate(state: SupportState) -> dict[str, Any]:
         """逐项生成并组合答复，单项失败不影响其他项；引用按全轮重新编号。"""
+        async def emit(text: str) -> None:
+            if text:
+                await adispatch_custom_event("support_answer_delta", {"text": text})
+
+        async def stream_reply(messages: list[BaseMessage], intent: str) -> str:
+            parts: list[str] = []
+            async for chunk in model.astream(messages, config=(
+                {
+                    "metadata": {"cost_intent": intent},
+                    "run_name": f"cost_intent_{intent}",
+                } if settings.langfuse_enabled else None
+            )):
+                text = _display_text(chunk.content)
+                if text:
+                    parts.append(text)
+                    await emit(text)
+            return "".join(parts).strip()
+
         direct_reply = state.get("direct_reply", "").strip()
         items = state.get("request_results", [])
         if direct_reply and not items:
+            await emit(direct_reply)
             return {"messages": [AIMessage(content=direct_reply)], "answer": direct_reply}
         answers: list[str] = []
         all_citations: list[dict[str, object]] = []
@@ -42,6 +76,9 @@ def make_generate(model: Runnable[LanguageModelInput, BaseMessage]) -> StateNode
         refund_pending: dict[str, str] = {}
         retrieval_snapshots: list[dict[str, object]] = []
         for item in items:
+            if len(items) > 1:
+                await emit(("\n" if answers else "") + f"【{len(answers) + 1}】 ")
+            streamed = False
             snapshot = item["retrieval"]
             retrieval_snapshots.append(snapshot)
             if item.get("low_confidence"):
@@ -91,7 +128,8 @@ def make_generate(model: Runnable[LanguageModelInput, BaseMessage]) -> StateNode
                 ]
                 if conversation and isinstance(conversation[-1], HumanMessage):
                     conversation.pop()  # 当前完整用户消息由下方的单项问题替代。
-                response = await model.ainvoke([
+                streamed = True
+                reply = await stream_reply([
                     SystemMessage(content=(
                         SYSTEM_PROMPT + "\n当前只回答一项闲聊。自然、简短地回应问候、感谢、"
                         "自我介绍或能力范围问题；无需工具证据，不要声称查到了订单、"
@@ -101,14 +139,7 @@ def make_generate(model: Runnable[LanguageModelInput, BaseMessage]) -> StateNode
                     HumanMessage(content=json.dumps({
                         "question": item["question"], "evidence": [],
                     }, ensure_ascii=False)),
-                ], config=(
-                    {
-                        "metadata": {"cost_intent": item["intent"]},
-                        "run_name": f"cost_intent_{item['intent']}",
-                    }
-                    if settings.langfuse_enabled else None
-                ))
-                reply = _content_as_text(response.content).strip()
+                ], item["intent"])
             if not reply:
                 evidence = []
                 local_citations = item.get("citations", [])
@@ -124,7 +155,8 @@ def make_generate(model: Runnable[LanguageModelInput, BaseMessage]) -> StateNode
                 # 只有服务端核验到覆盖本次原因的有效商家政策时才允许给出提交确认。
                 refund_policy = (item.get("goal") == "create_ticket"
                                  and bool(item.get("refund_policy_id")))
-                response = await model.ainvoke([
+                streamed = True
+                reply = await stream_reply([
                     SystemMessage(content=SYSTEM_PROMPT + "\n只回答这一项请求。必须以给出的本轮结果为准，简短说明查到的事实；不要输出 JSON 或工具名。"
                                   # 只有检索到带编号的知识块时才要求引用编号；订单/政策工具结果没有编号，
                                   # 若继续要求编号，模型会凭空写出 [1] 这类悬空标记。
@@ -134,15 +166,8 @@ def make_generate(model: Runnable[LanguageModelInput, BaseMessage]) -> StateNode
                                   + ("\n这是退款申请提交前说明：指出已核对的订单事实、政策证据能确认的条件、仍缺少或无法判断的信息；提交后待员工审核，不得说退款资格、金额或时效已经确定，也不要自行要求用户确认。"
                                      "本项的订单事实和适用政策都来自本轮工具结果（query_order、query_refund_policy），本轮按设计没有检索知识库，不得以缺少知识库检索为由拒答。" if refund_policy else "")),
                     HumanMessage(content=json.dumps({"question": item["question"], "evidence": evidence}, ensure_ascii=False)),
-                ], config=(
-                    {
-                        "metadata": {"cost_intent": item["intent"]},
-                        "run_name": f"cost_intent_{item['intent']}",
-                    }
-                    if settings.langfuse_enabled else None
-                ))
-                reply = _content_as_text(response.content).strip()
-                # 引用检查发生在草稿生成后；进度只带阶段，不泄露尚未通过检查的文字。
+                ], item["intent"])
+                # 草稿已经实时展示；引用核验后的权威正文由保存成功后的 final 统一纠正。
                 await adispatch_custom_event(
                     "support_progress", {"stage": "validation", "message": "正在核验回答引用"}
                 )
@@ -167,9 +192,11 @@ def make_generate(model: Runnable[LanguageModelInput, BaseMessage]) -> StateNode
                     # 带编号的知识问答仍走上面的子集校验，不受影响。
                     reply = re.sub(r"[ \t]*(?:\[[0-9]+\]|［[0-9]+］)", "", reply)
                 if refund_policy and reply and reply != _KNOWLEDGE_REFUSAL:
-                    reply += "\n" + _REFUND_CONFIRM_PROMPT.format(
+                    confirmation = "\n" + _REFUND_CONFIRM_PROMPT.format(
                         order_no=item["refund_order_no"], reason=item["refund_reason"],
                     )
+                    reply += confirmation
+                    await emit(confirmation)
                     refund_pending = {"stage": "confirm", "order_no": item["refund_order_no"],
                                       "reason": item["refund_reason"],
                                       "policy_id": item["refund_policy_id"],
@@ -183,6 +210,8 @@ def make_generate(model: Runnable[LanguageModelInput, BaseMessage]) -> StateNode
                     and _parse_order_list(reply) is not None):
                 refund_pending = {"stage": "order", "request_type": item["refund_request_type"],
                                   "reason": item.get("refund_reason", "")}
+            if not streamed or not reply:
+                await emit(reply or _FALLBACK_REPLY)
             answers.append(reply or _FALLBACK_REPLY)
         answer = answers[0] if len(answers) == 1 else "\n".join(
             f"【{index}】 {reply}" for index, reply in enumerate(answers, 1)

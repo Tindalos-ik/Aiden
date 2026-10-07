@@ -84,10 +84,13 @@ export async function readSseStream(
     }
   };
 
+  const cancelOnAbort = () => { void reader.cancel().catch(() => undefined); };
+  signal?.addEventListener('abort', cancelOnAbort, { once: true });
   try {
     while (true) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const { value, done } = await reader.read();
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       if (atStreamStart && buffer.length) {
@@ -101,6 +104,7 @@ export async function readSseStream(
     if (buffer.length) consumeLine(buffer);
     dispatch();
   } finally {
+    signal?.removeEventListener('abort', cancelOnAbort);
     if (signal?.aborted) await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
@@ -114,9 +118,9 @@ function citationsFrom(value: unknown): Citation[] | undefined {
     && typeof item.sectionPath === 'string');
 }
 
-const streamEventTypes: Record<StreamEvent['type'], true> = {
-  start: true, progress: true, tool_status: true, order_card: true, delta: true,
-  citations: true, handoff: true, done: true, error: true,
+const streamEventTypes: Partial<Record<StreamEvent['type'], true>> = {
+  start: true, progress: true, order_card: true, delta: true,
+  final: true, handoff: true, done: true, error: true,
 };
 const progressStages: Record<NonNullable<StreamEvent['stage']>, true> = {
   recognition: true, query: true, retrieval: true, validation: true,
@@ -138,17 +142,17 @@ function normalizedEvent(raw: RawSseEvent): StreamEvent | null {
   const conversation = (payload.conversation ?? payload.data) as Conversation | undefined;
   const stage = payload.stage;
   if (type === 'progress' && (typeof stage !== 'string' || !Object.prototype.hasOwnProperty.call(progressStages, stage) || typeof payload.message !== 'string')) return null;
+  if (type === 'final' && (typeof payload.text !== 'string' || !Array.isArray(payload.citations))) return null;
   return {
     type,
     messageId: String(payload.messageId ?? payload.assistantMessageId ?? '') || undefined,
     text: typeof payload.text === 'string' ? payload.text : typeof payload.delta === 'string' ? payload.delta : undefined,
-    status: typeof payload.status === 'string' ? payload.status : typeof payload.message === 'string' && type === 'tool_status' ? payload.message : undefined,
     stage: type === 'progress' ? stage as StreamEvent['stage'] : undefined,
     message: type === 'progress' ? payload.message as string : undefined,
     order,
     error: typeof payload.error === 'string' ? payload.error : typeof payload.message === 'string' && type === 'error' ? payload.message : undefined,
     conversation,
-    citations: citationsFrom(payload.citations),
+    citations: type === 'final' ? citationsFrom(payload.citations) : undefined,
   };
 }
 
