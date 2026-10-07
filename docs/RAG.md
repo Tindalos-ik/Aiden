@@ -550,7 +550,7 @@ System Prompt 要求知识事实只依据本轮 `search_faq` 结果，并逐项�
 
 每个失败诉求分别记录原问法、入口及原因：空召回和最高可比较重排分低于阈值使用 `retrieval_low_confidence`（原因分别说明空召回或低分），自评判不足或结果无法解析使用 `generation_insufficient_knowledge`。工具服务故障只返回错误文案，不作为知识不足入池。`finish_assistant_message` 在保存最终助手消息及引用快照的同一 MySQL 事务中批量写入 `low_confidence_questions`，重复收尾或 SSE 重放不重复写入。
 
-退款办理另有一个入口：本人订单没有正文覆盖用户陈述原因的现行商家政策时，`graph.py` 的 `_refund_policy_result()` 生成 `entrypoint = refund_policy_unavailable`（原因「没有可核验且覆盖本次退款原因的有效商家退款政策」）。它和上面的检索类入口写同一张表，但指向的是需要业务补录或核准商家政策，而不是知识库缺条目；知识库检索结果不能作为退款提交依据。
+退款办理另有一个入口：本人订单没有正文覆盖用户陈述原因的现行商家政策时，`refund.py` 的 `_refund_policy_result()` 生成 `entrypoint = refund_policy_unavailable`（原因「没有可核验且覆盖本次退款原因的有效商家退款政策」）。它和上面的检索类入口写同一张表，但指向的是需要业务补录或核准商家政策，而不是知识库缺条目；知识库检索结果不能作为退款提交依据。
 
 用户点击已完成助手回答的满意度按钮时，带鉴权的 `POST /api/conversations/{conversation_id}/messages/{message_id}/feedback` 仅接收 `{"rating":"satisfied"}` 或 `{"rating":"unsatisfied"}`；服务端核验会话归属和目标消息，并在“不满意”时关联真实用户问题，以 `user_feedback_unresolved` 入同一问题池。满意反馈只保存到 `messages.feedback`，不入池；已记录的反馈重复提交返回原结果，不允许改选。历史消息回传 `feedback` 供刷新后回显；失败时页面提示错误，可重试。消息表的 `citations` JSON 保存生成时的来源快照；历史消息和 SSE 的 `citations` 事件使用同一结构，前端点击 `[n]` 可查看原 chunk 正文与章节。Markdown 来源还可经已认证的 `GET /api/knowledge/source/{chunk_id}` 打开原始文档。问题入池不等于人工审核或自动补库，后两项尚未实现。
 
@@ -873,7 +873,7 @@ remote 模式下用员工账号登录后进入 `/staff/rag`。该页面调用员
 
 ### 当次检索证据
 
-`graph.py` 对每个诉求冻结其原话、检索问题及当次 `search_faq` 工具返回的有序片段（`rank`、`chunk_id`、正文、来源、章节、可比较分数）；没有执行检索标为 `not_searched`，执行成功即使零结果也标为 `searched`，工具故障标为 `error`。自动入池时，`finish_assistant_message()` 在回答完成的事务内将相应诉求证据写入 `low_confidence_questions`，不以最终 `citations` 冒充全部召回。负反馈发生得更晚：回答完成时先把逐诉求快照存于员工专用的 `messages.retrieval_snapshots`，`submit_message_feedback()` 再复制到每一条负反馈原话，绝不审核时重查；普通用户消息 API 不返回该字段。旧记录没有证据时 `retrieval_snapshot = null`，已执行检索但无片段为 `[]` + `searched`，未执行检索为 `[]` + `not_searched`，失败为 `[]` + `error`。详情页逐条显示这些区别；多诉求只展示各自当次检索结果。
+`nodes/request.py` 的 `finish_request()` 对每个诉求冻结其原话、检索问题及当次 `search_faq` 工具返回的有序片段（`rank`、`chunk_id`、正文、来源、章节、可比较分数）；没有执行检索标为 `not_searched`，执行成功即使零结果也标为 `searched`，工具故障标为 `error`。自动入池时，`finish_assistant_message()` 在回答完成的事务内将相应诉求证据写入 `low_confidence_questions`，不以最终 `citations` 冒充全部召回。负反馈发生得更晚：回答完成时先把逐诉求快照存于员工专用的 `messages.retrieval_snapshots`，`submit_message_feedback()` 再复制到每一条负反馈原话，绝不审核时重查；普通用户消息 API 不返回该字段。旧记录没有证据时 `retrieval_snapshot = null`，已执行检索但无片段为 `[]` + `searched`，未执行检索为 `[]` + `not_searched`，失败为 `[]` + `error`。详情页逐条显示这些区别；多诉求只展示各自当次检索结果。
 
 ### 整理任务与审核
 

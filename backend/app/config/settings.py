@@ -34,7 +34,7 @@ class Settings:
     # 于是“工具结果之后再由模型生成回答”这一步必然被拒。关掉思考模式后模型不再产生
     # reasoning_content，该约束自然消失；同时省掉思维链的 token 开销。
     #
-    # 只作用于在线对话（agent/graph.py 的 ChatOpenAI）。离线对话挖掘走自己的裸 OpenAI
+    # 只作用于在线对话（agent/models.py 的 ChatOpenAI）。离线对话挖掘走自己的裸 OpenAI
     # 客户端（services/rag/extraction.py，读 MINING_LLM_*），不受这里影响。
     openai_thinking_mode: str = os.getenv("OPENAI_THINKING_MODE", "").strip().lower()
     # 仅作开关判断；Langfuse SDK 自行从环境读取凭据和上报地址。

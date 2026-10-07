@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.agent import graph
+from app.agent import graph, models
+from app.agent.nodes import context
 from evals import run_customer_rag as runner
 from test_multi_requests import FakeModel, FakeToolNode, request
 
@@ -16,11 +17,11 @@ class OnlineEvaluationTests(unittest.IsolatedAsyncioTestCase):
         FakeToolNode.payloads = payloads or {"search_faq": {"status": "ok", "results": [
             {"chunkId": "fixture", "answer": "型号:MH-LP50；不含 App 联网功能；不支持满溢推送提醒", "score": 0.5,
              "sourcePath": "product-specs.md", "sectionPath": "智能猫砂盆 Lite(型号 MH-LP50)"}]}}
-        with (patch.object(graph, "ChatOpenAI", return_value=FakeModel(requests)),
+        with (patch.object(models, "ChatOpenAI", return_value=FakeModel(requests)),
               patch.object(graph, "ToolNode", FakeToolNode),
               patch.object(graph.settings, "langfuse_enabled", False),
-              patch.object(graph, "recent_messages", side_effect=AssertionError("禁止数据库历史读取")),
-              patch.object(graph, "finish_assistant_message", side_effect=AssertionError("禁止保存"))):
+              patch.object(context, "recent_messages", side_effect=AssertionError("禁止数据库历史读取")),
+              patch.object(context, "finish_assistant_message", side_effect=AssertionError("禁止保存"))):
             return await runner._online_case({"query": query, "workflow": {"history": history or []}},
                                              threshold, False, None, None)
 

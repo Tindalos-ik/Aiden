@@ -9,7 +9,8 @@ from unittest.mock import Mock, patch
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage, ToolMessage
 
-from app.agent import graph as support_graph
+from app.agent import graph as support_graph, models, order_selection, prompt
+from app.agent.nodes import context, tools
 from app.services.tools.ticket_create import create_ticket
 
 
@@ -89,15 +90,15 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
                           answer_suffix=answer_suffix)
         self.last_model = model
         self.last_trace_client = Mock()
-        tools = {name: SimpleNamespace(name=name) for name in support_graph._TOOLS_BY_NAME}
+        tool_registry = {name: SimpleNamespace(name=name) for name in tools._TOOLS_BY_NAME}
         with (
-            patch.object(support_graph, "ChatOpenAI", return_value=model),
+            patch.object(models, "ChatOpenAI", return_value=model),
             patch.object(support_graph, "ToolNode", FakeToolNode),
-            patch.object(support_graph, "_TOOLS_BY_NAME", tools),
-            patch.object(support_graph, "recent_messages", return_value=[
+            patch.object(tools, "_TOOLS_BY_NAME", tool_registry),
+            patch.object(context, "recent_messages", return_value=[
                 *(history or []), {"role": "user", "content": text},
             ]),
-            patch.object(support_graph, "finish_assistant_message") as finish,
+            patch.object(context, "finish_assistant_message") as finish,
             patch.object(support_graph.settings, "langfuse_enabled", langfuse),
             patch("langfuse.langchain.CallbackHandler", return_value=BaseCallbackHandler())
             if langfuse else nullcontext(),
@@ -235,7 +236,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("已回答", status["answer"])
 
     async def test_refund_order_selection_is_rechecked_for_owner(self):
-        previous = support_graph._order_list_reply(
+        previous = order_selection._order_list_reply(
             [{"order_no": "TEST-001", "items": []}], refund=True,
         )
         selected = request("refund_return", "create_ticket", "办理第一笔订单退款", "TEST-001")
@@ -358,7 +359,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
             "确认登记",
             [request("refund_return", "create_ticket", "确认登记退款处理",
                      action_quote="确认登记", refund_consent="agree")],
-            history=[{"role": "assistant", "content": support_graph._REFUND_CONFIRM_PROMPT.format(
+            history=[{"role": "assistant", "content": prompt._REFUND_CONFIRM_PROMPT.format(
                 order_no="TEST-001", reason="质量问题") }],
         )
         self.assertEqual(calls, [])
@@ -404,7 +405,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_selected_owned_order_with_irrelevant_faq_needs_manual_guidance(self):
-        previous = support_graph._order_list_reply([
+        previous = order_selection._order_list_reply([
             {"order_no": "TEST-001", "items": [{"product_name": "第一件", "quantity": 1}]},
             {"order_no": "TEST-002", "items": [{"product_name": "第二件", "quantity": 1}]},
         ], refund=True)
@@ -470,14 +471,14 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
     def test_order_list_remains_selectable_inside_multi_reply(self):
         answer = (
             "【1】 已回答政策。\n"
-            f"【2】 {support_graph._ORDER_LIST_HEADER}\n"
+            f"【2】 {order_selection._ORDER_LIST_HEADER}\n"
             "1. TEST-001 — 猫粮 ×1\n"
             "【3】 已回答其他问题。"
         )
-        self.assertEqual(support_graph._parse_order_list(answer), ["TEST-001"])
+        self.assertEqual(order_selection._parse_order_list(answer), ["TEST-001"])
 
     async def test_selection_from_previous_multi_reply_is_rechecked(self):
-        previous = f"【1】 已回答政策。\n【2】 {support_graph._ORDER_LIST_HEADER}\n1. TEST-001 — 猫粮 ×1"
+        previous = f"【1】 已回答政策。\n【2】 {order_selection._ORDER_LIST_HEADER}\n1. TEST-001 — 猫粮 ×1"
         item = request("logistics", "logistics", "查询列表第一个订单的物流", "TEST-001")
         item["entities"]["order_reference"] = "listed_selection"
         item["entities"]["reference_quote"] = "第一个"
@@ -528,7 +529,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
             payloads,
         )
         self.assertEqual([name for name, _ in calls], ["search_faq", "search_faq"])
-        self.assertEqual(result["answer"].count(support_graph._KNOWLEDGE_REFUSAL), 2)
+        self.assertEqual(result["answer"].count(prompt._KNOWLEDGE_REFUSAL), 2)
         self.assertEqual(result["citations"], [])
         records = self.last_finish.call_args.kwargs["low_confidence"]
         self.assertEqual(
@@ -560,7 +561,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
                     "查退货政策", [request("refund_return", "policy", "查退货政策")],
                     payloads, adequacy=verdict,
                 )
-                self.assertEqual(result["answer"], support_graph._KNOWLEDGE_REFUSAL)
+                self.assertEqual(result["answer"], prompt._KNOWLEDGE_REFUSAL)
                 self.assertEqual(result["citations"], [])
                 records = self.last_finish.call_args.kwargs["low_confidence"]
                 self.assertEqual(len(records), 1)
@@ -583,7 +584,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
              request("refund_return", "policy", questions[1], quote=questions[1])],
             payloads, cite_faq=False,
         )
-        self.assertEqual(result["answer"].count(support_graph._KNOWLEDGE_REFUSAL), 2)
+        self.assertEqual(result["answer"].count(prompt._KNOWLEDGE_REFUSAL), 2)
         self.assertEqual(result["citations"], [])
         self.assertEqual(
             [(row["original_question"], row["entrypoint"]) for row in
@@ -608,7 +609,7 @@ class MultiRequestTests(unittest.IsolatedAsyncioTestCase):
             cite_faq=lambda question: question == first,
         )
         self.assertIn("【1】 已回答：猫粮口味 [1]", result["answer"])
-        self.assertIn(f"【2】 {support_graph._KNOWLEDGE_REFUSAL}", result["answer"])
+        self.assertIn(f"【2】 {prompt._KNOWLEDGE_REFUSAL}", result["answer"])
         self.assertEqual([row["chunkId"] for row in result["citations"]], ["flavors"])
         self.assertEqual(
             [(row["original_question"], row["entrypoint"]) for row in

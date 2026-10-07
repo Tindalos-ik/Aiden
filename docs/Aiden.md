@@ -52,7 +52,7 @@ Aiden/
 
 ### 目标目录（规划，不代表文件或能力已经存在）
 
-下面保留早期分层设想。当前节点主要在 `agent/graph.py`，并未拆成 Supervisor / specialists；memory、guardrails、model、observability 尚无独立服务实现，其相关已实现逻辑仍位于图及现有模块。当前脚本在 `backend/scripts/`，不是根目录 `scripts/`。
+下面保留早期分层设想。当前节点实现集中在 `agent/nodes/`，由 `agent/graph.py` 装配成图，并未拆成 Supervisor / specialists；memory、guardrails、model、observability 尚无独立服务实现，其相关已实现逻辑仍位于图及现有模块。当前脚本在 `backend/scripts/`，不是根目录 `scripts/`。
 
 
 ```
@@ -160,7 +160,7 @@ graph TD
 
 
 ### System Prompt
-以下 Prompt、模板和结构化输出是教学示例，不是运行时原文。实际 `SYSTEM_PROMPT` 与多诉求契约分别在 `backend/app/agent/graph.py`、`intent.py`；不得据示例承诺未核实的仓库、送达日期或到账时效。
+以下 Prompt、模板和结构化输出是教学示例，不是运行时原文。实际 `SYSTEM_PROMPT` 与多诉求契约分别在 `backend/app/agent/prompt.py`、`intent.py`；不得据示例承诺未核实的仓库、送达日期或到账时效。
 
 
 ```
@@ -713,7 +713,7 @@ graph.add_edge("save_answer", END)
 
 
 ## 工具系统与 MCP 接入（MCP 为规划）
-**当前实现：** `services/tools/registry.py` 静态登记八个内置工具，意图白名单由 `agent/graph.py` 决定，`InjectedState` 注入可信身份，工具各自核验权限和业务条件。以下 MCP 动态发现和统一超时/重试/审计引擎是目标设计，尚无 MCP 客户端或统一执行引擎实现。
+**当前实现：** `services/tools/registry.py` 静态登记八个内置工具，意图白名单由 `agent/nodes/intent.py` 决定，`InjectedState` 注入可信身份，工具各自核验权限和业务条件。以下 MCP 动态发现和统一超时/重试/审计引擎是目标设计，尚无 MCP 客户端或统一执行引擎实现。
 
 
 对于agent而言，它只需要一份现在能调哪些工具的清单，真实系统中，这份清单有两个来源

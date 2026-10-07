@@ -13,7 +13,7 @@ Aiden 当前是一个智能订单客服原型。后端客服 Agent 在 `backend/
 1. FastAPI 验证登录 Cookie 和会话归属。
 2. MySQL 保存用户消息，并创建一条状态为 `streaming` 的助手消息。
 3. Agent 从 MySQL 读取近期历史，识别用户意图并补全当前问题。
-4. 服务端按识别结果决定本轮允许使用哪个工具，并由 `backend/app/agent/graph.py` 中的 `dispatch_tool_call()` 亲自构造这次调用的名称和参数；模型只负责理解诉求，不能自行扩展工具权限。写操作还要额外通过服务端复核：退款提交（`submit_after_sale`）要求紧邻上一轮保存的确认状态与本轮明确的「确认提交」原文同时成立；工单登记（`create_ticket`）要求本轮原话确实包含该登记诉求。识别结果解析失败、置信度不足或参数对不上时，服务端清空白名单并给出固定兜底答复，不执行任何工具。
+4. 服务端按识别结果决定本轮允许使用哪个工具，并由 `backend/app/agent/nodes/tools.py` 中的 `dispatch_tool_call()` 亲自构造这次调用的名称和参数；模型只负责理解诉求，不能自行扩展工具权限。写操作还要额外通过服务端复核：退款提交（`submit_after_sale`）要求紧邻上一轮保存的确认状态与本轮明确的「确认提交」原文同时成立；工单登记（`create_ticket`）要求本轮原话确实包含该登记诉求。识别结果解析失败、置信度不足或参数对不上时，服务端清空白名单并给出固定兜底答复，不执行任何工具。
 5. LangGraph 在必要时执行工具，再让模型根据工具结果组织回答。
 6. 最终回答由图节点 `save_answer()` 经 `backend/app/persistence/mysql/chat.py` 中的 `finish_assistant_message()` 整段写入助手消息；`backend/app/api/routes/conversations.py` 中的 `stream_message()` 只在 `save_answer` 这一步结束、拿到完整回答后发一次 `delta`（同一条回答不会被拆成多次 `delta`），需要时紧跟 `citations` 或 `handoff` 事件，末尾发 `done`，执行失败则发 `error`。模型中间产出的草稿和被拒答替换掉的文本都不会流到前端。
 
@@ -38,7 +38,20 @@ backend/app/
 ├─ agent/
 │  ├─ state.py                          # LangGraph 节点间共享的数据结构
 │  ├─ intent.py                         # 意图字段定义及分类 Prompt
-│  └─ graph.py                          # 主 Prompt、识别、路由、工具调用与图装配
+│  ├─ prompt.py                         # 主客服 System Prompt 与固定话术
+│  ├─ models.py                         # 模型客户端创建与配置校验
+│  ├─ messages.py                       # 历史消息与文本处理辅助
+│  ├─ order_routing.py                  # 语义路由与澄清话术
+│  ├─ order_selection.py                # 本人订单列表核验与选择
+│  ├─ refund.py                         # 退款办理与政策核对
+│  ├─ nodes/                            # 各图节点工厂与实现
+│  │  ├─ context.py                     # load_context、save_answer
+│  │  ├─ intent.py                      # 意图识别与服务端授权
+│  │  ├─ tools.py                       # 工具调用构造与 after_tools
+│  │  ├─ knowledge.py                   # 知识证据充分性校验
+│  │  ├─ answer.py                      # 最终回答生成
+│  │  └─ request.py                     # 当前请求收尾与证据冻结
+│  └─ graph.py                          # 图装配：build_support_graph、节点与边
 ├─ services/tools/
 │  ├─ registry.py                       # 八个客服工具的静态注册入口
 │  ├─ customer.py                       # 订单、物流、FAQ 读工具
@@ -56,6 +69,8 @@ backend/app/
 ```
 
 前端 remote API 的调用和 SSE 解码位于 `frontend/src/api/remote.ts`。API 契约的主要输入模型在 `backend/app/api/schemas.py`。
+
+依赖方向：图组装在 `graph.py`——由 `models.py` 创建模型客户端，并从 `nodes/` 取用节点（既有 `make_*` 工厂按本次模型/评估参数绑定的节点，也有 `route_intent`、`finish_request`、`after_tools` 这类直接注册的纯节点，节点名沿用原名）；`nodes/` 再调用 `prompt.py`、`messages.py`、`order_selection.py`、`order_routing.py`、`refund.py` 等业务辅助。这些模块不反向 `import graph`，也没有新增架构层。
 
 ### 读代码时会遇到的几个词
 
@@ -142,7 +157,7 @@ class Settings:
 
 摘录来自 `backend/app/config/settings.py` 中的 `load_dotenv` 和 `Settings`。其中：
 
-- `OPENAI_API_KEY` 和 `OPENAI_MODEL` 是调用模型必需项；缺少任一项时，`model_configuration_error()` 返回面向本地开发者的错误，流式接口发送 `error` 事件。
+- `OPENAI_API_KEY` 和 `OPENAI_MODEL` 是调用模型必需项；缺少任一项时，`backend/app/agent/models.py` 中的 `model_configuration_error()` 返回面向本地开发者的错误，流式接口发送 `error` 事件。
 - `OPENAI_BASE_URL` 可选，用于 OpenAI 兼容服务；为空时 SDK 使用默认地址。
 - `SESSION_COOKIE_NAME`、`SESSION_COOKIE_SECURE` 和 `SESSION_TTL_SECONDS` 控制登录 Cookie。
 - `max_history_messages`、`max_message_chars` 和 `max_context_chars` 目前写在代码中，并非环境变量。
@@ -159,10 +174,10 @@ class Settings:
 
 项目当前没有独立的 Prompt 管理服务或模板目录，提示词以 Python 常量保存：
 
-1. `SYSTEM_PROMPT` 在 `backend/app/agent/graph.py`，用于主回答模型。它说明客服语气、当前可用能力和不得编造数据等约束。`load_context()` 将它放在主模型上下文开头。
+1. `SYSTEM_PROMPT` 在 `backend/app/agent/prompt.py`，用于主回答模型。它说明客服语气、当前可用能力和不得编造数据等约束。`load_context()` 将它放在主模型上下文开头。
 2. 当前运行的多请求识别指令是 `MULTI_REQUEST_PROMPT`，在 `backend/app/agent/intent.py`；同文件保留的单项分类和语义补全 Prompt 当前没有独立调用。退款办理的确认、原因及订单引用由多请求结构化结果表达。
 
-识别时，`_structured_messages()` 会去掉历史中所有 `SystemMessage`（包括主客服 Prompt），换成当前阶段指令及 JSON Schema。`recognize_intent()` 先只用本轮原话拆分；缺目标或有待续的订单、退款上下文时再带近期历史识别。结果由 Pydantic 校验字段、枚举和范围；识别器不接收业务工具定义。实现见 `backend/app/agent/graph.py`。
+识别时，`_structured_messages()` 会去掉历史中所有 `SystemMessage`（包括主客服 Prompt），换成当前阶段指令及 JSON Schema。`recognize_intent()` 先只用本轮原话拆分；缺目标或有待续的订单、退款上下文时再带近期历史识别。结果由 Pydantic 校验字段、枚举和范围；识别器不接收业务工具定义。实现见 `backend/app/agent/nodes/intent.py`。
 
 ### 5.2 输出字段由 Pydantic 模型限制
 
@@ -376,7 +391,7 @@ return graph.compile()
 
 `query_order` 和 `query_logistics` 的函数签名使用 `InjectedState("user_id")`，因此模型提供的 JSON 参数不含身份字段。这两个工具打开一个短生命周期的 SQLAlchemy Session，整理成普通 JSON 字符串后关闭 Session；模型不会拿到 ORM 对象或数据库连接。关系查询的 `WHERE` 子句会包含用户 ID。实现见 `backend/app/services/tools/customer.py` 中的 `query_order()`、`query_logistics()` 和 `search_faq()`。
 
-知识检索默认是 dense + BM25 的混合召回加精排，不是单路向量相似度：`RAG_ONLINE_STRATEGY` 默认 `hybrid_rerank`，`KnowledgeVectorStore.hybrid_search()` 在 Milvus 内同时发起 dense 与 BM25 两路召回、用 `RRFRanker(60)` 融合，取 `RAG_ONLINE_CANDIDATE_LIMIT`（默认 50）条候选；`_rerank()` 用 `RAG_RERANKER_MODEL`（默认 `BAAI/bge-reranker-v2-m3`）对回表正文打分，sigmoid 归一到 0..1 后按 `RAG_RERANK_LIMIT`（默认 10）截断，最终最多返回 `RAG_ONLINE_RESULT_LIMIT`（默认 10）条。Milvus 检索期间不持有 MySQL Session，回表才开短事务。命中项只有当前有效且 `vector_status = 'vectorized'` 的块会交给模型；`backend/app/agent/graph.py` 还会用 `RAG_MIN_RERANK_SCORE`（默认 0.35）在最高重排分低于阈值时走低置信度拒答，而不是把低分知识当结论。向量服务或 Milvus 故障时返回通用错误结果，不静默降级。售后类工具另在 `backend/app/services/tools/`：`after_sale.py` 的 `query_after_sale` 与 `ticket_query.py` 的 `query_ticket` 读本人售后申请与工单，`ticket_create.py` 的 `create_ticket` 登记待处理工单，`after_sale_submit.py` 的 `query_refund_policy` 经 `preview_request()` 读本人订单当前有效的商家退款政策、`submit_after_sale` 在跨轮确认成立后写入退款申请。因此“政策依据”有两条互不替代的来源：知识库召回只用于解释与咨询（`knowledge_chunks`），退款提交只认 `query_refund_policy` 返回的现行政策行（`policies`）。
+知识检索默认是 dense + BM25 的混合召回加精排，不是单路向量相似度：`RAG_ONLINE_STRATEGY` 默认 `hybrid_rerank`，`KnowledgeVectorStore.hybrid_search()` 在 Milvus 内同时发起 dense 与 BM25 两路召回、用 `RRFRanker(60)` 融合，取 `RAG_ONLINE_CANDIDATE_LIMIT`（默认 50）条候选；`_rerank()` 用 `RAG_RERANKER_MODEL`（默认 `BAAI/bge-reranker-v2-m3`）对回表正文打分，sigmoid 归一到 0..1 后按 `RAG_RERANK_LIMIT`（默认 10）截断，最终最多返回 `RAG_ONLINE_RESULT_LIMIT`（默认 10）条。Milvus 检索期间不持有 MySQL Session，回表才开短事务。命中项只有当前有效且 `vector_status = 'vectorized'` 的块会交给模型；`backend/app/agent/nodes/knowledge.py` 还会用 `RAG_MIN_RERANK_SCORE`（默认 0.35）在最高重排分低于阈值时走低置信度拒答，而不是把低分知识当结论。向量服务或 Milvus 故障时返回通用错误结果，不静默降级。售后类工具另在 `backend/app/services/tools/`：`after_sale.py` 的 `query_after_sale` 与 `ticket_query.py` 的 `query_ticket` 读本人售后申请与工单，`ticket_create.py` 的 `create_ticket` 登记待处理工单，`after_sale_submit.py` 的 `query_refund_policy` 经 `preview_request()` 读本人订单当前有效的商家退款政策、`submit_after_sale` 在跨轮确认成立后写入退款申请。因此“政策依据”有两条互不替代的来源：知识库召回只用于解释与咨询（`knowledge_chunks`），退款提交只认 `query_refund_policy` 返回的现行政策行（`policies`）。
 
 在线 Agent 的模型客户端还需要 `OPENAI_THINKING_MODE=disabled`：工具调用由服务端合成（`dispatch_tool_call` 构造的 `AIMessage` 不带 `reasoning_content`），而 DeepSeek 思考模式要求带 `tools` 的请求必须回传历史 `reasoning_content`，否则在「工具结果后再生成回答」这一步返回 400。原因与替代做法见 [`RAG.md`](RAG.md#思考模式必须关闭)。
 
@@ -436,7 +451,7 @@ data: {}
 | FastAPI 应用与路由装配 | `backend/app/main.py` 中的 `app` 和 `include_router()` 调用 |
 | Cookie 身份依赖 | `backend/app/api/deps.py` 中的 `current_actor()`；`backend/app/persistence/mysql/chat.py` 中的 `get_user_for_session()` |
 | 发送消息 API、SSE 生命周期 | `backend/app/api/routes/conversations.py` 中的 `stream_message()`；`backend/app/api/sse.py` 中的 `sse_event()` |
-| Prompt、分类、订单目标校验、图节点 | `backend/app/agent/intent.py` 中的 `INTENT_CLASSIFICATION_PROMPT`、`SEMANTIC_EXTRACTION_PROMPT`、`IntentClassification` 和 `SemanticExtraction`；`backend/app/agent/state.py` 中的 `SupportState`；`backend/app/agent/graph.py` 中的 `SYSTEM_PROMPT`、`_semantic_route()` 和 `build_support_graph()` |
+| Prompt、分类、订单目标校验、图节点 | `backend/app/agent/intent.py` 中的 `INTENT_CLASSIFICATION_PROMPT`、`SEMANTIC_EXTRACTION_PROMPT`、`IntentClassification` 和 `SemanticExtraction`；`backend/app/agent/state.py` 中的 `SupportState`；`backend/app/agent/prompt.py` 中的 `SYSTEM_PROMPT`；`backend/app/agent/nodes/intent.py` 中的识别与授权（`recognize_intent`、`route_intent`、`_route_request`）；`backend/app/agent/order_routing.py` 中的 `_semantic_route()`；`backend/app/agent/graph.py` 中的 `build_support_graph()` 图装配 |
 | Agent 历史裁剪与消息状态 | `backend/app/persistence/mysql/chat.py` 中的 `recent_messages()`、`finish_assistant_message()` |
 | 订单、物流、FAQ 数据查询 | `backend/app/services/tools/customer.py` 中的 `query_order()`、`query_logistics()`、`search_faq()`；`backend/app/persistence/mysql/queries.py` 中的 `list_user_orders()`、`get_owned_order_with_shipments()` |
 | 在线语义检索链路 | `backend/app/services/rag/retrieval.py` 中的 `semantic_search()`、`_rerank()`；`backend/app/services/rag/embedding_text.py` 中的 `build_query_embedding_text()`；`backend/app/persistence/milvus/knowledge_store.py` 中的 `KnowledgeVectorStore.hybrid_search()`（dense 单路为 `search()`、BM25 单路为 `search_bm25()`）；`backend/app/persistence/mysql/knowledge.py` 中的 `get_vectorized_chunks_by_ids()` |

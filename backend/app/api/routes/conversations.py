@@ -6,7 +6,8 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.agent.graph import build_support_graph, model_configuration_error
+from app.agent.graph import build_support_graph
+from app.agent.models import model_configuration_error
 from app.api.deps import current_actor
 from app.api.schemas import (
     CreateConversationRequest, HumanMessageRequest, MessageFeedbackRequest, StreamMessageRequest,
