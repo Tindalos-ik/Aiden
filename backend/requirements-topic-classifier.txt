@@ -1,0 +1,5 @@
+# 旁路主题训练/推理专用；不并入在线API依赖，不自动安装/下载模型。
+torch>=2.2,<3
+transformers>=4.40,<5
+safetensors>=0.4,<1
+openai>=1.30,<3

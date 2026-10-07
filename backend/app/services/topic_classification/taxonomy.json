@@ -1,0 +1,135 @@
+{
+  "version": "aiden-topic-v1",
+  "labels": [
+    {
+      "id": "returns_exchange",
+      "display": "退换货",
+      "include": "退货、退款、换货的明确诉求",
+      "exclude": "仅说商品坏了不推断退换货；明确保修换新或维修归保修维修，普通换货归本类"
+    },
+    {
+      "id": "logistics",
+      "display": "物流",
+      "include": "发货、运输、派送、到货进度",
+      "exclude": "运费金额归运费"
+    },
+    {
+      "id": "size",
+      "display": "尺码",
+      "include": "大小、码数、合身、偏码",
+      "exclude": "规格功能归商品信息；仅断码、是否有货、补货归库存补货，不自动加尺码"
+    },
+    {
+      "id": "invoice",
+      "display": "发票",
+      "include": "开票、抬头、税票、报销凭证",
+      "exclude": "付款失败归支付"
+    },
+    {
+      "id": "quality",
+      "display": "质量问题",
+      "include": "破损、开胶、故障、瑕疵",
+      "exclude": "不自动添加退换货或维修"
+    },
+    {
+      "id": "shipping_fee",
+      "display": "运费",
+      "include": "包邮、运费承担、运费险赔付",
+      "exclude": "运输进度归物流；明确退货可同时退换货"
+    },
+    {
+      "id": "promotion",
+      "display": "优惠活动",
+      "include": "券、满减、活动、叠加规则",
+      "exclude": "买后降价补差归价保；会员积分归会员积分"
+    },
+    {
+      "id": "price_protection",
+      "display": "价保",
+      "include": "买后降价、价保期限、补差价",
+      "exclude": "购买前优惠归优惠活动"
+    },
+    {
+      "id": "payment",
+      "display": "支付",
+      "include": "付款失败、付款方式、分期、重复扣款",
+      "exclude": "明确退款诉求归退换货"
+    },
+    {
+      "id": "order_change",
+      "display": "订单修改",
+      "include": "下单后改地址、电话、取消订单",
+      "exclude": "换绑电话归账号"
+    },
+    {
+      "id": "stock",
+      "display": "库存补货",
+      "include": "是否有货、断码、补货",
+      "exclude": "码数合身归尺码"
+    },
+    {
+      "id": "product_info",
+      "display": "商品信息",
+      "include": "材质、功能、清洗、使用方式",
+      "exclude": "具体故障归质量问题"
+    },
+    {
+      "id": "warranty",
+      "display": "保修维修",
+      "include": "保修、维修、保修换新",
+      "exclude": "普通换货归退换货；坏了不自动加维修"
+    },
+    {
+      "id": "account",
+      "display": "账号",
+      "include": "登录、密码、绑定、安全",
+      "exclude": "修改订单电话归订单修改"
+    },
+    {
+      "id": "membership",
+      "display": "会员积分",
+      "include": "会员权益、等级、积分使用",
+      "exclude": "一般优惠活动归优惠活动"
+    },
+    {
+      "id": "review",
+      "display": "评价",
+      "include": "评价修改、追评、晒单",
+      "exclude": "投诉客服不因负面情绪归评价"
+    },
+    {
+      "id": "other",
+      "display": "其他",
+      "include": "明确可理解但不属于任何上述主题，如营业时间、联系人工、客服投诉",
+      "exclude": "含糊、缺上下文、乱码或无法判断不是其他；不得与具体主题共存"
+    }
+  ],
+  "category_mapping": {
+    "version": "mysql-category-prelabel-v1",
+    "usage": "仅辅助预标，非人工真值，不修改FAQ/chunk category；needs_human_confirmation禁止自动确定",
+    "entries": [
+      {"category":"会员权益","suggested_labels":["membership"],"status":"prelabel"},
+      {"category":"发票","suggested_labels":["invoice"],"status":"prelabel"},
+      {"category":"售后","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"售后手册","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"售后手册 > 受理范围","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"商品 FAQ","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"商品 FAQ > 使用与保养","suggested_labels":["product_info"],"status":"prelabel"},
+      {"category":"商品 FAQ > 家电","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"商品 FAQ > 手机数码","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"商品 FAQ > 服饰鞋包","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"商品与购物 FAQ","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"商品规格手册","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"客服服务","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"开票与配送","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"物流","suggested_labels":["logistics"],"status":"prelabel"},
+      {"category":"知识文档目录","suggested_labels":[],"status":"needs_human_confirmation"},
+      {"category":"订单物流","suggested_labels":["logistics"],"status":"prelabel"},
+      {"category":"退货政策","suggested_labels":["returns_exchange"],"status":"prelabel"},
+      {"category":"退货政策 > 七天无理由退货","suggested_labels":["returns_exchange"],"status":"prelabel"},
+      {"category":"退货退款政策","suggested_labels":["returns_exchange"],"status":"prelabel"},
+      {"category":"退货退款政策 > 换货政策","suggested_labels":["returns_exchange"],"status":"prelabel"},
+      {"category":"退货退款政策 > 无理由退货","suggested_labels":["returns_exchange"],"status":"prelabel"}
+    ]
+  }
+}

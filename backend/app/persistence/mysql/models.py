@@ -612,6 +612,72 @@ class LowConfidenceQuestion(UUIDPrimaryKey, Base):
     )
 
 
+class TopicClassificationPrediction(UUIDPrimaryKey, Base):
+    """某条低置信度原话在指定输入与模型版本下的旁路预测。"""
+
+    __tablename__ = "topic_classification_predictions"
+    __table_args__ = (
+        UniqueConstraint("source_id", "input_hash", "model_version", name="uq_topic_prediction_source_input_model"),
+        CheckConstraint("status IN ('predicted', 'uncertain')", name="status_valid"),
+        Index("ix_topic_prediction_model_source", "model_version", "source_id"),
+    )
+
+    source_id: Mapped[str] = mapped_column(
+        ForeignKey("low_confidence_questions.id", ondelete="CASCADE"), nullable=False
+    )
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    scores: Mapped[dict] = mapped_column(JSON, nullable=False)
+    predicted_labels: Mapped[list] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(255), nullable=False)
+    taxonomy_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class TopicClassificationHumanReview(UUIDPrimaryKey, Base):
+    """独立于模型版本的原话人工最终标签；仅显式人工操作可变更。"""
+
+    __tablename__ = "topic_classification_human_reviews"
+    __table_args__ = (
+        UniqueConstraint("source_id", "input_hash", name="uq_topic_human_source_input"),
+        CheckConstraint(
+            "status IN ('confirmed', 'uncertain', 'insufficient_context')",
+            name="status_valid",
+        ),
+        Index("ix_topic_human_status", "status", "updated_at"),
+    )
+
+    source_id: Mapped[str] = mapped_column(
+        ForeignKey("low_confidence_questions.id", ondelete="CASCADE"), nullable=False
+    )
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    labels: Mapped[list] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    reviewed_by_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class TopicClassificationHumanAudit(UUIDPrimaryKey, Base):
+    """每次人工最终标注的不可覆盖操作记录。"""
+
+    __tablename__ = "topic_classification_human_audits"
+    __table_args__ = (Index("ix_topic_human_audit_review_time", "human_review_id", "created_at"),)
+
+    human_review_id: Mapped[str] = mapped_column(
+        ForeignKey("topic_classification_human_reviews.id", ondelete="CASCADE"), nullable=False
+    )
+    staff_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    previous_labels: Mapped[list | None] = mapped_column(JSON)
+    previous_status: Mapped[str | None] = mapped_column(String(32))
+    labels: Mapped[list] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utc_now_naive)
+
+
 class Ticket(UUIDPrimaryKey, TimestampMixin, Base):
     """用户诉求登记的待处理工单，不代表售后申请已经创建。
 
