@@ -124,11 +124,11 @@ def make_recognize_intent(json_model: Runnable[LanguageModelInput, BaseMessage])
     """绑定非流式 JSON 模型，识别阶段只发送受控进度事件。"""
     async def recognize_intent(state: SupportState) -> dict[str, Any]:
         """先按本轮原话识别；格式异常重试一次，指代不明时再借助历史。"""
-        current_message = HumanMessage(content=_latest_user_text(state["messages"]))
-        current_only = _structured_messages([current_message], MULTI_REQUEST_PROMPT, SupportRequests)
         await adispatch_custom_event(
             "support_progress", {"stage": "recognition", "message": "正在识别您的服务诉求"}
         )
+        current_message = HumanMessage(content=_latest_user_text(state["messages"]))
+        current_only = _structured_messages([current_message], MULTI_REQUEST_PROMPT, SupportRequests)
         requests: SupportRequests | None = None
         for attempt in range(2):
             messages = current_only
