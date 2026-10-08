@@ -154,7 +154,14 @@ async def stream_message(
                     "assistant_message_id": pair.assistant_message_id,
                     "user_id": actor["id"],
                 }
-                async for event in graph.astream_events(initial_state, version="v2"):
+                async for event in graph.astream_events(
+                    initial_state, version="v2",
+                    config={"metadata": {
+                        "conversation_id": conversation_id,
+                        "assistant_message_id": pair.assistant_message_id,
+                        "aiden_source": "online",
+                    }},
+                ):
                     progress = progress_payload(event)
                     if progress is not None:
                         yield sse_event("progress", progress)

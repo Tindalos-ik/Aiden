@@ -14,7 +14,7 @@
 | 已实现，仍需真实环境验收 | 售后页退款/退货/换货与员工处理；对话退款限本人单商品订单、政策覆盖原因和原文“确认提交” | `/app/service`、`/staff/service`、`persistence/mysql/service_workflow.py`、`services/tools/after_sale_submit.py` |
 | 已实现，仍需真实环境验收 | 站内人工排队、接单、双方消息、关闭；前端主要靠轮询，不是外部坐席平台 | `api/routes/staff.py`、`persistence/mysql/human_support.py`、`UserWorkspace.tsx`、`StaffWorkspace.tsx` |
 | 已实现，仍需真实环境验收 | 低置信度/负反馈入池、员工审核补 FAQ、同步及重试；历史挖掘是另一条抽取/脱敏/暂存/去重路径 | `services/rag/review_queue.py`、`conversation_mining.py`、`extraction.py` |
-| 已实现，范围有限 | RAG 控制台、离线评估、Langfuse 图回调、模型 usage 与意图成本归因；检索内部阶段未单独追踪 | `api/routes/rag_admin.py`、`backend/evals/run_customer_rag.py`、`agent/graph.py` |
+| 已实现，仍需真实环境验收 | RAG 控制台、离线评估、Langfuse 图回调与意图归因；员工只读观测 API 与 `/staff/observability` 页面按显式来源汇总，历史未标来源/意图不推断，展示安全 Trace 树、usage/costDetails.total（USD）、唯一 generation 按日/模型/业务桶费用趋势及覆盖；费用非结算账单，检索内部阶段未单独追踪。已通过隔离 staff 会话、真实只读上游 HTTP 和真实数据浏览器展示（31 天读 626 observation、36 Trace）；该场景不代表正式员工登录验收。历史 Langfuse usage 是未核验记录值，新 provider source marker 尚未由真实上游确认 | `api/routes/rag_admin.py`、`api/routes/observability.py`、`backend/evals/run_customer_rag.py`、`agent/graph.py`、`frontend/src/pages/Observability.tsx` |
 | 尚未实现 / 目标设计 | MCP 动态发现、自主 ReAct、历史摘要与语义记忆、小分类器及微调；外部支付退款执行及到账核实 | 后文标注的规划章节 |
 
 本地 mock 只展示模拟订单、对话和处理状态；remote 使用后端与真实依赖，出错不会静默切回 mock。`approved` / `awaiting_external_refund` 只表示审核通过 / 待外部退款，不能描述为款项已到账；站内人工排队也不保证立即接入。
@@ -24,7 +24,7 @@
 ```text
 Aiden/
 ├─ frontend/src/
-│  ├─ pages/                         # 登录、用户/员工会话、售后、RAG、评估与审核页面
+│  ├─ pages/                         # 登录、用户/员工会话、售后、RAG、评估、审核与观测页面
 │  ├─ components/
 │  ├─ api/                           # mock / remote 适配器与 SSE 客户端
 │  ├─ data/                          # mock 演示数据
@@ -35,8 +35,9 @@ Aiden/
 │  │  ├─ api/                        # deps.py、schemas.py、sse.py、routes/
 │  │  ├─ agent/                      # graph.py、state.py、intent.py、service_intent.py
 │  │  ├─ services/
-│  │  │  ├─ rag/                     # 建库、检索、历史挖掘、审核与控制台
-│  │  │  └─ tools/                   # 八个静态注册工具
+│  │  │  ├─ observability/            # Langfuse callback 与只读控制台聚合
+│  │  │  ├─ rag/                      # 建库、检索、历史挖掘、审核与控制台
+│  │  │  └─ tools/                    # 八个静态注册工具
 │  │  ├─ persistence/
 │  │  │  ├─ mysql/                   # 业务、会话、人工接管、知识与审核数据访问
 │  │  │  └─ milvus/                  # 知识向量、BM25 与混合召回
@@ -52,7 +53,7 @@ Aiden/
 
 ### 目标目录（规划，不代表文件或能力已经存在）
 
-下面保留早期分层设想。当前节点实现集中在 `agent/nodes/`，由 `agent/graph.py` 装配成图，并未拆成 Supervisor / specialists；memory、guardrails、model、observability 尚无独立服务实现，其相关已实现逻辑仍位于图及现有模块。当前脚本在 `backend/scripts/`，不是根目录 `scripts/`。
+下面保留早期分层设想。当前节点实现集中在 `agent/nodes/`，由 `agent/graph.py` 装配成图，并未拆成 Supervisor / specialists；memory、guardrails、model 尚无独立服务实现；只读观测与成本控制台及 Langfuse callback 已分别位于 `api/routes/observability.py` 和 `services/observability/`，不等同于独立的通用监控平台。当前脚本在 `backend/scripts/`，不是根目录 `scripts/`。
 
 
 ```

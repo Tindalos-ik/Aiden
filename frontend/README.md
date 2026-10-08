@@ -49,9 +49,17 @@ mock 还预置一张配送投诉工单，可在“售后与工单”页演示查
 
 FastAPI 提供普通用户对话、正式售后申请及工单进度闭环。顶部“售后与工单”进入用户 `/app/service` 或员工 `/staff/service`：用户核对订单商品和有效政策后确认提交，可查进度并在允许阶段取消；员工可审核申请、接手处理和关闭工单。remote 使用后端 MySQL 和 Cookie 权限，mock 仅在浏览器本地模拟申请及处理，不代表真实退款。员工还能从 `/staff/rag` 进入 RAG 建库与评估页面。订单和物流工具是否返回数据取决于后端数据与服务配置。
 
-员工页面顶部固定显示五个入口，顺序为“售后与工单 → RAG 建库 → 问题审核 → 主题分类器 → 客服工作台”；切换员工页面时入口顺序和数量不变，可随时返回工作台。
+员工页面顶部固定显示六个入口，顺序为“售后与工单 → RAG 建库 → 问题审核 → 主题分类器 → 观测与成本 → 客服工作台”；切换员工页面时入口顺序和数量不变，可随时返回工作台。
 
 remote 用户页中，知识类回答的 `[1]` 等引用编号可点击查看来源 chunk 的章节路径和正文；Markdown 来源提供跳回原文的链接。每段已完成的助手回答下方有“满意 / 不满意”反馈：remote 经 Cookie 鉴权 API 保存至 MySQL 消息行，刷新后从历史消息回显；不满意会由服务端关联真实用户问题并写入低置信度问题池，满意不入池。请求失败会提示错误并允许重试，remote 不回退到 mock。mock 只在浏览器本地演示数据中保存反馈，不代表服务端问题池已写入。
+
+### 员工观测与成本
+
+员工从顶部“观测与成本”或 `/staff/observability` 进入；路由要求 staff 身份。页面仅 remote 模式读取 Cookie 鉴权的 `/api/observability/*` 接口，mock 不生成或回退到假观测。可按固定提交的时间范围（最多 31 天）、source、model、intent、状态、conversation ID 和 message ID 筛选；默认 source 为在线客服 `aiden_support`，其他来源单独选择，不与在线客服费用混合。历史记录若无可靠 source marker 会归入其他/未记录来源，不能据此推断其属于在线或评测。
+
+概览显示根请求（不是会话）、generation 数、成功/错误/未知、时长样本及分位数、token、费用覆盖和按日请求量趋势；另有按唯一 generation 的 UTC 日期、模型、业务桶展示费用/token/调用数的每日明细，可在本地选择模型与业务桶。共享分类和未归因分别保留，不会复制或按根请求意图分摊。历史 Langfuse usage 是记录值，不等同于经 provider source marker 确认的用量；详情会标明来源是否核验。分页链路可打开 Trace 详情，按真实 parent ID 展示 observation 树。缺少父项的节点单列；循环引用安全停止。历史 trace 未记录 root intents 时显示未采集，不会从 generation attribution bucket 推断根意图。概览、链路和详情各自显示 envelope 状态与截断/失败信息；数据状态包含查询时间、最新记录与覆盖。上游查询错误显式显示，不静默回退。
+
+费用只展示后端提取的 Langfuse `costDetails.total`（USD）以及字段来源，不是结算账单；未知值不视为零，真实 numeric 0 与 null 分开。共享 `intent_classification` 和 `unattributed` 保持独立，不按根请求意图分摊。工具、数据库、GPU、embedding、Milvus/RRF 和 rerank 的未测量成本/耗时不代表免费或零耗时。`search_faq` 内部阶段未提供单独耗时。页面不显示原始输入/输出或任意 metadata。
 
 设置：
 
@@ -329,14 +337,15 @@ remote 历史仍每 3 秒轮询全部消息，会话状态每 5 秒刷新，保�
 
 ## 代码组织
 
-- `src/pages/`：登录、用户会话、mock/remote 两模式人工客服工作台、`RagConsole.tsx` 员工建库控制台及 `RagEvals.tsx` 评估页面。
+- `src/pages/`：登录、用户会话、mock/remote 两模式人工客服工作台、`RagConsole.tsx` 员工建库控制台、`RagEvals.tsx` 评估页面及 `Observability.tsx` 只读观测页。
 - `src/components/`：品牌、模式提示、会话状态等共享 UI。
 - `src/api/contracts.ts`：页面使用的统一适配器接口。
 - `src/api/mock.ts`：本地持久化、跨标签同步和模拟 Agent 行为。
 - `src/data/demoData.ts`：演示账号和各用户独立的订单数据。
 - `src/api/remote.ts`：Cookie、HTTP 和增量 SSE 解析。
 - `src/api/rag.ts`：员工建库与评估报告 API、Cookie 请求和错误处理。
-- `src/types.ts`：身份、会话、消息、订单与流事件类型。
+- `src/api/observability.ts`：员工只读观测 API、Cookie 请求及明确错误处理。
+- `src/types.ts`：身份、会话、消息、订单、流事件与观测 API 类型。
 
 TanStack Query 管理服务端数据及刷新；不使用额外全局状态库。普通用户与客服使用独立路由，最终权限仍由 API 服务端校验。
 

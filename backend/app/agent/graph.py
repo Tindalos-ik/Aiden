@@ -102,7 +102,10 @@ def build_support_graph(*, evaluation: dict[str, Any] | None = None):
     # 图在每条新消息中构建一次；在编译出口绑定一个回调，让节点、模型和工具
     # 共享同一条 trace，而不必在每个模型调用或 ToolNode 上重复传 callbacks。
     if settings.langfuse_enabled:
-        from langfuse.langchain import CallbackHandler
+        from app.services.observability.callback import SupportCallbackHandler
 
-        return compiled.with_config({"callbacks": [CallbackHandler(update_trace=True)]})
+        return compiled.with_config({
+            "callbacks": [SupportCallbackHandler(update_trace=True)],
+            "metadata": {"aiden_source": "evaluation" if evaluation is not None else "online"},
+        })
     return compiled

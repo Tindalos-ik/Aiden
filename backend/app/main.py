@@ -6,6 +6,7 @@ from app.api.routes.knowledge_sources import router as knowledge_sources_router
 from app.api.routes.rag_admin import router as rag_admin_router
 from app.api.routes.staff import router as staff_router
 from app.api.routes.topics import router as topics_router
+from app.api.routes.observability import router as observability_router
 from app.api.routes.service_workflow import user_router as service_router, staff_router as staff_service_router
 from app.services.rag.admin_console import stop_owned_embedding_on_shutdown
 
@@ -18,6 +19,7 @@ app.include_router(knowledge_sources_router)
 app.include_router(rag_admin_router)
 app.include_router(staff_router)
 app.include_router(topics_router)
+app.include_router(observability_router)
 app.include_router(service_router)
 app.include_router(staff_service_router)
 

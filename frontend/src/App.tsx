@@ -11,6 +11,7 @@ import { RagConsole } from './pages/RagConsole';
 import { RagEvals } from './pages/RagEvals';
 import { ReviewQueue } from './pages/ReviewQueue';
 import { TopicConsole } from './pages/TopicConsole';
+import { Observability } from './pages/Observability';
 import { mockChannelName, mockStorageKey } from './api/mock';
 import type { Role } from './types';
 import { Brand, SpinnerPage } from './components/Common';
@@ -83,6 +84,7 @@ function AppRoutes() {
       <Route path="/staff/reviews" element={<RoleGate role="staff"><ReviewQueue /></RoleGate>} />
       <Route path="/staff/evals" element={<RoleGate role="staff"><RagEvals /></RoleGate>} />
       <Route path="/staff/topics" element={<RoleGate role="staff"><TopicConsole /></RoleGate>} />
+      <Route path="/staff/observability" element={<RoleGate role="staff"><Observability /></RoleGate>} />
       <Route path="/staff/:conversationId" element={<RoleGate role="staff"><StaffWorkspace /></RoleGate>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
