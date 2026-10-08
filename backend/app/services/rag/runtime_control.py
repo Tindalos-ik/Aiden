@@ -65,7 +65,7 @@ class _InstanceLock:
         handle.flush()
         self._handle = handle
 
-    def release(self) -> None:
+    def release(self, *, keep_file: bool = False) -> None:
         """释放锁并删除锁文件；重复调用是安全的。"""
         handle = self._handle
         if handle is None:
@@ -83,11 +83,12 @@ class _InstanceLock:
         finally:
             handle.close()
             self._handle = None
-            try:
-                self._path.unlink()
-            except OSError:
-                # 锁文件残留不影响正确性：下一次获取仍然以文件锁为准，而不是文件是否存在。
-                pass
+            if not keep_file:
+                try:
+                    self._path.unlink()
+                except OSError:
+                    # 默认行为保持兼容；共享稳定锁路径时调用者应保留文件。
+                    pass
 
 
 @dataclass
@@ -109,9 +110,9 @@ class MiningRuntimeControl:
         """获取实例锁；失败时抛 `AlreadyRunningError`。"""
         self._lock.acquire()
 
-    def release(self) -> None:
-        """释放实例锁。"""
-        self._lock.release()
+    def release(self, *, keep_file: bool = False) -> None:
+        """释放实例锁；共享多进程稳定路径可保留文件，避免 unlink 竞争。"""
+        self._lock.release(keep_file=keep_file)
 
     def request_stop(self) -> None:
         """请求优雅停止：当前轮次跑完后退出循环。"""

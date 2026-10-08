@@ -471,3 +471,14 @@ button { -webkit-tap-highlight-color: transparent; }
   .service-product-item { flex-wrap: wrap; align-items: flex-start; }
   .service-product-amount { width: 100%; padding-left: 56px; text-align: left; }
 }
+
+.topic-main > .ant-alert { margin-bottom: 16px; }
+.topic-main .ant-card .ant-alert + .ant-alert { margin-top: 10px; }
+.topic-main .topic-filters { display: flex; margin-bottom: 16px; }
+.topic-evidence { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 440px; overflow: auto; }
+.topic-main .ant-pagination { margin-top: 20px; }
+.topic-main .ant-descriptions-item-content { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .topic-main .topic-filters .ant-picker { width: 100%; }
+  .topic-main .ant-card-head-wrapper { flex-wrap: wrap; gap: 8px; }
+}

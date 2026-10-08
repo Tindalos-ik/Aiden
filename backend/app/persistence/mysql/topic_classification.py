@@ -273,3 +273,82 @@ def record_human_review(
         ))
         return {"source_id": source_id, "input_hash": input_hash_value,
                 "labels": labels, "status": status, "reviewed_by_id": staff_id}
+
+def readiness() -> dict:
+    """只读检查实际表与消费者所需列，不执行迁移。"""
+    from sqlalchemy import inspect
+    tables = (LowConfidenceQuestion, Message, ReviewQueue, TopicClassificationPrediction,
+              TopicClassificationHumanReview, TopicClassificationHumanAudit)
+    with get_session_factory()() as session:
+        inspector = inspect(session.connection())
+        missing_tables, missing_columns = [], {}
+        for model in tables:
+            name = model.__tablename__
+            if not inspector.has_table(name):
+                missing_tables.append(name)
+                continue
+            actual = {c["name"] for c in inspector.get_columns(name)}
+            missing = sorted(set(model.__table__.columns.keys()) - actual)
+            if missing:
+                missing_columns[name] = missing
+    return {"ready": not missing_tables and not missing_columns,
+            "missing_tables": missing_tables, "missing_columns": missing_columns}
+
+
+def model_versions() -> list[str]:
+    with get_session_factory()() as session:
+        return sorted(session.scalars(select(TopicClassificationPrediction.model_version).distinct()).all())
+
+
+def result_rows(*, model_version=None, start_at=None, end_at=None, source_id=None,
+                topic=None, status=None, current_prediction=None, has_human=None) -> list[dict]:
+    """当前输入单独匹配；最新旧预测、人审不能冒充 current。仅输出主题脱敏问题。"""
+    from app.services.topic_classification.data import prepare_input
+    predicates = _scope(start_at, end_at)
+    if source_id is not None:
+        predicates.append(LowConfidenceQuestion.id == source_id)
+    with get_session_factory()() as session:
+        sources = session.scalars(select(LowConfidenceQuestion).where(*predicates)
+                                  .order_by(LowConfidenceQuestion.created_at.desc(), LowConfidenceQuestion.id.desc())).all()
+        ids = [s.id for s in sources]
+        predictions = session.scalars(select(TopicClassificationPrediction).where(
+            TopicClassificationPrediction.source_id.in_(ids),
+            *([TopicClassificationPrediction.model_version == model_version] if model_version else [])
+        ).order_by(TopicClassificationPrediction.updated_at.desc(), TopicClassificationPrediction.id.desc())).all()
+        humans = session.scalars(select(TopicClassificationHumanReview).where(
+            TopicClassificationHumanReview.source_id.in_(ids)
+        ).order_by(TopicClassificationHumanReview.updated_at.desc(), TopicClassificationHumanReview.id.desc())).all()
+        session.expunge_all()
+    predictions_by_source, humans_by_source = {}, {}
+    for prediction in predictions:
+        predictions_by_source.setdefault(prediction.source_id, []).append(prediction)
+    for human in humans:
+        humans_by_source.setdefault(human.source_id, []).append(human)
+    output = []
+    for source in sources:
+        digest = input_hash(source.original_question)
+        def pack(row, human=False):
+            fields = ("id", "input_hash", "labels", "status", "reviewed_by_id", "created_at", "updated_at") if human else (
+                "id", "input_hash", "scores", "predicted_labels", "status", "model_version", "taxonomy_version", "created_at", "updated_at")
+            value = {k: getattr(row, k) for k in fields}
+            value["current"] = row.input_hash == digest and (human or row.taxonomy_version == TAXONOMY_VERSION)
+            return value
+        ps = [pack(p) for p in predictions_by_source.get(source.id, [])]
+        hs = [pack(h, True) for h in humans_by_source.get(source.id, [])]
+        cp = next((p for p in ps if p["current"]), None)
+        ch = next((h for h in hs if h["current"]), None)
+        if topic is not None and (cp is None or topic not in cp["predicted_labels"]):
+            continue
+        if status is not None and status != (cp["status"] if cp else "unclassified"):
+            continue
+        if current_prediction is not None and current_prediction != (cp is not None):
+            continue
+        if has_human is not None and has_human != (ch is not None):
+            continue
+        output.append({"source_id": source.id, "question": prepare_input(source.original_question),
+                       "input_hash": digest, "created_at": source.created_at,
+                       "conversation_id": source.conversation_id, "user_message_id": source.source_user_message_id,
+                       "matched_review_id": source.matched_review_id,
+                       "current_prediction": cp, "latest_prediction": ps[0] if ps else None,
+                       "human_current": ch, "human_latest": hs[0] if hs else None})
+    return output

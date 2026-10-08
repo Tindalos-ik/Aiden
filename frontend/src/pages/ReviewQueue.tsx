@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Card, DatePicker, Drawer, Empty, Form, Input, Pagination, Select, Space, Spin, Statistic, Tag, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { api, apiMode } from '../api';
 import { ragApi } from '../api/rag';
 import { PageHeader } from '../components/Common';
@@ -129,7 +130,16 @@ export function ReviewQueue() {
   const [issueType, setIssueType] = useState<ReviewIssueType>();
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [page, setPage] = useState(1);
-  const [selectedId, setSelectedId] = useState<string>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedId = searchParams.get('review_id') || undefined;
+  const setSelectedId = (id: string | undefined) => {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (id) next.set('review_id', id);
+      else next.delete('review_id');
+      return next;
+    });
+  };
   const [jobError, setJobError] = useState('');
   const actor = useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: Infinity });
   const remote = apiMode === 'remote';

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.persistence.mysql import topic_classification as repo
 from .data import prepare_input
@@ -40,6 +40,8 @@ def export_source_batch(
 def _run_with_predictor(
     predictor, *, start_at: datetime | None, end_at: datetime | None,
     after: tuple[datetime, str] | None, limit: int, batch_size: int,
+    on_outcome: Callable[[dict[str, Any], dict[str, str]], None] | None = None,
+    on_stage: Callable[[str], None] | None = None,
 ) -> list[dict[str, Any]]:
     if not 1 <= limit <= 5000:
         raise ValueError("limit must be between 1 and 5000")
@@ -55,15 +57,21 @@ def _run_with_predictor(
     while len(output) < limit:
         page_size = min(batch_size, limit - len(output))
         # 持久化层已在返回普通数据行之前关闭短读取Session。
+        if on_stage is not None:
+            on_stage("source_read")
         rows = repo.list_source_batch(
             start_at=start_at, end_at=end_at, after=cursor, limit=page_size,
         )
         if not rows:
             break
+        if on_stage is not None:
+            on_stage("inference")
         predictions = predictor.predict_batch([row["raw_question"] for row in rows])
         if len(predictions) != len(rows):
             raise ValueError("predictor returned a mismatched batch length")
         for source, prediction in zip(rows, predictions, strict=True):
+            if on_stage is not None:
+                on_stage("persistence")
             persistence_outcome = repo.persist_prediction(
                 source_id=source["source_id"], input_hash_value=source["input_hash"],
                 scores=prediction["scores"], predicted_labels=prediction["predicted_labels"],
@@ -80,6 +88,9 @@ def _run_with_predictor(
                 "taxonomy_version": predictor.taxonomy_version,
                 "persistence_outcome": persistence_outcome,
             })
+            if on_outcome is not None:
+                on_outcome(output[-1], {"created_at": source["created_at"].isoformat(),
+                                       "source_id": source["source_id"]})
         last = rows[-1]
         # 按时间戳和来源ID续读，避免分页期间新增来源导致偏移漂移。
         cursor = (last["created_at"], last["source_id"])
@@ -91,12 +102,19 @@ def run_batch(
     start_at: datetime | None = None, end_at: datetime | None = None,
     after: tuple[datetime, str] | None = None, limit: int = 100,
     batch_size: int = 32,
+    on_outcome: Callable[[dict[str, Any], dict[str, str]], None] | None = None,
+    expected_model_version: str | None = None,
+    on_stage: Callable[[str], None] | None = None,
+    predictor: EncoderPredictor | None = None,
 ) -> list[dict[str, Any]]:
-    """加载真实本地artifact；Session只用于短读/写，预测全过程不占用数据库连接。"""
-    predictor = EncoderPredictor(artifact_dir, device=device)
+    """默认真实加载；控制台可复用已校验EncoderPredictor，避免同时驻留两份GPU权重。"""
+    if predictor is None:
+        predictor = EncoderPredictor(artifact_dir, device=device)
+    if expected_model_version is not None and predictor.model_version != expected_model_version:
+        raise ValueError("artifact changed after job acceptance")
     return _run_with_predictor(
         predictor, start_at=start_at, end_at=end_at, after=after,
-        limit=limit, batch_size=batch_size,
+        limit=limit, batch_size=batch_size, on_outcome=on_outcome, on_stage=on_stage,
     )
 
 
