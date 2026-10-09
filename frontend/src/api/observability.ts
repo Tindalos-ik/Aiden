@@ -35,7 +35,14 @@ function params(filters: ObservabilityFilters): string {
 }
 export const observabilityApi = {
   status: () => request<ObservabilityStatus>('/status'),
-  overview: (filters: ObservabilityFilters) => request<ObservabilityOverview>(`/overview?${params(filters)}`),
+  overview: async (filters: ObservabilityFilters) => {
+    const result = await request<ObservabilityOverview>(`/overview?${params(filters)}`);
+    // 字段切换后旧后端可能仍返回费用趋势；拒绝不兼容响应，不补造空 Token 趋势。
+    if (result.data != null && !Array.isArray(result.data.token_trend)) {
+      throw new Error('观测接口版本与页面不一致，请管理员更新并重启后端服务后刷新。');
+    }
+    return result;
+  },
   traces: (filters: ObservabilityFilters, page: number, page_size = 20) => request<ObservabilityTracePage>(`/traces?${params(filters)}&page=${page}&page_size=${page_size}`),
   detail: (id: string, filters: ObservabilityFilters) => request<ObservabilityDetail>(`/traces/${encodeURIComponent(id)}?${params(filters)}`),
 };
