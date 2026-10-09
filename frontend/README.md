@@ -293,6 +293,8 @@ remote SSE 的阶段事件是 `progress`，data 必须包含 `stage` 与中文 `
 
 远端正常流顺序为 `start → (progress | delta)* → final → handoff? → done`；`start` 给出数据库助手消息 ID，`delta` 是真实生成阶段的增量片段，前端追加为“生成草稿 · 尚未核验”。`final` 携带核验且落库后的完整权威正文及引用数组，替换草稿和引用（空数组也清空旧引用），不是终止事件；`done` 标记本轮完成。`error` 是独立终态，不能与 `done` 连发。remote 不发送独立 `citations` 事件，也不展示内部意图、reasoning 或工具结果为回答正文。
 
+remote 历史轮询合并保留服务端返回的消息顺序，尚未出现在历史中的本地消息按缓存顺序尾附。流式助手草稿沿用客户端时间，而落库消息使用服务端 UTC 时间（微秒精度）；不再混用 `createdAt` 字符串重排，以免时钟差或小数精度差使回复在生成中跳到用户消息上方。`start` 改 ID、`final` 替换正文及轮询同步均不改变本轮消息先后，mock 契约不变。
+
 ```text
 event: start
 data: {"messageId":"assistant-message-id"}

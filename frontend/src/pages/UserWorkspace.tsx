@@ -225,7 +225,8 @@ export function UserWorkspace() {
           merged.push(item);
         }
       }
-      return merged.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      // 服务端历史已按消息先后排序；保留其顺序，再尾附本地草稿，不能混排服务端微秒与客户端毫秒/时钟。
+      return merged;
     }, enabled: Boolean(conversationId),
     refetchInterval: apiMode === 'remote' ? 3_000 : false,
   });
