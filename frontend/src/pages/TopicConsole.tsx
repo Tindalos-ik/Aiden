@@ -126,6 +126,7 @@ export function TopicConsole() {
     onError: (error) => { setActionError(errorText(error)); void availability.refetch(); void jobs.refetch(); },
   });
   const busy = mutation.isPending || !!selected?.active_job && active(selected.active_job) || !!registry.data?.active_job && active(registry.data.active_job) || jobs.data?.items.some(active) === true;
+  const runningJobs = [...new Map([...(jobs.data?.items ?? []), ...(selected?.active_job ? [selected.active_job] : []), ...(registry.data?.active_job ? [registry.data.active_job] : [])].filter(active).map((item) => [item.id, item] as const)).values()];
   const terminalJobs = jobs.data?.items.filter((item) => !active(item)).map((item) => `${item.id}:${item.state}`).join('|');
   useEffect(() => {
     // 完成轮询后解除可用性锁，并重新读取真实结果与报告。
@@ -168,6 +169,7 @@ export function TopicConsole() {
       {selected && <ModelSource value={{ ...selected, model_key: selected.selected_model_key }} />}
       {selectedCandidate && <><Collapse size="small" items={[{ key: 'training', label: '当前候选训练摘要（不表示执行就绪）', children: <JsonEvidence value={selectedCandidate.training_summary} /> }]} />{selectedCandidate.blocked_reason && <Alert type="warning" message={`${selectedCandidate.blocked_reason.code}: ${selectedCandidate.blocked_reason.message}`} />}</>}
     </Card>
+    {busy && <Alert type="info" showIcon message={mutation.isPending ? '正在提交启动请求；模型切换和重复启动已锁定' : '有排队或运行中的任务；模型切换和重复启动已锁定'} description={<Space wrap>{runningJobs.map((item) => <Button key={item.id} size="small" onClick={() => setJobId(item.id)}>{labelText(item.state)} · {item.id} · 任务详情</Button>)}<Text>查看详情和切换历史查看版本不会改变执行任务。</Text></Space>} />}
     {(selectedCandidate?.data_mode === 'synthetic_experiment' || selected?.data_mode === 'synthetic_experiment') && <Alert type="warning" showIcon message={experimentWarning} />}
     {remote && !viewVersion && <Alert type="warning" showIcon message="尚未获取选定执行模型的实际版本：结果、统计和报告请求已禁用。" />}
     {!remote && <Alert type="warning" showIcon message="演示模式明确禁用真实分类与评测" description="不调用主题 API，不生成模拟报告，不回退模拟结果。切换 VITE_API_MODE=remote 后使用员工登录；模型、设备与数据集路径仅由服务端配置。" />}
@@ -215,8 +217,8 @@ export function TopicConsole() {
         </Card>
       </Space> },
     ]} />
-    <Drawer open={!!sourceId} onClose={() => setSourceId(undefined)} width={820} title="主题脱敏原话与分类证据">{result.isError ? <QueryError error={result.error} /> : result.isLoading ? <Spin /> : result.data && <ResultEvidence item={result.data} />}</Drawer>
-    <Drawer open={!!jobId} onClose={() => setJobId(undefined)} width={760} title="服务端真实任务详情">{job.isError ? <QueryError error={job.error} /> : job.isLoading ? <Spin /> : job.data && <>
+    <Drawer rootClassName="staff-detail-drawer" open={!!sourceId} onClose={() => setSourceId(undefined)} width={820} title="主题脱敏原话与分类证据">{result.isError ? <QueryError error={result.error} /> : result.isLoading ? <Spin /> : result.data && <ResultEvidence item={result.data} />}</Drawer>
+    <Drawer rootClassName="staff-detail-drawer" open={!!jobId} onClose={() => setJobId(undefined)} width={760} title="服务端真实任务详情">{job.isError ? <QueryError error={job.error} /> : job.isLoading ? <Spin /> : job.data && <>
       <Paragraph>ID {job.data.id} · {labelText(job.data.state)} · 实际模型 {job.data.model_version ?? '未记录'} · 分类体系 {job.data.taxonomy_version}</Paragraph>
       <ModelSource value={job.data} />{job.data.data_mode === 'synthetic_experiment' && <Alert type="warning" message={experimentWarning} />}
       <Paragraph>创建 {dateText(job.data.created_at)} · 开始 {dateText(job.data.started_at)} · 结束 {dateText(job.data.finished_at)}</Paragraph>
@@ -229,7 +231,7 @@ export function TopicConsole() {
       {job.data.error && <Alert type="error" message={`${job.data.error.code}: ${job.data.error.message}`} />}
       {job.data.result?.next_cursor && <Button disabled={busy || !selectedVersion || job.data.model_key !== modelKey || job.data.model_version !== selectedVersion} onClick={() => resume(job.data!)}>同执行键与实际版本续跑</Button>}
     </>}</Drawer>
-    <Drawer open={!!reportId} onClose={() => setReportId(undefined)} width={1000} title="真实报告与服务端确定性结论">
+    <Drawer rootClassName="staff-detail-drawer" open={!!reportId} onClose={() => setReportId(undefined)} width={1000} title="真实报告与服务端确定性结论">
       {report.isError ? <><QueryError error={report.error} /><Alert type="warning" message="尚无法形成分类质量结论" /></> : report.isLoading ? <Spin /> : report.data && report.data.report.model_version === viewVersion ? <>
         <Paragraph>报告 {report.data.id} · 生成 {dateText(report.data.created_at)}</Paragraph>
         <ModelSource value={report.data} />

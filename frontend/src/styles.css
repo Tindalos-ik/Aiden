@@ -496,3 +496,149 @@ button { -webkit-tap-highlight-color: transparent; }
 .obs-tree-row:hover { border-color: #cfd4f0; background: #f8f9ff; }
 @media (max-width: 850px) { .obs-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .observability-sections { grid-template-columns: 1fr; } }
 @media (max-width: 580px) { .obs-counts { grid-template-columns: 1fr; } }
+
+/* 员工公共外壳：管理页面随文档滚动，只有客服双栏限制在视口内。 */
+.staff-layout { min-height: 100dvh; min-width: 0; background: #f4f6fa; font-size: 14px; line-height: 1.6; }
+.staff-layout .staff-layout-header { display: flex; align-items: center; position: sticky; top: 0; z-index: 20; background: #fff; border-bottom: 1px solid #e9ebf1; }
+.staff-layout .app-topbar { flex: 1; min-width: 0; height: auto; min-height: 66px; padding: 12px 24px; border-bottom: 0; gap: 16px; flex-wrap: wrap; }
+.staff-layout .topbar-left, .staff-layout .topbar-right { min-width: 0; width: auto; flex-wrap: wrap; gap: 12px; }
+.staff-layout .workspace-label { display: inline; font-size: 14px; color: #454b63; }
+.staff-layout .mode-tag { max-width: none; overflow: visible; white-space: normal; font-size: 12px; line-height: 20px; }
+.staff-layout .account-name { display: inline; font-size: 14px; }
+.staff-layout .staff-navigation-trigger { display: none; flex-shrink: 0; margin-left: 12px; }
+.staff-layout .staff-layout-body { display: flex; align-items: stretch; min-width: 0; }
+.staff-layout .staff-layout-sidebar { position: sticky; top: 67px; align-self: flex-start; width: 212px; flex: 0 0 212px; height: calc(100dvh - 67px); overflow-y: auto; padding: 16px 12px; border-right: 1px solid #e6e9f0; background: #fff; }
+.staff-layout .staff-sidebar-control { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px 12px; color: #626a80; font-weight: 600; }
+.staff-layout .staff-content { flex: 1; min-width: 0; }
+.staff-layout .staff-navigation-group, .staff-navigation-drawer .staff-navigation-group { margin-bottom: 20px; }
+.staff-layout .staff-navigation-heading, .staff-navigation-drawer .staff-navigation-heading { padding: 8px 12px; color: #81889b; font-size: 12px; font-weight: 600; }
+.staff-layout .staff-navigation-link, .staff-navigation-drawer .staff-navigation-link { min-height: 44px; display: flex; align-items: center; gap: 12px; margin: 4px 0; padding: 10px 12px; border-radius: 8px; color: #505a72; text-decoration: none; }
+.staff-layout .staff-navigation-link .anticon, .staff-navigation-drawer .staff-navigation-link .anticon { flex-shrink: 0; font-size: 18px; }
+.staff-layout .staff-navigation-link:hover, .staff-navigation-drawer .staff-navigation-link:hover { background: #f5f6fc; color: #5865c9; }
+.staff-layout .staff-navigation-link.is-selected, .staff-navigation-drawer .staff-navigation-link.is-selected { background: #eef0fd; color: #5260c7; font-weight: 600; }
+.staff-layout.staff-layout-collapsed .staff-layout-sidebar { width: 68px; flex-basis: 68px; padding-inline: 8px; }
+.staff-layout.staff-layout-collapsed .staff-sidebar-control { justify-content: center; padding-inline: 0; }
+.staff-layout.staff-layout-collapsed .staff-sidebar-control > span, .staff-layout .staff-navigation-compact .staff-navigation-heading, .staff-layout .staff-navigation-compact .staff-navigation-link > span:not(.anticon) { display: none; }
+.staff-layout .staff-navigation-compact .staff-navigation-link { justify-content: center; padding-inline: 8px; }
+.staff-layout :is(button, a, input, textarea, .ant-select-selector):focus-visible, .staff-navigation-drawer :is(button, a):focus-visible, .staff-detail-drawer :is(button, a, input, textarea):focus-visible { outline: 2px solid #6674d9; outline-offset: 3px; }
+.staff-layout :is(.rag-main, .staff-service-page) { min-width: 0; width: calc(100% - 48px); max-width: 1320px; margin: 0 auto; padding: 24px 0 48px; gap: 20px; }
+.staff-layout :is(.rag-heading, .rag-grid, .rag-card, .ant-card-body, .ant-tabs-content-holder, .ant-tabs-tabpane, .staff-data-tabs, .staff-query, .staff-service-page) { min-width: 0; max-width: 100%; }
+.staff-layout .rag-heading { flex-wrap: wrap; }
+.staff-layout .ant-card-head-title { white-space: normal; overflow-wrap: anywhere; }
+.staff-layout .ant-card-head-wrapper { flex-wrap: wrap; gap: 12px; }
+.staff-layout :is(.ant-alert-message, .ant-alert-description, .ant-descriptions-item-content, .ant-table-cell) { overflow-wrap: anywhere; }
+.staff-layout .ant-table-wrapper { min-width: 0; max-width: 100%; }
+.staff-layout .ant-table-content { overflow-x: auto; }
+.staff-layout .ant-tabs-nav { margin-bottom: 20px; }
+.staff-layout .rag-preview-list { max-height: none; overflow: visible; }
+.staff-layout .rag-file-select { min-width: min(270px, 100%); max-width: 100%; }
+.staff-layout .staff-query :is(.ant-input, .ant-select, .ant-picker) { max-width: 100%; }
+.staff-layout :is(.obs-trend-wrap, .obs-trend-table) { min-width: 0; max-width: 100%; overflow-x: auto; }
+.staff-layout .obs-trend { min-width: 560px; }
+.staff-layout .obs-counts .ant-card-body { padding: 16px; }
+.staff-detail-drawer .ant-drawer-content-wrapper, .staff-service-drawer .ant-drawer-content-wrapper { max-width: 100vw; }
+.staff-detail-drawer .ant-drawer-title, .staff-service-drawer .ant-drawer-title { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.staff-detail-drawer .ant-drawer-body, .staff-service-drawer .ant-drawer-body { min-width: 0; overflow-wrap: anywhere; font-size: 14px; line-height: 1.7; }
+.staff-detail-drawer .ant-card-head-title, .staff-service-drawer .service-record-card .ant-card-head-title { white-space: normal; overflow-wrap: anywhere; }
+.staff-detail-drawer :is(.ant-table-wrapper, .ant-tabs-content-holder) { min-width: 0; max-width: 100%; }
+.staff-detail-drawer .ant-table-content { overflow-x: auto; }
+.staff-detail-drawer .ant-card-head-wrapper { flex-wrap: wrap; gap: 12px; }
+
+.staff-layout.staff-chat-layout { height: 100dvh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.staff-layout.staff-chat-layout .staff-layout-header { flex: 0 0 auto; position: relative; }
+.staff-layout.staff-chat-layout .staff-layout-body { flex: 1; min-height: 0; }
+.staff-layout.staff-chat-layout .staff-layout-sidebar { position: static; height: 100%; }
+.staff-layout.staff-chat-layout .staff-content { display: flex; min-height: 0; }
+.staff-layout .staff-workspace { width: 100%; min-width: 0; min-height: 0; grid-template-columns: minmax(240px, 280px) minmax(0, 1fr); padding: 16px; gap: 16px; overflow: hidden; }
+.staff-layout :is(.staff-sidebar, .staff-chat-panel) { min-width: 0; min-height: 0; }
+.staff-layout .queue-pane, .staff-queue-drawer .queue-pane { min-height: 0; display: flex; flex-direction: column; height: 100%; }
+.staff-layout :is(.queue-pane-title, .queue-pane-footer), .staff-queue-drawer :is(.queue-pane-title, .queue-pane-footer) { flex-shrink: 0; }
+.staff-layout .queue-scroll, .staff-queue-drawer .queue-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.staff-layout .queue-pane-title p, .staff-queue-drawer .queue-pane-title p { font-size: 14px; }
+.staff-layout :is(.queue-group-heading, .queue-item-name, .queue-item-subject, .queue-item-preview, .queue-group-empty), .staff-queue-drawer :is(.queue-group-heading, .queue-item-name, .queue-item-subject, .queue-item-preview, .queue-group-empty) { font-size: 14px; }
+.staff-layout .queue-item-name, .staff-queue-drawer .queue-item-name { flex-wrap: wrap; }
+.staff-layout :is(.queue-item-name time, .queue-pane-footer), .staff-queue-drawer :is(.queue-item-name time, .queue-pane-footer) { font-size: 12px; }
+.staff-layout .queue-pane-footer, .staff-queue-drawer .queue-pane-footer { flex-wrap: wrap; padding-block: 12px; }
+.staff-layout .staff-chat-header { flex: 0 0 auto; padding: 16px; gap: 12px; flex-wrap: wrap; }
+.staff-layout .chat-title-cluster > div { min-width: 0; }
+.staff-layout .chat-title { max-width: none; white-space: normal; overflow-wrap: anywhere; font-size: 15px; }
+.staff-layout .chat-title-sub { max-width: none; white-space: normal; overflow-wrap: anywhere; font-size: 12px; }
+.staff-layout .staff-header-actions { flex-wrap: wrap; gap: 8px; }
+.staff-layout .staff-chat-header .ant-btn, .staff-layout .staff-composer-box .ant-btn { height: 34px; font-size: 14px !important; }
+.staff-layout .staff-chat-header .status-tag { display: inline-flex; font-size: 12px; white-space: normal; }
+.staff-layout .staff-conversation-area { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.staff-layout .staff-message-timeline { min-height: 0; gap: 20px; padding: 24px; }
+.staff-layout .chat-column { min-width: 0; max-width: min(85%, 650px); }
+.staff-layout .message-bubble { max-width: 100%; min-width: 0; padding: 12px 16px; }
+.staff-layout .message-content { font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
+.staff-layout .message-byline, .staff-layout .message-byline time { font-size: 12px; }
+.staff-layout :is(.staff-waiting-banner, .closed-banner, .staff-composer-locked, .staff-inbox-empty p, .staff-inbox-empty .ant-btn, .chat-load-state) { font-size: 14px; }
+.staff-layout .staff-inbox-empty { min-height: 0; overflow-y: auto; }
+.staff-layout .staff-composer-wrap { flex: 0 0 auto; padding: 12px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: #fff; }
+.staff-layout .staff-composer-box .ant-input { font-size: 14px; }
+.staff-layout :is(.composer-hint, .staff-composer-footer) { font-size: 12px; }
+.staff-layout .staff-composer-footer { flex-wrap: wrap; gap: 8px; }
+.staff-layout .staff-mobile-queue-bar { display: none; flex: 0 0 auto; padding: 8px 12px; border-bottom: 1px solid #edf0f5; }
+.staff-layout .sidebar-error, .staff-queue-drawer .sidebar-error { min-height: 0; overflow: auto; padding: 16px; }
+.staff-queue-drawer .ant-drawer-body { min-height: 0; overflow: hidden; }
+.staff-layout .inline-alert { flex: 0 0 auto; max-height: 25%; overflow-y: auto; }
+@media (max-width: 1100px) {
+  .staff-layout .rag-grid, .staff-layout .observability-sections { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 960px) {
+  .staff-layout .staff-layout-sidebar { display: none; }
+  .staff-layout .staff-navigation-trigger { display: inline-flex; }
+  .staff-layout .app-topbar { padding-inline: 12px; }
+}
+@media (max-width: 760px) {
+  .staff-layout .app-topbar { min-height: 64px; gap: 8px; padding-block: 10px; }
+  .staff-layout .topbar-left, .staff-layout .topbar-right { gap: 8px; }
+  .staff-layout .topbar-left { flex-wrap: wrap; }
+  .staff-layout .workspace-label { display: inline; }
+  .staff-layout :is(.rag-main, .staff-service-page) { width: calc(100% - 24px); padding-top: 16px; }
+  .staff-layout :is(.rag-counts, .obs-counts, .eval-truth, .eval-strategies, .rag-config) { grid-template-columns: minmax(0, 1fr); }
+  .staff-layout .staff-workspace { display: flex; padding: 0; gap: 0; }
+  .staff-layout .staff-sidebar { display: none; }
+  .staff-layout .staff-chat-panel { width: 100%; border: 0; border-radius: 0; }
+  .staff-layout .staff-mobile-queue-bar { display: block; }
+  .staff-layout .staff-chat-header { padding: 12px; gap: 8px; }
+  .staff-layout .staff-chat-header .status-tag { display: inline-flex; }
+  .staff-layout .staff-message-timeline { padding: 16px 12px; }
+  .staff-layout .staff-composer-wrap { padding-inline: 12px; }
+  .staff-layout .staff-composer-footer { display: none; }
+  .staff-layout .staff-inbox-empty { justify-content: flex-start; padding: 24px 16px; }
+  .staff-layout .topic-filters .ant-picker { min-width: 0; width: 100%; }
+  .staff-detail-drawer .ant-drawer-body, .staff-service-drawer .ant-drawer-body { padding: 16px; }
+}
+.staff-layout :is(.rag-chunk .ant-card-head-title, .rag-card .ant-card-head-title), .staff-detail-drawer :is(.rag-chunk .ant-card-head-title, .rag-card .ant-card-head-title) { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.staff-layout :is(.rag-chunk-meta, .rag-job-note), .staff-detail-drawer :is(.rag-chunk-meta, .rag-job-note) { overflow-wrap: anywhere; }
+.staff-detail-drawer :is(pre, .rag-result, .rag-chunk-body, .topic-evidence), .staff-service-drawer pre { max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.7; }
+.staff-detail-drawer .ant-tag, .staff-service-drawer .ant-tag { max-width: 100%; height: auto; white-space: normal; overflow-wrap: anywhere; }
+.staff-detail-drawer .ant-descriptions-item-content, .staff-service-drawer .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
+.staff-layout .staff-task-tabs { min-width: 0; max-width: 100%; }
+.staff-layout:not(.staff-chat-layout) { height: auto; display: block; }
+/* 显式允许管理页单列网格收缩，表格/长模型版本不应撑大整个文档。 */
+.staff-layout .rag-main { grid-template-columns: minmax(0, 1fr); }
+.staff-layout .rag-heading > div { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.staff-layout .ant-space-item { min-width: 0; max-width: 100%; }
+.staff-layout .topic-main :is(.ant-typography, .ant-tag) { overflow-wrap: anywhere; white-space: normal; }
+.staff-layout .topic-main .ant-alert-description .ant-space { min-width: 0; max-width: 100%; }
+.staff-layout .topic-main .ant-alert-description .ant-btn { max-width: 100%; height: auto; min-height: 28px; white-space: normal; overflow-wrap: anywhere; }
+.staff-layout .topic-main .ant-alert-description .ant-btn > span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.staff-layout .staff-eval-main { gap: 12px; }
+.staff-eval-report-summary { font-size: 14px; line-height: 1.6; }
+.staff-layout .staff-eval-report-summary .ant-typography-warning { color: #8f6418; }
+.staff-eval-mode-tabs > .ant-tabs-nav { margin-bottom: 0; }
+.staff-eval-report-tabs > .ant-tabs-nav { margin-bottom: 12px; }
+.staff-eval-overview > .ant-card-head { min-height: 48px; padding: 0 12px; }
+.staff-eval-overview > .ant-card-body { padding: 12px; }
+.staff-eval-task-state { display: grid; gap: 12px; }
+.staff-eval-status.ant-alert { padding: 12px 16px; }
+.staff-eval-status .ant-alert-message { margin-bottom: 0; font-size: 14px; line-height: 1.6; }
+.staff-eval-job-progress { display: grid; gap: 12px; }
+.staff-eval-progress.ant-progress { width: 180px; max-width: 100%; margin: 0; }
+.staff-eval-report-state.ant-alert { padding: 12px 16px; }
+.staff-eval-report-state .ant-alert-message { font-size: 14px; }
+.staff-eval-limitations { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.6; }
+.staff-eval-limitations li { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 850px) { .staff-eval-limitations { grid-template-columns: minmax(0, 1fr); } }

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Empty, Input, Select, Space, Spin, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Drawer, Empty, Input, Select, Space, Spin, Table, Tabs, Tag, Typography, message } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { api, apiMode } from '../api';
 import { PageHeader } from '../components/Common';
+import { StaffLayout } from '../components/StaffLayout';
 import type { AfterSaleApplication, AfterSalePreview, ServiceProduct, ServiceTicket, SubmitAfterSaleInput } from '../types';
 
 const requestText: Record<string, string> = { refund: '退款', return: '退货', exchange: '换货' };
@@ -173,29 +174,84 @@ export function StaffServicePage() {
   const tickets = useQuery({ queryKey: ['staff-tickets'], queryFn: api.listStaffTickets, refetchInterval: apiMode === 'remote' ? 5000 : false });
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [links, setLinks] = useState<Record<string, string>>({});
+  // 详情只保存记录标识，轮询后仍展示最新状态；草稿独立保存，关闭详情不会清空。
+  const [detail, setDetail] = useState<{ kind: 'ticket' | 'application'; id: string } | null>(null);
+  const selectedTicket = detail?.kind === 'ticket' ? tickets.data?.find((row) => row.id === detail.id) : undefined;
+  const selectedApplication = detail?.kind === 'application' ? applications.data?.find((row) => row.id === detail.id) : undefined;
   const requestMutation = useMutation({ mutationFn: ({ id, status }: { id: string; status: string }) => api.transitionAfterSale(id, status, notes[id] ?? ''),
     onSuccess: async () => { message.success('申请状态已更新'); await client.invalidateQueries({ queryKey: ['staff-after-sales'] }); } });
   const ticketMutation = useMutation({ mutationFn: ({ id, status }: { id: string; status: string }) => api.transitionTicket(id, status, notes[id] ?? '', links[id] || undefined),
     onSuccess: async () => { message.success('工单状态已更新'); await client.invalidateQueries({ queryKey: ['staff-tickets'] }); } });
   if (!actor.data) return <Spin />;
-  return <div className="workspace-shell"><PageHeader actor={actor.data} /><main style={{ maxWidth: 1100, margin: '28px auto', padding: 16 }}>
-    <Typography.Title level={3}>员工售后与工单处理</Typography.Title>
+  return <StaffLayout actor={actor.data}><main className="staff-service-page">
+    <Typography.Title level={3}>售后与工单处理</Typography.Title>
+    <Typography.Paragraph type="secondary">从列表查看完整记录，在详情中填写处理说明并执行操作。查看或切换记录不会提交处理。</Typography.Paragraph>
     {apiMode === 'mock' && <Alert type="info" showIcon message="本地演示模式：处理状态仅保存在浏览器。" style={{ marginBottom: 16 }} />}
-    <ErrorLine error={requestMutation.error ?? ticketMutation.error} />
+    <ErrorLine error={requestMutation.error} />
+    <ErrorLine error={ticketMutation.error} />
+    <ErrorLine error={tickets.error} />
+    <ErrorLine error={applications.error} />
     <Tabs items={[
-      { key: 'tickets', label: `工单 ${tickets.data?.length ?? 0}`, children: <><ErrorLine error={tickets.error} />{(tickets.data ?? []).length ? tickets.data!.map((row) => <TicketCard key={row.id} row={row} action={<Space>
-        {row.status === 'open' && <Button size="small" onClick={() => ticketMutation.mutate({ id: row.id, status: 'in_progress' })}>接单</Button>}
-        {row.status === 'in_progress' && <Button size="small" onClick={() => ticketMutation.mutate({ id: row.id, status: 'resolved' })}>标记已处理</Button>}
-        {['in_progress', 'resolved'].includes(row.status) && <Button size="small" onClick={() => ticketMutation.mutate({ id: row.id, status: 'closed' })}>关闭</Button>}
-      </Space>} />).map((card, index) => <div key={(tickets.data ?? [])[index]?.id}>{card}{(tickets.data ?? [])[index]?.status !== 'closed' && <Space wrap style={{ marginBottom: 16 }}>
-        <Input placeholder="处理说明；处理或关闭时必填" style={{ width: 280 }} value={notes[(tickets.data ?? [])[index].id] ?? ''} onChange={(event) => setNotes({ ...notes, [(tickets.data ?? [])[index].id]: event.target.value })} />
-        <Select allowClear placeholder="关联同一用户的申请" style={{ width: 260 }} value={links[(tickets.data ?? [])[index].id] || undefined} options={(applications.data ?? []).filter((app) => app.userId === (tickets.data ?? [])[index].userId).map((app) => ({ value: app.id, label: app.requestNo }))} onChange={(value) => setLinks({ ...links, [(tickets.data ?? [])[index].id]: value ?? '' })} />
-      </Space>}</div>) : <Empty description="暂无工单" />}</> },
-      { key: 'applications', label: `售后申请 ${applications.data?.length ?? 0}`, children: <><ErrorLine error={applications.error} />{(applications.data ?? []).length ? applications.data!.map((row) => <div key={row.id}><ApplicationCard row={row} action={<Space>
-        {row.status === 'pending' && <><Button size="small" onClick={() => requestMutation.mutate({ id: row.id, status: 'approved' })}>审核通过</Button><Button size="small" danger onClick={() => requestMutation.mutate({ id: row.id, status: 'rejected' })}>驳回</Button></>}
-        {row.status === 'approved' && <Button size="small" onClick={() => requestMutation.mutate({ id: row.id, status: row.requestType === 'refund' ? 'awaiting_external_refund' : 'processing' })}>{row.requestType === 'refund' ? '转待外部退款' : '开始处理'}</Button>}
-        {row.status === 'processing' && <Button size="small" onClick={() => requestMutation.mutate({ id: row.id, status: 'completed' })}>处理完成</Button>}
-      </Space>} />{['pending', 'approved', 'processing'].includes(row.status) && <Input style={{ width: 360, marginBottom: 16 }} placeholder="审核或处理说明" value={notes[row.id] ?? ''} onChange={(event) => setNotes({ ...notes, [row.id]: event.target.value })} />}</div>) : <Empty description="暂无售后申请" />}</> },
+      { key: 'tickets', label: `工单 ${tickets.data?.length ?? 0}`, children: <Table<ServiceTicket>
+        size="small" rowKey="id" dataSource={tickets.data ?? []} loading={tickets.isLoading} scroll={{ x: 960 }}
+        locale={{ emptyText: <Empty description="暂无工单" /> }}
+        pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条工单` }}
+        columns={[
+          { title: '工单编号', dataIndex: 'ticketNo', width: 180 },
+          { title: '关联订单 / 申请', width: 220, render: (_, row) => <div><div>{row.orderNo ?? '暂无关联订单'}</div>{row.afterSaleRequestId && <Typography.Text type="secondary">{row.afterSaleRequestNo ?? row.afterSaleRequestId}</Typography.Text>}</div> },
+          { title: '类型', dataIndex: 'issueType', width: 120 },
+          { title: '状态', width: 110, render: (_, row) => <Tag color={row.status === 'closed' ? 'default' : row.status === 'open' ? 'gold' : 'blue'}>{ticketStatus[row.status] ?? row.status}</Tag> },
+          { title: '创建时间', width: 180, render: (_, row) => new Date(row.createdAt).toLocaleString('zh-CN') },
+          { title: '操作', width: 140, render: (_, row) => <Button size="small" onClick={() => setDetail({ kind: 'ticket', id: row.id })}>{row.status === 'closed' ? '查看详情' : '查看 / 处理'}</Button> },
+        ]}
+      /> },
+      { key: 'applications', label: `售后申请 ${applications.data?.length ?? 0}`, children: <Table<AfterSaleApplication>
+        size="small" rowKey="id" dataSource={applications.data ?? []} loading={applications.isLoading} scroll={{ x: 960 }}
+        locale={{ emptyText: <Empty description="暂无售后申请" /> }}
+        pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条售后申请` }}
+        columns={[
+          { title: '申请编号', dataIndex: 'requestNo', width: 180 },
+          { title: '关联订单', width: 200, render: (_, row) => row.orderNo ?? '暂无订单信息' },
+          { title: '类型', width: 90, render: (_, row) => requestText[row.requestType] },
+          { title: '状态', width: 170, render: (_, row) => <Tag color="blue">{requestStatus[row.status]}</Tag> },
+          { title: '提交时间', width: 180, render: (_, row) => new Date(row.createdAt).toLocaleString('zh-CN') },
+          { title: '操作', width: 140, render: (_, row) => <Button size="small" onClick={() => setDetail({ kind: 'application', id: row.id })}>{['pending', 'approved', 'processing'].includes(row.status) ? '查看 / 处理' : '查看详情'}</Button> },
+        ]}
+      /> },
     ]} />
-  </main></div>;
+    <Drawer title={detail?.kind === 'ticket' ? '工单详情与处理' : '售后申请详情与处理'} open={detail !== null} onClose={() => setDetail(null)} width="min(760px, 100vw)" className="staff-service-drawer">
+      {detail?.kind === 'ticket' && <ErrorLine error={tickets.error} />}
+      <ErrorLine error={applications.error} />
+      <ErrorLine error={detail?.kind === 'ticket' ? ticketMutation.error : requestMutation.error} />
+      {selectedTicket && <>
+        <TicketCard row={selectedTicket} />
+        <Typography.Paragraph type="secondary">问题类型：{selectedTicket.issueType}</Typography.Paragraph>
+        {selectedTicket.status !== 'closed' && <Card size="small" title="工单处理">
+          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            <div><Typography.Text strong>处理说明</Typography.Text><Input.TextArea aria-label="工单处理说明" placeholder="处理说明；处理或关闭时必填" autoSize={{ minRows: 3, maxRows: 8 }} value={notes[selectedTicket.id] ?? ''} onChange={(event) => setNotes((current) => ({ ...current, [selectedTicket.id]: event.target.value }))} /></div>
+            <div><Typography.Text strong>关联售后申请</Typography.Text><Select aria-label="关联同一用户的申请" allowClear placeholder="关联同一用户的申请" style={{ width: '100%' }} value={links[selectedTicket.id] || undefined} options={(applications.data ?? []).filter((app) => app.userId === selectedTicket.userId).map((app) => ({ value: app.id, label: app.requestNo }))} onChange={(value) => setLinks((current) => ({ ...current, [selectedTicket.id]: value ?? '' }))} /></div>
+            <Space wrap>
+              {selectedTicket.status === 'open' && <Button size="small" onClick={() => ticketMutation.mutate({ id: selectedTicket.id, status: 'in_progress' })}>接单</Button>}
+              {selectedTicket.status === 'in_progress' && <Button size="small" onClick={() => ticketMutation.mutate({ id: selectedTicket.id, status: 'resolved' })}>标记已处理</Button>}
+              {['in_progress', 'resolved'].includes(selectedTicket.status) && <Button size="small" onClick={() => ticketMutation.mutate({ id: selectedTicket.id, status: 'closed' })}>关闭</Button>}
+            </Space>
+          </Space>
+        </Card>}
+      </>}
+      {selectedApplication && <>
+        <ApplicationCard row={selectedApplication} />
+        {['pending', 'approved', 'processing'].includes(selectedApplication.status) && <Card size="small" title="售后审核与处理">
+          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            <div><Typography.Text strong>审核或处理说明</Typography.Text><Input.TextArea aria-label="售后审核或处理说明" placeholder="审核或处理说明" autoSize={{ minRows: 3, maxRows: 8 }} value={notes[selectedApplication.id] ?? ''} onChange={(event) => setNotes((current) => ({ ...current, [selectedApplication.id]: event.target.value }))} /></div>
+            <Space wrap>
+              {selectedApplication.status === 'pending' && <><Button size="small" onClick={() => requestMutation.mutate({ id: selectedApplication.id, status: 'approved' })}>审核通过</Button><Button size="small" danger onClick={() => requestMutation.mutate({ id: selectedApplication.id, status: 'rejected' })}>驳回</Button></>}
+              {selectedApplication.status === 'approved' && <Button size="small" onClick={() => requestMutation.mutate({ id: selectedApplication.id, status: selectedApplication.requestType === 'refund' ? 'awaiting_external_refund' : 'processing' })}>{selectedApplication.requestType === 'refund' ? '转待外部退款' : '开始处理'}</Button>}
+              {selectedApplication.status === 'processing' && <Button size="small" onClick={() => requestMutation.mutate({ id: selectedApplication.id, status: 'completed' })}>处理完成</Button>}
+            </Space>
+          </Space>
+        </Card>}
+      </>}
+      {detail && !selectedTicket && !selectedApplication && ((detail.kind === 'ticket' ? tickets.isLoading : applications.isLoading) ? <Spin /> : <Empty description="当前列表暂无此记录，请刷新后查看。" />)}
+    </Drawer>
+  </main></StaffLayout>;
 }

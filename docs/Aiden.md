@@ -70,7 +70,6 @@ Aiden/
   │     ├─ main.py                     # FastAPI 入口
   │     ├─ api/                        # 鉴权、会话、人工接管、运营与 trace 接口
   │     │  ├─ routes/
-  │     │  ├─ schemas/
   │     │  └─ sse.py
   │     │
   │     ├─ agent/                      # Agent 编排层
@@ -78,15 +77,11 @@ Aiden/
   │     │  ├─ state.py                 # 对话与流程状态
   │     │  ├─ nodes/                   # load_context、intent、clarify、route、
   │     │  │                            # summarize、security
-  │     │  └─ specialists/             # RAG、Tools、Billing、ticket
   │     │
   │     ├─ services/                   # 基础能力层
   │     │  ├─ rag/                     # 检索、融合、重排
   │     │  ├─ tools/                   # 订单、物流等工具调用
-  │     │  ├─ memory/                  # 上下文裁剪与摘要
-  │     │  ├─ guardrails/              # 置信度闸门、拒答、转人工
-  │     │  ├─ model/                   # OpenAI 兼容模型接入
-  │     │  └─ observability/           # trace、token 与成本记录
+  │     │  ├─ topic_classification/    # 旁路主题分类器接入
   │     │
   │     ├─ persistence/                # 数据访问
   │     │  ├─ mysql/                   # 会话、消息、工单、问题池

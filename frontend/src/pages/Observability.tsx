@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Alert, AutoComplete, Button, Card, DatePicker, Descriptions, Drawer, Empty, Input, Pagination, Select, Space, Spin, Statistic, Table, Tag, Typography } from 'antd';
+import { Alert, AutoComplete, Button, Card, Collapse, DatePicker, Descriptions, Drawer, Empty, Input, Pagination, Select, Space, Spin, Statistic, Table, Tabs, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { useQuery } from '@tanstack/react-query';
-import { PageHeader } from '../components/Common';
+import { StaffLayout } from '../components/StaffLayout';
 import { api, apiMode } from '../api';
 import { observabilityApi } from '../api/observability';
 import type { ObservabilityDetail, ObservabilityFilters, ObservabilityObservation, ObservabilityTrace, ObservabilityTrendPoint, ObservabilityTokenTrendPoint } from '../types';
@@ -117,6 +117,7 @@ function Trend({ points }: { points: ObservabilityTrendPoint[] }) {
       <Table
         size="small"
         pagination={false}
+        scroll={{ x: 850 }}
         rowKey="date"
         dataSource={points}
         columns={[
@@ -188,6 +189,8 @@ function TraceDetails({ envelope, timezone, onSelect, selectedObservation, selec
           <Descriptions.Item label="模型 / 耗时">{selectedObservation.model ?? '未记录'} / {selectedObservation.duration_ms == null ? '耗时未记录' : `${numberText(selectedObservation.duration_ms)} 毫秒`}</Descriptions.Item>
           <Descriptions.Item label="模型用量"><Usage value={selectedObservation} /></Descriptions.Item>
         </Descriptions>
+        {selectedObservation.error_summary && <Alert type="error" showIcon message="步骤错误摘要" description={selectedObservation.error_summary} />}
+        <Collapse size="small" items={[{ key: 'fields', label: '步骤原始字段（已读取的元数据与用量）', children: <pre className="rag-result" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(selectedObservation, null, 2)}</pre> }]} />
       </Card>}
     </>}
     {envelope.data === null && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={stateHint[envelope.state] ?? '此请求没有可展示的详情记录。'} />}
@@ -266,8 +269,7 @@ export function Observability() {
     { title: '耗时', dataIndex: 'duration_ms', render: durationText },
     { title: '模型用量（Token）', render: (_, item) => tokenText(item.tokens) },
   ];
-  return <div className="workspace-shell rag-shell observability-shell">
-    <PageHeader actor={actor.data} />
+  return <StaffLayout actor={actor.data} className="observability-shell">
     <main className="rag-main observability-main">
       <section className="rag-heading">
         <div>
@@ -275,11 +277,10 @@ export function Observability() {
           <Title level={2}>观测与用量</Title>
           <Paragraph type="secondary">查看客服请求与模型用量；不展示原始聊天内容。</Paragraph>
         </div>
-        <Text type="secondary">显示时区：{timezone}</Text>
+        <Space wrap><Text type="secondary">显示时区：{timezone}</Text><Button onClick={refresh} disabled={!remote} loading={overview.isFetching || traces.isFetching}>刷新数据</Button></Space>
       </section>
     {!remote && <Alert type="warning" showIcon message="模拟模式不提供真实观测数据" description="此页不会填入模拟观测；切换到 remote 并使用已授权的员工账户。" />}
-    <Button onClick={refresh} disabled={!remote} loading={overview.isFetching || traces.isFetching}>刷新数据</Button>
-    <Card className="rag-card" title="查询范围">
+    <Card size="small" className="rag-card staff-query" title="查询范围" extra={<Button onClick={clearOtherFilters}>清除其他筛选并查询</Button>}>
       <Space wrap>
         <Select aria-label="时间范围" value={preset} onChange={applyPreset} options={[{ value: '1h', label: '最近 1 小时' }, { value: '24h', label: '最近 24 小时' }, { value: '7d', label: '最近 7 天' }, { value: '31d', label: '最近 31 天（最大范围）' }, { value: 'custom', label: '自定义' }]} />
         {preset === 'custom' && <><DatePicker.RangePicker showTime value={customRange} onChange={(value) => setCustomRange(value)} /><Button onClick={applyCustom}>应用时间</Button></>}
@@ -312,7 +313,6 @@ export function Observability() {
       </Paragraph>
     </Card>
     <Paragraph type="secondary">如无数据，可显式扩大到最近 7 天或 31 天、清除已应用筛选后点击“应用筛选”，或点击“刷新数据”；页面不会自行改变范围。</Paragraph>
-    <Button onClick={clearOtherFilters}>清除其他筛选并查询</Button>
     {overview.isLoading && <Spin tip="正在读取观测概览…" />}
     {overview.isError && <Alert type="error" showIcon message="概览读取失败" description={overview.error instanceof Error ? overview.error.message : '请求失败'} />}
     {!overview.isError && overview.data?.state === 'ready' && <Alert type="success" showIcon message={`已读取真实观测数据 · 查询时间 ${dateText(overview.data.queried_at, timezone)}`} description={`查询来源：${sourceText(filters.source)}。以下数字来自当前查询范围的实际读取结果。`} />}
@@ -364,15 +364,32 @@ export function Observability() {
           <Text type="secondary">输入 {numberText(data.tokens.input)} · 输出 {numberText(data.tokens.output)} · 合计 {numberText(data.tokens.total)}。未知表示数据未记录；已确认的 0 保持显示为 0。Token 是模型处理文本的计量单位，不等同于字数；缺失字段不补算，历史未核验数据不计入已确认汇总。完整覆盖：{data.tokens.known_generations}/{data.tokens.total_generations} 次。</Text>
         </Card>
       </section>
-    <Card className="rag-card" title="本次查询结论">
-      <Paragraph>{data.insights.facts.join(' ')}</Paragraph>
+    <Collapse size="small" items={[{ key: 'facts', label: '本次查询事实', children: <Paragraph>{data.insights.facts.join(' ')}</Paragraph> }]} />
       {data.insights.limitations.map((item, index) => <Paragraph type="secondary" key={`limit-${index}`}>{item}</Paragraph>)}
+    <Paragraph type="secondary">这里只表示后台处理耗时；用户端总等待时间、首字响应时间未采集。知识查询只记录整体耗时，内部阶段未分别记录。</Paragraph>
+    </>}
+    <Tabs className="staff-data-tabs" items={[
+      { key: 'trends', label: '处理趋势', children: data ? <Card size="small" className="rag-card" title="每日处理趋势"><Trend points={data.trend} /></Card> : <Empty description="尚无可展示的趋势数据" /> },
+      { key: 'requests', label: '请求与步骤', children: <>
+    <Card className="rag-card" title="处理记录与请求列表">
+      <Paragraph type="secondary">列表展示当前范围内已读取的客服请求；更细的处理步骤仅按实际记录显示，不推测未采集的耗时。</Paragraph>
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={list?.items ?? []}
+        loading={traces.isLoading}
+        pagination={false}
+        scroll={{ x: 1200 }}
+        locale={{ emptyText: traces.isLoading ? '正在读取请求…' : traces.isError ? '请求列表读取失败。请查看上方提示并手动刷新。' : traces.data?.state === 'empty' ? '本次查询没有匹配请求。' : traces.data && traces.data.state !== 'ready' ? stateHint[traces.data.state] ?? '当前无法读取请求列表。' : '暂无请求记录。' }}
+      />
+      <Pagination current={list?.page ?? page} pageSize={list?.page_size ?? 20} total={list?.total ?? 0} onChange={(next) => setPage(next)} showSizeChanger={false} />
     </Card>
-    <Card className="rag-card" title="模型与业务分类用量"><Space direction="vertical" style={{ width: '100%' }}><Table size="small" rowKey="model" pagination={false} dataSource={data.models} locale={{ emptyText: '当前没有模型调用记录' }} columns={[{ title: '模型', dataIndex: 'model' }, { title: '调用数', dataIndex: 'generations' }, { title: '模型用量（Token）', render: (_, row) => tokenText(row.tokens) }]} /><Table size="small" rowKey="bucket" pagination={false} dataSource={data.attribution} locale={{ emptyText: '当前没有业务分类记录' }} columns={[{ title: '业务分类', dataIndex: 'bucket', render: intentText }, { title: '调用数', dataIndex: 'generations' }, { title: '模型用量（Token）', render: (_, row) => tokenText(row.tokens) }]} /></Space></Card>
+      {data && <>
     <Card className="rag-card" title="较慢的请求与步骤">
       <Paragraph type="secondary">展示已记录的较慢处理步骤。步骤按真实父子关系追溯；并行处理不表示先后顺序。点击步骤后会打开所属请求详情并定位到该步骤。</Paragraph>
       <Table
         size="small"
+        scroll={{ x: 850 }}
         rowKey="trace_id"
         pagination={false}
         dataSource={data.slow_items.requests}
@@ -387,6 +404,7 @@ export function Observability() {
       />
       <Table
         size="small"
+        scroll={{ x: 750 }}
         rowKey="observation_id"
         pagination={false}
         dataSource={data.slow_items.steps}
@@ -400,17 +418,10 @@ export function Observability() {
         ]}
       />
     </Card>
-    <Card className="rag-card" title="每日处理趋势"><Trend points={data.trend} /></Card></>}
-    {data && <Card className="rag-card" title="数据完整情况">
-      <Paragraph type="secondary">这里只表示后台处理耗时；用户端总等待时间、首字响应时间未采集。知识查询只记录整体耗时，内部阶段未分别记录。</Paragraph>
-      <Descriptions column={{ xs: 1, md: 2 }} size="small">
-        <Descriptions.Item label="模型调用总数">{numberText(data.data_quality.generations)}</Descriptions.Item>
-        <Descriptions.Item label="来源已核验的完整用量">{numberText(data.data_quality.provider_verified)} / {numberText(data.data_quality.generations)} 次</Descriptions.Item>
-        <Descriptions.Item label="没有用量记录">{numberText(data.data_quality.usage_unrecorded)}</Descriptions.Item>
-        <Descriptions.Item label="用量已记录但来源未核验">{numberText(data.data_quality.usage_unverified)}</Descriptions.Item>
-        
-      </Descriptions>
-    </Card>}
+      </>}
+      </> },
+      { key: 'usage', label: '用量明细', children: data ? <>
+    <Card size="small" className="rag-card" title="模型与业务分类用量"><Space direction="vertical" style={{ width: '100%' }}><Table size="small" scroll={{ x: 650 }} rowKey="model" pagination={false} dataSource={data.models} locale={{ emptyText: '当前没有模型调用记录' }} columns={[{ title: '模型', dataIndex: 'model' }, { title: '调用数', dataIndex: 'generations' }, { title: '模型用量（Token）', render: (_, row) => tokenText(row.tokens) }]} /><Table size="small" scroll={{ x: 650 }} rowKey="bucket" pagination={false} dataSource={data.attribution} locale={{ emptyText: '当前没有业务分类记录' }} columns={[{ title: '业务分类', dataIndex: 'bucket', render: intentText }, { title: '调用数', dataIndex: 'generations' }, { title: '模型用量（Token）', render: (_, row) => tokenText(row.tokens) }]} /></Space></Card>
     {data && <Card className="rag-card obs-token-trend" title="Token 趋势">
       <Paragraph type="secondary">按日期、模型和业务分类查看调用次数与 Token 用量。共享意图分类单独列出；此处筛选只改变本表，不改变上方请求总览。</Paragraph>
       <Space wrap className="obs-token-filters">
@@ -434,19 +445,18 @@ export function Observability() {
         ]}
       />}
     </Card>}
-    <Card className="rag-card" title="处理记录与请求列表">
-      <Paragraph type="secondary">列表展示当前范围内已读取的客服请求；更细的处理步骤仅按实际记录显示，不推测未采集的耗时。</Paragraph>
-      <Table
-        rowKey="id"
-        columns={columns}
-        dataSource={list?.items ?? []}
-        loading={traces.isLoading}
-        pagination={false}
-        scroll={{ x: 1200 }}
-        locale={{ emptyText: traces.isLoading ? '正在读取请求…' : traces.isError ? '请求列表读取失败。请查看上方提示并手动刷新。' : traces.data?.state === 'empty' ? '本次查询没有匹配请求。' : traces.data && traces.data.state !== 'ready' ? stateHint[traces.data.state] ?? '当前无法读取请求列表。' : '暂无请求记录。' }}
-      />
-      <Pagination current={list?.page ?? page} pageSize={list?.page_size ?? 20} total={list?.total ?? 0} onChange={(next) => setPage(next)} showSizeChanger={false} />
-    </Card>
+    {data && <Card className="rag-card" title="数据完整情况">
+      <Paragraph type="secondary">这里只表示后台处理耗时；用户端总等待时间、首字响应时间未采集。知识查询只记录整体耗时，内部阶段未分别记录。</Paragraph>
+      <Descriptions column={{ xs: 1, md: 2 }} size="small">
+        <Descriptions.Item label="模型调用总数">{numberText(data.data_quality.generations)}</Descriptions.Item>
+        <Descriptions.Item label="来源已核验的完整用量">{numberText(data.data_quality.provider_verified)} / {numberText(data.data_quality.generations)} 次</Descriptions.Item>
+        <Descriptions.Item label="没有用量记录">{numberText(data.data_quality.usage_unrecorded)}</Descriptions.Item>
+        <Descriptions.Item label="用量已记录但来源未核验">{numberText(data.data_quality.usage_unverified)}</Descriptions.Item>
+        
+      </Descriptions>
+    </Card>}
+      </> : <Empty description="尚无可展示的用量数据" /> },
+    ]} />
     <Card className="rag-card" title="数据状态与覆盖">
       <Descriptions column={{ xs: 1, md: 2 }} size="small">
         <Descriptions.Item label="读取状态">{overview.isError ? '读取失败' : stateText[envelope?.state ?? ''] ?? '等待读取'}</Descriptions.Item>
@@ -463,7 +473,7 @@ export function Observability() {
         <Descriptions.Item label="读取完整性">{envelope?.coverage ? envelope.coverage.truncated ? '不完整，仅代表已读取部分' : '本次读取完成' : '未读取'}</Descriptions.Item>
       </Descriptions>
     </Card>
-    <Drawer title="请求详情" width={760} open={!!selected} onClose={() => { setSelected(undefined); setSelectedObservationId(undefined); }}>
+    <Drawer rootClassName="staff-detail-drawer" title="请求详情" width={760} open={!!selected} onClose={() => { setSelected(undefined); setSelectedObservationId(undefined); }}>
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         {detail.isLoading && <Spin tip="正在读取请求详情…" />}
         {detail.isError && <Alert type="error" message="详情读取失败" description={detail.error instanceof Error ? detail.error.message : '请求失败，请手动重试。'} />}
@@ -471,5 +481,5 @@ export function Observability() {
         {selected && !remote && <Alert type="warning" message="演示模式不提供详情数据" />}
       </Space>
     </Drawer>
-  </main></div>;
+  </main></StaffLayout>;
 }

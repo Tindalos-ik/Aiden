@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Empty, Select, Space, Spin, Statistic, Tabs, Tag, Typography } from 'antd';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Alert, Button, Card, Drawer, Empty, Select, Space, Spin, Statistic, Tabs, Tag, Typography } from 'antd';
 import { DatabaseOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api, apiMode } from '../api';
 import { ragApi } from '../api/rag';
-import { PageHeader } from '../components/Common';
+import { StaffLayout } from '../components/StaffLayout';
 import type { RagChunk, RagJob } from '../types';
 
 const { Text, Title, Paragraph } = Typography;
@@ -18,16 +18,32 @@ function StatusCount({ title, count }: { title: string; count: number }) {
   return <Card size="small" className="rag-stat"><Statistic title={title} value={count} /></Card>;
 }
 
+function DetailDrawer({ title, children }: { title: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return <>
+    <Button size="small" onClick={() => setOpen(true)}>查看详情</Button>
+    <Drawer rootClassName="staff-detail-drawer" title={title} open={open} onClose={() => setOpen(false)} width="min(720px, 100vw)">
+      {children}
+    </Drawer>
+  </>;
+}
+
 function ChunkCard({ chunk }: { chunk: RagChunk }) {
   return <Card size="small" className="rag-chunk" title={<Space wrap><span>{chunk.sectionPath || '未命名章节'}</span><Tag>{chunk.category}</Tag></Space>}
-    extra={<Space wrap><Tag color={chunk.isKeyClause ? 'gold' : 'default'}>{chunk.isKeyClause ? '关键条款' : '普通内容'}</Tag><Tag>{chunk.contentType}</Tag></Space>}>
+    extra={<DetailDrawer title={chunk.sectionPath || '知识块详情'}>
+      <Space wrap><Tag>{chunk.category}</Tag><Tag>{chunk.contentType}</Tag><Tag>{chunk.isKeyClause ? '关键条款' : '普通内容'}</Tag></Space>
+      <Paragraph>来源：{[chunk.sourceType, chunk.sourcePath].filter(Boolean).join(' · ') || '未提供'}</Paragraph>
+      <Paragraph>问法：{chunk.questions.length ? chunk.questions.join(' / ') : '无'}</Paragraph>
+      {chunk.vectorStatus && <Paragraph>向量状态：{chunk.vectorStatus}</Paragraph>}
+      {chunk.needsManualReview && <Alert showIcon type="warning" message={chunk.reviewReason || '请检查内容长度'} />}
+      <pre className="rag-chunk-body">{chunk.content}</pre>
+    </DetailDrawer>}>
     <div className="rag-chunk-meta">
-      <span>问法：{chunk.questions.length ? chunk.questions.join(' / ') : '无'}</span>
-      {chunk.sourceType && <span>来源：{chunk.sourceType}{chunk.sourcePath ? ` · ${chunk.sourcePath}` : ''}</span>}
+      <span>来源：{[chunk.sourceType, chunk.sourcePath].filter(Boolean).join(' · ') || '未提供'}</span>
+      <Space wrap><Tag>{chunk.contentType}</Tag><Tag color={chunk.isKeyClause ? 'gold' : 'default'}>{chunk.isKeyClause ? '关键条款' : '普通内容'}</Tag><Text type="secondary">问法 {chunk.questions.length} 条 · 正文 {chunk.content.length} 字符</Text></Space>
       {chunk.vectorStatus && <span>向量状态：<Tag color={chunk.vectorStatus === 'vectorized' ? 'green' : chunk.vectorStatus === 'pending' ? 'blue' : 'orange'}>{chunk.vectorStatus}</Tag></span>}
       {chunk.needsManualReview && <Tag color="orange">需人工审核：{chunk.reviewReason || '请检查内容长度'}</Tag>}
     </div>
-    <pre className="rag-chunk-body">{chunk.content}</pre>
   </Card>;
 }
 
@@ -37,7 +53,7 @@ function JobPanel({ jobs }: { jobs: RagJob[] }) {
     <Space wrap><Text strong>{job.kind}</Text><Tag color={job.status === 'completed' ? 'green' : job.status === 'failed' ? 'red' : job.status === 'cancelled' ? 'orange' : job.status === 'stopping' ? 'gold' : 'blue'}>{job.status}</Tag><Text type="secondary">{new Date(job.createdAt).toLocaleString('zh-CN')}</Text></Space>
     {job.progress && <Paragraph className="rag-job-note">{job.progress}</Paragraph>}
     {job.error && <Alert type="error" showIcon message={job.error} />}
-    {job.result != null && <pre className="rag-result">{JSON.stringify(job.result, null, 2)}</pre>}
+    {job.result != null && <DetailDrawer title={`${job.kind} · 任务结果`}><pre className="rag-result">{JSON.stringify(job.result, null, 2)}</pre></DetailDrawer>}
   </Card>)}</div>;
 }
 
@@ -47,6 +63,7 @@ export function RagConsole() {
   const [offset, setOffset] = useState(0);
   const [milvusOffset, setMilvusOffset] = useState(0);
   const [actionError, setActionError] = useState('');
+  const [activeTab, setActiveTab] = useState('overview');
   const actorQuery = useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: Infinity });
   const enabled = apiMode === 'remote';
   const overview = useQuery({ queryKey: ['rag-overview'], queryFn: ragApi.overview, enabled, refetchInterval: 5000 });
@@ -71,68 +88,98 @@ export function RagConsole() {
   });
   const run = (operation: () => Promise<unknown>) => action.mutate(operation);
   const working = action.isPending || (jobs.data?.items.some((item) => item.status === 'queued' || item.status === 'running' || item.status === 'stopping') ?? false);
+  const activeJobs = (jobs.data?.items ?? []).filter((job) => ['queued', 'running', 'stopping'].includes(job.status));
+  const historicalErrorCount = (jobs.data?.items ?? []).filter((job) => !['queued', 'running', 'stopping'].includes(job.status) && (job.status === 'failed' || !!job.error)).length;
 
   if (actorQuery.isLoading) return <div className="full-screen-state"><Spin /></div>;
   if (!actorQuery.data) return <div className="full-screen-state"><Alert type="error" message="登录状态不可用" /></div>;
 
-  return <div className="workspace-shell rag-shell">
-    <PageHeader actor={actorQuery.data} />
+  return <StaffLayout actor={actorQuery.data} className="rag-shell">
     <main className="rag-main">
       <div className="rag-heading"><div><Text className="section-kicker">KNOWLEDGE OPERATIONS</Text><Title level={2}>RAG 建库控制台</Title><Paragraph type="secondary">预览切块、导入来源、挖掘对话，再按 pending 状态补齐向量。</Paragraph></div><Space wrap><Link to="/staff/evals">查看 RAG 评估</Link>{apiMode === 'mock' && <Link to="/staff">返回员工工作台</Link>}<Button icon={<ReloadOutlined />} onClick={() => void refresh()} disabled={!enabled}>刷新</Button></Space></div>
       {!enabled ? <Alert showIcon type="warning" message="演示模式不可建库" description="此页面不会模拟启动向量服务、写入 MySQL 或 Milvus。请切换 VITE_API_MODE=remote 并使用员工账号登录。" /> : <>
         {actionError && <Alert type="error" showIcon message={actionError} closable onClose={() => setActionError('')} />}
         {overview.isError && <Alert type="error" showIcon message="建库总览加载失败" description={errorText(overview.error)} action={<Button size="small" onClick={() => void overview.refetch()}>重试</Button>} />}
         {overview.data?.databaseError && <Alert type="error" showIcon message="MySQL 状态读取失败" description={overview.data.databaseError} />}
-        {overview.data?.documentsError && <Alert type="error" showIcon message="知识目录读取失败" description={overview.data.documentsError} />}
-        <div className="rag-grid">
-          <Card className="rag-card" title="本地 BGE 向量服务" extra={<Tag color={overview.data?.embedding.dimensionPending ? 'gold' : overview.data?.embedding.healthy ? 'green' : 'red'}>{overview.data?.embedding.dimensionPending ? '维度待验证' : overview.data?.embedding.healthy ? '健康' : '未就绪'}</Tag>}>
-            <Paragraph>进程：{overview.data?.embedding.managed ? '本应用启动' : overview.data?.embedding.processState === 'failed' ? `启动失败（退出码 ${overview.data.embedding.exitCode}）` : '未由本应用启动'} · 模型：{overview.data?.embedding.model || '未探测到'} · 维度：{overview.data?.embedding.dimension ?? '—'}</Paragraph>
-            {overview.data?.embedding.dimensionPending && <Alert type="info" showIcon message="服务已响应；首次编码后会确认向量维度" />}
-            {overview.data?.embedding.healthError && <Alert type="warning" showIcon message={overview.data.embedding.healthError} />}
-            <Space wrap><Button type="primary" icon={<RocketOutlined />} loading={action.isPending} disabled={working || !overview.data?.embedding.canStart || overview.data?.embedding.healthy} onClick={() => run(ragApi.startEmbedding)}>启动本地服务</Button><Button danger loading={action.isPending} disabled={!overview.data?.embedding.managed} onClick={() => run(ragApi.stopEmbedding)}>关闭本应用启动的服务</Button></Space>
-            <Paragraph type="secondary" className="rag-hint">启动后模型加载可能需要几分钟。外部运行的服务只能查看，不能从这里关闭。</Paragraph>
-          </Card>
-          <Card className="rag-card" title="Milvus 集合配置" extra={<DatabaseOutlined />}>
-            <div className="rag-config"><span>集合 <b>{overview.data?.milvus.collection ?? '—'}</b></span><span>向量维度 <b>{overview.data?.milvus.dimension ?? '—'}</b></span><span>距离指标 <b>{overview.data?.milvus.metric ?? '—'}</b></span><span>索引 <b>{overview.data?.milvus.index ?? '—'}</b></span></div>
-            <Paragraph type="secondary" className="rag-hint">这里显示服务端配置；集合会在向量化时检查或创建。</Paragraph>
-          </Card>
-        </div>
-        <div className="rag-counts">
-          <StatusCount title="待向量化" count={overview.data?.chunksByStatus.pending ?? 0} />
-          <StatusCount title="已向量化" count={overview.data?.chunksByStatus.vectorized ?? 0} />
-          <StatusCount title="待人工审核" count={overview.data?.chunksByStatus.need_manual_review ?? 0} />
-          <StatusCount title="已作废块" count={overview.data?.chunksByStatus.superseded ?? 0} />
-        </div>
-        <Card className="rag-card" title="Milvus 实际数据（只读）" extra={<Space><Button disabled={milvusOffset === 0} onClick={() => setMilvusOffset(Math.max(0, milvusOffset - 20))}>上一页</Button><Text>{Math.floor(milvusOffset / 20) + 1}</Text><Button disabled={!milvus.data?.count || milvusOffset + 20 >= milvus.data.count} onClick={() => setMilvusOffset(milvusOffset + 20)}>下一页</Button></Space>}>
-          <Paragraph type="secondary">集合统计数可能短暂滞后；下方仅展示标量字段，不加载高维向量。MySQL 状态仍是知识是否有效的依据。</Paragraph>
-          {milvus.isError && <Alert type="error" showIcon message="读取 Milvus 失败" description={errorText(milvus.error)} />}
-          {milvus.data?.error && <Alert type="error" showIcon message="读取 Milvus 失败" description={milvus.data.error} />}
-          {milvus.data?.mysqlError && <Alert type="warning" showIcon message="无法核对 MySQL 状态" description={milvus.data.mysqlError} />}
-          {milvus.data?.exists === false && <Empty description="Milvus 集合尚未创建；首次向量化会创建集合" />}
-          {milvus.data?.exists && <><Space wrap className="rag-status-tags"><Tag>集合 {milvus.data.collection}</Tag><Tag>实际维度 {milvus.data.dimension ?? '未知'}</Tag><Tag>集合统计数 {milvus.data.count ?? '未知'}</Tag><Tag>MySQL 已向量化 {overview.data?.databaseError ? '不可用' : overview.data?.chunksByStatus.vectorized ?? '未知'}</Tag></Space><div className="rag-stack">{milvus.data.items.map((item) => <Card key={item.chunkId} size="small"><Space wrap><Text code>{item.chunkId}</Text><Tag color={item.mysqlStatus === 'vectorized' ? 'green' : 'orange'}>MySQL {item.mysqlStatus}</Tag><Tag>{item.sourceType}</Tag><Text>{item.category}</Text></Space><Paragraph type="secondary" className="rag-job-note">{[item.sourcePath, item.sectionPath, item.contentType].filter(Boolean).join(' · ')}</Paragraph></Card>)}{!milvus.data.items.length && <Empty description="集合暂无记录" />}</div></>}
+        {jobs.isError && <Alert type="error" showIcon message="任务状态读取失败" description={errorText(jobs.error)} />}
+        <Card size="small" className="rag-card" title="运行状态">
+          <Space wrap>
+            <Tag color={working ? 'blue' : 'default'}>{working ? '操作或任务进行中' : jobs.data ? '当前无运行任务' : '任务状态待读取'}</Tag>
+            <Tag color={overview.data?.embedding.dimensionPending ? 'gold' : overview.data?.embedding.healthy ? 'green' : 'red'}>BGE {overview.data?.embedding.dimensionPending ? '维度待验证' : overview.data?.embedding.healthy ? '健康' : '未就绪'}</Tag>
+            <Text type="secondary">任务每 2 秒刷新 · 服务与挖掘每 5 秒刷新</Text>
+          </Space>
+          {working && <Alert type="info" showIcon message="操作或任务进行中，暂不可启动新任务或本地服务；切换标签不会改变任务。" />}
+          <Space wrap className="rag-status-tags">{activeJobs.map((job) => <Space key={job.id} wrap><Tag color="blue">{job.kind} · {job.status}</Tag><Text code>{job.id}</Text>{job.progress && <Text>{job.progress}</Text>}{job.error && <Text type="danger">{job.error}</Text>}</Space>)}</Space>
+          {historicalErrorCount > 0 && <Space wrap><Text type="danger">历史失败或错误任务 {historicalErrorCount} 个</Text><Button size="small" onClick={() => setActiveTab('jobs')}>查看任务及完整错误</Button></Space>}
         </Card>
-        <Card className="rag-card" title="Markdown 切块预览" extra={<Space wrap><Select className="rag-file-select" placeholder="选择知识文档" value={file} onChange={setFile} options={(overview.data?.documents ?? []).map((item) => ({ value: item, label: item }))} /><Button type="primary" disabled={!file || working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('import-markdown', file))}>导入此文档到 MySQL</Button></Space>}>
-          <Paragraph type="secondary">预览仅读取 backend/knowledge 内的 Markdown，不写数据库。导入后新块先处于 pending。</Paragraph>
-          {preview.isError && <Alert type="error" showIcon message="切块预览失败" description={errorText(preview.error)} />}
-          {preview.isLoading && file && <Spin />}
-          {preview.data && <><Text strong>{preview.data.title} · {preview.data.chunks.length} 块</Text><div className="rag-stack rag-preview-list">{preview.data.chunks.map((chunk, index) => <ChunkCard key={`${chunk.sectionPath}-${index}`} chunk={chunk} />)}</div></>}
-        </Card>
-        <Card className="rag-card" title="入库与双写任务">
-          <Space wrap><Button disabled={working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('import-markdown-all'))}>导入全部 Markdown 到 MySQL</Button><Button disabled={working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('import-faq'))}>导入启用的 FAQ 到 MySQL</Button><Button disabled={working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('mine'))}>对话挖掘一轮</Button><Button type="primary" disabled={working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('vectorize'))}>向量化 pending 并双写</Button><Button disabled={working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('cleanup'))}>清理已作废向量</Button></Space>
-          <Paragraph type="secondary" className="rag-hint">挖掘任务先写候选和正式知识；向量化由下一步单独触发。清理只删除已作废块的 Milvus 向量。</Paragraph>
-          <Title level={5}>任务状态</Title>{jobs.isError ? <Alert type="error" message={errorText(jobs.error)} /> : <JobPanel jobs={jobs.data?.items ?? []} />}
-        </Card>
-        <Card className="rag-card" title="对话挖掘批次与候选">
-          <Space wrap className="rag-status-tags">{Object.entries(overview.data?.batchesByStatus ?? {}).map(([status, count]) => <Tag key={status}>{status}: {count}</Tag>)}{Object.entries(overview.data?.candidatesByStatus ?? {}).map(([status, count]) => <Tag key={status} color="blue">候选 {status}: {count}</Tag>)}</Space>
-          {mining.isError ? <Alert type="error" message={errorText(mining.error)} /> : <Tabs items={[
-            { key: 'batches', label: '最近批次', children: <div className="rag-stack">{mining.data?.batches.map((batch) => <Card key={batch.id} size="small"><Space wrap><Tag color={batch.status === 'failed' ? 'red' : batch.status === 'promoted' ? 'green' : 'blue'}>{batch.status}</Tag><Text>轮次 {batch.turnCount} · 候选 {batch.candidateCount}</Text><Text type="secondary">{batch.updatedAt ? new Date(batch.updatedAt).toLocaleString('zh-CN') : ''}</Text>{batch.runId && <Text type="secondary">运行 {batch.runId.slice(0, 8)}</Text>}</Space>{batch.error && <Paragraph type="danger">{batch.error}</Paragraph>}</Card>)}{!mining.data?.batches.length && <Empty description="暂无批次" />}</div> },
-            ...(['staged', 'promoted', 'rejected'] as const).map((status) => ({ key: status, label: `候选 ${status}`, children: <div className="rag-stack">{(mining.data?.candidates[status] ?? []).map((candidate) => <Card key={candidate.candidate_id} size="small" title={candidate.question} extra={<Tag>{candidate.category}</Tag>}><Paragraph>{candidate.answer}</Paragraph>{candidate.rejection_reason && <Text type="danger">{candidate.rejection_reason}</Text>}</Card>)}{!mining.data?.candidates[status]?.length && <Empty description="暂无候选" />}</div> })),
-          ]} />}
-        </Card>
-        <Card className="rag-card" title="已入库 chunks" extra={<Space><Button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 20))}>上一页</Button><Text>{Math.floor(offset / 20) + 1}</Text><Button disabled={(chunks.data?.items.length ?? 0) < 20} onClick={() => setOffset(offset + 20)}>下一页</Button></Space>}>
-          {chunks.isError ? <Alert type="error" message={errorText(chunks.error)} /> : <div className="rag-stack">{chunks.data?.items.map((chunk) => <ChunkCard key={chunk.id} chunk={chunk} />)}{!chunks.data?.items.length && <Empty description="暂无已导入知识块" />}</div>}
-        </Card>
+        {/* 标签只组织阅读路径；查询和草稿状态留在页面层，不因切换触发写入。 */}
+        <Tabs className="staff-task-tabs" activeKey={activeTab} onChange={setActiveTab} items={[
+          { key: 'overview', label: '服务与概览', forceRender: true, children: <div className="rag-stack">
+            <div className="rag-counts">
+              <StatusCount title="待向量化" count={overview.data?.chunksByStatus.pending ?? 0} />
+              <StatusCount title="已向量化" count={overview.data?.chunksByStatus.vectorized ?? 0} />
+              <StatusCount title="待人工审核" count={overview.data?.chunksByStatus.need_manual_review ?? 0} />
+              <StatusCount title="已作废块" count={overview.data?.chunksByStatus.superseded ?? 0} />
+            </div>
+            <div className="rag-grid">
+              <Card className="rag-card" title="本地 BGE 向量服务">
+                <Paragraph>进程：{overview.data?.embedding.managed ? '本应用启动' : overview.data?.embedding.processState === 'failed' ? `启动失败（退出码 ${overview.data.embedding.exitCode}）` : '未由本应用启动'} · 模型：{overview.data?.embedding.model || '未探测到'} · 维度：{overview.data?.embedding.dimension ?? '—'}</Paragraph>
+                {overview.data?.embedding.healthError && <Alert type="warning" showIcon message={overview.data.embedding.healthError} />}
+                {overview.data?.embedding.dimensionPending && <Alert type="info" showIcon message="服务已响应；首次编码后会确认向量维度" />}
+                <Space wrap><Button type="primary" icon={<RocketOutlined />} loading={action.isPending} disabled={working || !overview.data?.embedding.canStart || overview.data?.embedding.healthy} onClick={() => run(ragApi.startEmbedding)}>启动本地服务</Button><Button danger loading={action.isPending} disabled={!overview.data?.embedding.managed} onClick={() => run(ragApi.stopEmbedding)}>关闭本应用启动的服务</Button></Space>
+                <Paragraph type="secondary" className="rag-hint">启动后模型加载可能需要几分钟。外部运行的服务只能查看，不能从这里关闭。</Paragraph>
+                {!overview.data?.embedding.canStart && <Paragraph type="secondary">当前服务端不允许启动本地服务。</Paragraph>}
+                {overview.data?.embedding.healthy && <Paragraph type="secondary">服务已健康，无需重复启动。</Paragraph>}
+                {!overview.data?.embedding.managed && <Paragraph type="secondary">没有本应用管理的服务，关闭操作不可用。</Paragraph>}
+              </Card>
+              <Card className="rag-card" title="Milvus 集合配置" extra={<DatabaseOutlined />}>
+                <div className="rag-config"><span>集合 <b>{overview.data?.milvus.collection ?? '—'}</b></span><span>向量维度 <b>{overview.data?.milvus.dimension ?? '—'}</b></span><span>距离指标 <b>{overview.data?.milvus.metric ?? '—'}</b></span><span>索引 <b>{overview.data?.milvus.index ?? '—'}</b></span></div>
+                <Paragraph type="secondary" className="rag-hint">这里显示服务端配置；集合会在向量化时检查或创建。</Paragraph>
+              </Card>
+            </div>
+          </div> },
+          { key: 'documents', label: '文档预览与导入', forceRender: true, children: <Card className="rag-card" title="Markdown 切块预览">
+            <Space wrap><Select className="rag-file-select" placeholder="选择知识文档" value={file} onChange={setFile} options={(overview.data?.documents ?? []).map((item) => ({ value: item, label: item }))} /><Button type="primary" disabled={!file || working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('import-markdown', file))}>导入此文档到 MySQL</Button></Space>
+            {overview.data?.documentsError && <Alert type="error" showIcon message="知识目录读取失败" description={overview.data.documentsError} />}
+            {preview.isError && <Alert type="error" showIcon message="切块预览失败" description={errorText(preview.error)} />}
+            <Paragraph type="secondary">预览仅读取 backend/knowledge 内的 Markdown，不写数据库。导入后新块先处于 pending。</Paragraph>
+            {!file && <Alert type="info" showIcon message="请先选择知识文档；未选择时不可导入。" />}
+            {preview.isLoading && file && <Spin />}
+            {preview.data && <><Text strong>{preview.data.title} · {preview.data.chunks.length} 块</Text><div className="rag-stack rag-preview-list">{preview.data.chunks.map((chunk, index) => <ChunkCard key={`${chunk.sectionPath}-${index}`} chunk={chunk} />)}</div></>}
+          </Card> },
+          { key: 'jobs', label: '入库与向量化任务', forceRender: true, children: <Card className="rag-card" title="入库与双写任务">
+            <Space wrap><Button disabled={working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('import-markdown-all'))}>导入全部 Markdown 到 MySQL</Button><Button disabled={working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('import-faq'))}>导入启用的 FAQ 到 MySQL</Button><Button type="primary" disabled={working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('vectorize'))}>向量化 pending 并双写</Button><Button disabled={working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('cleanup'))}>清理已作废向量</Button></Space>
+            <Paragraph type="secondary" className="rag-hint">挖掘任务先写候选和正式知识；向量化由下一步单独触发。清理只删除已作废块的 Milvus 向量。</Paragraph>
+            <Title level={5}>全部任务</Title><JobPanel jobs={jobs.data?.items ?? []} />
+          </Card> },
+          { key: 'mining', label: '对话挖掘', forceRender: true, children: <Card className="rag-card" title="对话挖掘批次与候选">
+            <Button disabled={working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('mine'))}>对话挖掘一轮</Button>
+            {mining.isError && <Alert type="error" showIcon message="对话挖掘读取失败" description={errorText(mining.error)} />}
+            <Paragraph type="secondary">挖掘先写入候选与正式知识，需要在「入库与向量化任务」中单独触发向量化。</Paragraph>
+            <Space wrap className="rag-status-tags">{Object.entries(overview.data?.batchesByStatus ?? {}).map(([status, count]) => <Tag key={status}>{status}: {count}</Tag>)}{Object.entries(overview.data?.candidatesByStatus ?? {}).map(([status, count]) => <Tag key={status} color="blue">候选 {status}: {count}</Tag>)}</Space>
+            <Tabs items={[
+              { key: 'batches', label: '最近批次', forceRender: true, children: <div className="rag-stack">{mining.data?.batches.map((batch) => <Card key={batch.id} size="small"><Space wrap><Tag color={batch.status === 'failed' ? 'red' : batch.status === 'promoted' ? 'green' : 'blue'}>{batch.status}</Tag><Text>轮次 {batch.turnCount} · 候选 {batch.candidateCount}</Text><Text type="secondary">{batch.updatedAt ? new Date(batch.updatedAt).toLocaleString('zh-CN') : ''}</Text>{batch.runId && <Text type="secondary">运行 {batch.runId}</Text>}</Space>{batch.error && <Paragraph type="danger">{batch.error}</Paragraph>}</Card>)}{!mining.data?.batches.length && <Empty description="暂无批次" />}</div> },
+              ...(['staged', 'promoted', 'rejected'] as const).map((status) => ({ key: status, label: `候选 ${status}`, forceRender: true, children: <div className="rag-stack">{(mining.data?.candidates[status] ?? []).map((candidate) => <Card key={candidate.candidate_id} size="small" title={<Text>{candidate.question}</Text>} extra={<Tag>{candidate.category}</Tag>}><Space wrap><Text type="secondary">答案 {candidate.answer.length} 字符</Text><DetailDrawer title="候选答案"><Paragraph>{candidate.question}</Paragraph><Tag>{candidate.category}</Tag><Paragraph style={{ whiteSpace: 'pre-wrap' }}>{candidate.answer}</Paragraph>{candidate.rejection_reason && <Alert type="warning" message={candidate.rejection_reason} />}</DetailDrawer></Space>{candidate.rejection_reason && <Paragraph type="danger">{candidate.rejection_reason}</Paragraph>}</Card>)}{!mining.data?.candidates[status]?.length && <Empty description="暂无候选" />}</div> })),
+            ]} />
+          </Card> },
+          { key: 'data', label: '知识块与 Milvus 数据', forceRender: true, children: <div className="rag-stack">
+            <Card className="rag-card" title="已入库 chunks">
+              <Space wrap><Button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 20))}>上一页</Button><Text>第 {Math.floor(offset / 20) + 1} 页</Text><Button disabled={(chunks.data?.items.length ?? 0) < 20} onClick={() => setOffset(offset + 20)}>下一页</Button></Space>
+              {chunks.isError && <Alert type="error" showIcon message="知识块读取失败" description={errorText(chunks.error)} />}
+              <div className="rag-stack">{chunks.data?.items.map((chunk) => <ChunkCard key={chunk.id} chunk={chunk} />)}{!chunks.isError && !chunks.data?.items.length && <Empty description="暂无已导入知识块" />}</div>
+            </Card>
+            <Card className="rag-card" title="Milvus 实际数据（只读）">
+              <Space wrap><Button disabled={milvusOffset === 0} onClick={() => setMilvusOffset(Math.max(0, milvusOffset - 20))}>上一页</Button><Text>第 {Math.floor(milvusOffset / 20) + 1} 页</Text><Button disabled={!milvus.data?.count || milvusOffset + 20 >= milvus.data.count} onClick={() => setMilvusOffset(milvusOffset + 20)}>下一页</Button></Space>
+              <Paragraph type="secondary">集合统计数可能短暂滞后；仅展示标量字段，不加载高维向量。MySQL 状态仍是知识是否有效的依据。</Paragraph>
+              {milvus.isError && <Alert type="error" showIcon message="读取 Milvus 失败" description={errorText(milvus.error)} />}
+              {milvus.data?.error && <Alert type="error" showIcon message="读取 Milvus 失败" description={milvus.data.error} />}
+              {milvus.data?.mysqlError && <Alert type="warning" showIcon message="无法核对 MySQL 状态" description={milvus.data.mysqlError} />}
+              {milvus.data?.exists === false && <Empty description="Milvus 集合尚未创建；首次向量化会创建集合" />}
+              {milvus.data?.exists && <><Space wrap className="rag-status-tags"><Tag>集合 {milvus.data.collection}</Tag><Tag>实际维度 {milvus.data.dimension ?? '未知'}</Tag><Tag>集合统计数 {milvus.data.count ?? '未知'}</Tag><Tag>MySQL 已向量化 {overview.data?.databaseError ? '不可用' : overview.data?.chunksByStatus.vectorized ?? '未知'}</Tag></Space><div className="rag-stack">{milvus.data.items.map((item) => <Card key={item.chunkId} size="small" extra={<DetailDrawer title={`Milvus 记录 ${item.chunkId}`}><pre className="rag-result">{JSON.stringify(item, null, 2)}</pre></DetailDrawer>}><Space wrap><Text code>{item.chunkId}</Text><Tag color={item.mysqlStatus === 'vectorized' ? 'green' : 'orange'}>MySQL {item.mysqlStatus}</Tag><Tag>{item.sourceType}</Tag><Text>{item.category}</Text></Space><Paragraph type="secondary" className="rag-job-note">{[item.sourcePath, item.sectionPath, item.contentType].filter(Boolean).join(' · ')}</Paragraph></Card>)}{!milvus.data.items.length && <Empty description="集合暂无记录" />}</div></>}
+            </Card>
+          </div> },
+        ]} />
       </>}
     </main>
-  </div>;
+  </StaffLayout>;
 }
