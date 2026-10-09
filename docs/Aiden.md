@@ -14,7 +14,7 @@
 | 已实现，仍需真实环境验收 | 售后页退款/退货/换货与员工处理；对话退款限本人单商品订单、政策覆盖原因和原文“确认提交” | `/app/service`、`/staff/service`、`persistence/mysql/service_workflow.py`、`services/tools/after_sale_submit.py` |
 | 已实现，仍需真实环境验收 | 站内人工排队、接单、双方消息、关闭；前端主要靠轮询，不是外部坐席平台 | `api/routes/staff.py`、`persistence/mysql/human_support.py`、`UserWorkspace.tsx`、`StaffWorkspace.tsx` |
 | 已实现，仍需真实环境验收 | 低置信度/负反馈入池、员工审核补 FAQ、同步及重试；历史挖掘是另一条抽取/脱敏/暂存/去重路径 | `services/rag/review_queue.py`、`conversation_mining.py`、`extraction.py` |
-| 已实现，仍需真实环境验收 | RAG 控制台、离线评估、Langfuse 图回调与意图归因；员工只读观测 API 与 `/staff/observability` 页面按显式来源汇总，历史未标来源/意图不推断，展示安全 Trace 树、usage/costDetails.total（USD）、唯一 generation 按日/模型/业务桶费用趋势及覆盖；费用非结算账单，检索内部阶段未单独追踪。已通过隔离 staff 会话、真实只读上游 HTTP 和真实数据浏览器展示（31 天读 626 observation、36 Trace）；该场景不代表正式员工登录验收。历史 Langfuse usage 是未核验记录值，新 provider source marker 尚未由真实上游确认 | `api/routes/rag_admin.py`、`api/routes/observability.py`、`backend/evals/run_customer_rag.py`、`agent/graph.py`、`frontend/src/pages/Observability.tsx` |
+| 已实现，仍需真实环境验收 | RAG 控制台、离线评估、Langfuse 图回调与意图归因；员工只读观测 API 与 `/staff/observability` 按显式来源汇总，展示安全观测树、唯一模型调用的用量/费用趋势、员工语言事实、可追溯慢请求/慢步骤和缺失覆盖。费用采用 costDetails.total 或有文档定义的 v2 totalCost（USD），非账单；历史来源/意图不推断，缺金额不当零。2026-10-09 真实只读批次为 108 个唯一观测、11 次模型调用、7 条线上请求；11/11 供应商原始计数完整，合计 30,023 tokens，11 次金额未提供，尚无真实多意图请求可验。隔离 current_staff 会话读取成功不代表正式员工登录验收；用户此前 connection_failed 根因尚未捕获，不能宣称已修复。检索内部阶段未单独追踪 | `api/routes/rag_admin.py`、`api/routes/observability.py`、`backend/evals/run_customer_rag.py`、`agent/graph.py`、`frontend/src/pages/Observability.tsx` |
 | 尚未实现 / 目标设计 | MCP 动态发现、自主 ReAct、历史摘要与语义记忆、小分类器及微调；外部支付退款执行及到账核实 | 后文标注的规划章节 |
 
 本地 mock 只展示模拟订单、对话和处理状态；remote 使用后端与真实依赖，出错不会静默切回 mock。`approved` / `awaiting_external_refund` 只表示审核通过 / 待外部退款，不能描述为款项已到账；站内人工排队也不保证立即接入。

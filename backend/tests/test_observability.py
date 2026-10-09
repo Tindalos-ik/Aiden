@@ -26,7 +26,7 @@ def test_missing_usage_zero_and_per_field_coverage():
 
 
 def test_cost_only_resolved_details_currency_and_zero():
-    rows = [generation('missing', totalCost=999), generation('zero', costDetails={'total': 0}),
+    rows = [generation('missing', calculatedTotalCost=999), generation('zero', costDetails={'total': 0}),
             generation('eur', costDetails={'total': 2}, currency='EUR')]
     by_currency = {v['currency']: v for v in c.costs(rows)}
     assert by_currency['USD']['known_cost'] == 0
@@ -212,3 +212,194 @@ def test_generation_cost_trend_preserves_each_currency_and_shared_bucket():
         subtotal = sum(cost['known_cost'] for row in trend for cost in row['costs']
                        if cost['currency'] == total['currency'] and cost['known_cost'] is not None)
         assert subtotal == total['known_cost']
+
+
+def test_employee_insights_cover_whole_selection_and_traceable_slow_items():
+    rows = []
+    for index in range(7):
+        tid = f'trace-{index}'
+        root = {'id': f'root-{index}', 'traceId': tid, 'name': 'aiden_support',
+                'startTime': '2026-10-01T00:00:00Z',
+                'endTime': f'2026-10-01T00:00:0{index + 1}Z',
+                'metadata': {'aiden_source': 'online'}}
+        call = generation(f'call-{index}', traceId=tid, parentObservationId=root['id'],
+                          model='model-a', startTime=root['startTime'], endTime=root['endTime'],
+                          usageDetails={'input': 0, 'output': 0, 'total': 0},
+                          costDetails={'total': index})
+        rows.extend([root, call])
+    with patch.object(c, 'read_rows', return_value=(rows, False, None)):
+        overview = c.query(kind='overview', limit=100, page_size=1)['data']
+        listing = c.query(kind='traces', limit=100, page_size=1)['data']
+    assert len(listing['items']) == 1 and listing['total'] == 7
+    assert overview['data_quality']['provider_verified'] == 7
+    assert overview['data_quality']['cost_recorded'] == 7
+    assert {v['known_cost'] for v in overview['insights']['cost_contributions']} == {21}
+    assert all(v['known_generations'] == 7 for v in overview['insights']['cost_contributions'])
+    assert overview['slow_items']['requests'][0]['trace_id'] == 'trace-6'
+    assert overview['slow_items']['steps'][0]['observation_id'] == 'call-6'
+    assert overview['slow_items']['steps'][0]['trace_id'] == 'trace-6'
+    assert len(overview['slow_items']['requests']) == len(overview['slow_items']['steps']) == 5
+    assert not any('trace-' in fact or 'call-' in fact for fact in overview['insights']['facts'])
+
+
+def test_data_quality_missing_historical_partial_and_malformed_values():
+    rows = [generation('missing', usageDetails=None, costDetails='invalid', metadata={}),
+            generation('history', usageDetails={'total': 4}, metadata={}, costDetails={'total': 0}),
+            generation('verified', usageDetails={'input': 0, 'output': 0, 'total': 0}),
+            generation('partial', usageDetails={'input': 2}),
+            generation('malformed', usageDetails=['invalid'], metadata={'aiden_usage_source': 'provider',
+                                                                      'aiden_provider_usage': 'invalid'})]
+    quality = c.data_quality(rows)
+    assert quality == {'generations': 5, 'provider_verified': 1, 'usage_unrecorded': 2,
+                       'usage_unverified': 1, 'cost_recorded': 1, 'cost_missing': 4}
+    assert c.tokens(rows)['total'] == 0
+    assert c.costs(rows)[0]['known_cost'] == 0
+    assert c.costs(rows)[0]['completeness'] == 'partial'
+    assert c.observation_summary(rows[0])['cost_details'] is None
+
+
+def test_empty_reason_distinguishes_range_source_and_filters():
+    root = {'id': 'root', 'traceId': 'trace', 'name': 'aiden_support',
+            'metadata': {'aiden_source': 'online'}}
+    other = {'id': 'other', 'traceId': 'other', 'name': 'aiden_support',
+             'metadata': {'aiden_source': 'evaluation'}}
+    for rows, kwargs, reason, source_count, source_excluded, filter_excluded in [
+        ([], {}, 'no_observations', 0, 0, 0),
+        ([other], {}, 'source_excluded', 0, 1, 0),
+        ([root, other], {'model': 'missing'}, 'filters_excluded', 1, 1, 1),
+    ]:
+        with patch.object(c, 'read_rows', return_value=(rows, False, None)):
+            result = c.query(kind='overview', limit=20, **kwargs)
+        assert result['state'] == 'empty' and result['availability']['query_verified']
+        coverage = result['coverage']
+        assert coverage['empty_reason'] == reason
+        assert coverage['source_matched_traces'] == source_count
+        assert coverage['excluded_by_source'] == source_excluded
+        assert coverage['excluded_by_filters'] == filter_excluded
+        assert coverage['matched_observations'] == 0
+
+
+def test_invalid_cursor_contract_rejects_partial_batch():
+    class Client:
+        meta = None
+        def __init__(self, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def get(self, url, params):
+            return httpx.Response(200, json={'data': [generation('a')], 'meta': self.meta},
+                                  request=httpx.Request('GET', 'https://example.invalid'))
+    with patch.object(c.settings, 'langfuse_enabled', True), patch.object(c.httpx, 'Client', Client):
+        for invalid in [['not-a-mapping'], {'cursor': ['not-a-string']}]:
+            Client.meta = invalid
+            assert c.read_rows(limit=10) == ([], False, 'unsupported')
+
+
+def test_v2_documented_total_cost_fallback_without_double_counting():
+    rows = [generation('fallback', costDetails={'input': 1, 'output': 2}, totalCost=3),
+            generation('priority', costDetails={'total': 0}, totalCost=999),
+            generation('missing', costDetails={'input': 1, 'output': 2})]
+    assert c.resolved_cost(rows[0]) == 3
+    assert c.resolved_cost(rows[1]) == 0
+    assert c.resolved_cost(rows[2]) is None
+    assert c.costs(rows)[0]['known_cost'] == 3
+    assert c.costs(rows)[0]['known_generations'] == 2
+    assert c.data_quality(rows)['cost_missing'] == 1
+    root = {'id': 'root', 'traceId': 'trace', 'name': 'aiden_support',
+            'metadata': {'aiden_source': 'online'}}
+    with patch.object(c, 'read_rows', return_value=([root, *rows], False, None)):
+        data = c.query(kind='overview', limit=20)['data']
+    assert data['costs'][0]['known_cost'] == 3
+    assert {item['known_cost'] for item in data['insights']['cost_contributions']} == {3}
+    assert sum(item['costs'][0]['known_cost'] for item in data['attribution']) == 3
+
+
+def test_documented_v2_total_is_usd_not_relabelled_by_currency_field():
+    rows = [generation('v2-usd', totalCost=2, currency='EUR'),
+            generation('explicit-eur', costDetails={'total': 3}, currency='EUR'),
+            generation('zero-usd', totalCost=0, costCurrency='EUR')]
+    values = {item['currency']: item for item in c.costs(rows)}
+    assert values['USD']['known_cost'] == 2
+    assert values['USD']['known_generations'] == 2
+    assert values['EUR']['known_cost'] == 3
+    root = {'id': 'root', 'traceId': 'trace', 'name': 'aiden_support',
+            'totalCost': 999, 'metadata': {'aiden_source': 'online'}}
+    with patch.object(c, 'read_rows', return_value=([root, *rows], False, None)):
+        data = c.query(kind='overview', limit=20)['data']
+    for total in data['costs']:
+        assert sum(cost['known_cost'] for item in data['cost_trend'] for cost in item['costs']
+                   if cost['currency'] == total['currency']) == total['known_cost']
+    assert data['data_quality']['cost_recorded'] == 3
+
+
+def test_partial_provider_fields_never_claim_complete_usage_and_truncated_empty_is_unknown():
+    row = generation('partial', usageDetails={'input': 0, 'output': 2})
+    quality = c.data_quality([row])
+    usage = c.tokens([row])
+    assert quality['provider_verified'] == usage['known_generations'] == 0
+    assert usage['input'] == 0 and usage['output'] == 2 and usage['total'] is None
+    assert usage['field_coverage']['total'] == {'known': 0, 'missing': 1}
+    assert quality['usage_unrecorded'] == quality['usage_unverified'] == 0
+    other = {'id': 'other', 'traceId': 'other', 'name': 'aiden_support',
+             'metadata': {'aiden_source': 'evaluation'}}
+    with patch.object(c, 'read_rows', return_value=([other], True, None)):
+        result = c.query(kind='overview', limit=1)
+    assert result['coverage']['empty_reason'] is None
+    assert result['coverage']['excluded_by_source'] == 1
+    assert result['coverage']['truncated']
+
+
+def test_slow_steps_exclude_real_graph_and_wrapper_containers_not_nested_steps():
+    timing = {'traceId': 'trace', 'startTime': '2026-10-01T00:00:00Z',
+              'endTime': '2026-10-01T00:00:10Z'}
+    wrapper = {'id': 'wrapper', 'name': 'aiden_support', 'isRootObservation': True, **timing}
+    root = {'id': 'graph', 'name': 'aiden_support', 'parentObservationId': 'wrapper',
+            'metadata': {'is_langchain_root': True, 'aiden_source': 'online'}, **timing}
+    node = {'id': 'node', 'name': 'generate', 'type': 'CHAIN', 'parentObservationId': 'graph', **timing}
+    call = generation('call', model='model-a', parentObservationId='node', **timing)
+    rows = [wrapper, root, node, call]
+    with patch.object(c, 'read_rows', return_value=(rows, False, None)):
+        data = c.query(kind='overview', limit=20)['data']
+    assert {step['observation_id'] for step in data['slow_items']['steps']} == {'node', 'call'}
+    assert {step['type'] for step in data['slow_items']['steps']} == {'CHAIN', 'GENERATION'}
+    assert all(step['duration_ms'] == 10000 for step in data['slow_items']['steps'])
+    assert data['duration']['mean_ms'] == 10000
+    assert len(data['slow_items']['requests']) == 1
+
+
+def test_rootless_record_group_is_not_confirmed_processing_or_slow_request():
+    row = generation('history', parentObservationId='outside-window',
+                     startTime='2026-10-01T00:00:00Z', endTime='2026-10-01T00:00:02Z',
+                     usageDetails={'total': 5}, metadata={})
+    with patch.object(c, 'read_rows', return_value=([row], False, None)):
+        overview = c.query(kind='overview', source='other', limit=10)
+        listing = c.query(kind='traces', source='other', limit=10)
+    assert overview['coverage']['matched_traces'] == listing['data']['total'] == 1
+    assert overview['data']['counts']['roots'] == 0
+    assert overview['data']['duration']['samples'] == 0
+    assert overview['data']['slow_items']['requests'] == []
+    assert overview['data']['slow_items']['steps'][0]['observation_id'] == 'history'
+    assert listing['data']['items'][0]['duration_ms'] is None
+    assert listing['data']['items'][0]['status'] == 'unknown'
+
+
+def test_usage_insights_require_verified_totals_even_when_all_costs_missing():
+    high_model, low_model, unknown_model, zero_model = (
+        'verified-high-model', 'verified-low-model', 'unverified-large-model', 'verified-zero-model')
+    high = generation('high', 'cost_bucket_intent_classification',
+                      model=high_model, usageDetails={'input': 0, 'output': 4, 'total': 4})
+    low = generation('low', model=low_model, usageDetails={'input': 0, 'output': 2, 'total': 2})
+    history = generation('history', model=unknown_model, usageDetails={'total': 999}, metadata={})
+    unknown = c.insights([], [history], False)
+    known = c.insights([], [high, low, history], False)
+    zero = c.insights([], [generation('zero', model=zero_model,
+                                      usageDetails={'input': 0, 'output': 0, 'total': 0})], False)
+    assert any(high_model in fact for fact in known['facts'])
+    assert not any(low_model in fact or unknown_model in fact for fact in known['facts'])
+    assert not any(unknown_model in fact for fact in unknown['facts'])
+    assert any(zero_model in fact for fact in zero['facts'])
+    assert known['cost_contributions'] == zero['cost_contributions'] == []
+    assert c.tokens([high, low, history])['total'] == 6
+    assert c.data_quality([high, low, history])['cost_missing'] == 3

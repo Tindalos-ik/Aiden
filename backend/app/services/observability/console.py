@@ -14,6 +14,7 @@ from app.config.settings import settings
 
 INTENTS = frozenset({'logistics', 'order', 'product', 'refund_return', 'after_sales', 'complaint', 'smalltalk', 'human', 'other'})
 SAFE_NAMES = frozenset({'aiden_support', 'load_context', 'recognize_intent', 'route_intent', 'dispatch_tool_call', 'generate', 'assess_knowledge', 'after_tools', 'finish_request', 'save_answer', 'query_order', 'query_logistics', 'search_faq', 'query_refund_policy', 'query_after_sale', 'query_ticket', 'create_ticket', 'cost_bucket_intent_classification'}) | {f'cost_intent_{i}' for i in INTENTS}
+SAFE_NAMES |= {'submit_after_sale'} | {f'run_{name}' for name in ('query_order', 'query_logistics', 'search_faq', 'query_refund_policy', 'query_after_sale', 'query_ticket', 'create_ticket', 'submit_after_sale')}
 FIELDS = 'basic,usage,model,metadata,trace_context'
 logger = logging.getLogger(__name__)
 
@@ -63,8 +64,23 @@ def tokens(rows: list[dict]) -> dict:
         'known_generations': sum(all(provider(r, k) is not None for k in ['input', 'output', 'total']) for r in rows),
         'total_generations': len(rows),
         'field_coverage': {key: {'known': sum(v is not None for v in vals), 'missing': sum(v is None for v in vals)} for key, vals in values.items()},
-        'source': '仅计入已确认 provider 响应原始计数；历史来源未核验即 unknown，不采用上游 tokenizer 推算',
+        'source': '仅汇总供应商响应确认的原始用量；历史来源未核验的记录不计入，不使用估算用量。',
     }
+
+
+def resolved_cost(row: dict) -> float | None:
+    """v2 usage 字段组：优先明细 total，否则采用同 observation 的文档总额。"""
+    details = row.get('costDetails') if isinstance(row.get('costDetails'), dict) else {}
+    value = number(details.get('total'))
+    return value if value is not None else number(row.get('totalCost'))
+
+
+def cost_currency(row: dict) -> str:
+    details = row.get('costDetails') if isinstance(row.get('costDetails'), dict) else {}
+    if number(details.get('total')) is None and number(row.get('totalCost')) is not None:
+        return 'USD'  # v2 totalCost 明确为 USD，不按无关币种字段换标签或换汇。
+    currency = row.get('currency') or row.get('costCurrency') or 'USD'
+    return currency if isinstance(currency, str) and 0 < len(currency) <= 12 else 'USD'
 
 
 def costs(rows: list[dict]) -> list[dict]:
@@ -72,12 +88,9 @@ def costs(rows: list[dict]) -> list[dict]:
     groups: dict[str, list[float]] = {}
     totals: dict[str, int] = {}
     for row in rows:
-        details = row.get('costDetails') or {}
-        value = number(details.get('total'))
-        # 上游 Observation.costDetails 合同明确 USD；不使用来源不明的 totalCost。
-        currency = row.get('currency') or row.get('costCurrency') or 'USD'
-        if not isinstance(currency, str) or len(currency) > 12:
-            currency = 'USD'
+        value = resolved_cost(row)
+        # v2 costDetails 和 totalCost 均明确为 USD；只计唯一 generation，不叠加分项。
+        currency = cost_currency(row)
         groups.setdefault(currency, [])
         totals[currency] = totals.get(currency, 0) + 1
         if value is not None:
@@ -88,7 +101,7 @@ def costs(rows: list[dict]) -> list[dict]:
         'known_generations': len(values),
         'total_generations': totals[currency],
         'completeness': 'complete' if len(values) == totals[currency] else 'partial' if values else 'unknown',
-        'source': 'Langfuse resolved costDetails.total（上报优先，否则模型价格计算；读取接口不提供逐行来源标记），非供应商账单',
+        'source': '观测平台记录的金额：优先采用上报金额，否则按模型价格计算；当前接口不区分两者，不是供应商账单。',
     } for currency, values in sorted(groups.items())]
 
 
@@ -155,19 +168,27 @@ def trace_summary(trace_id: str, rows: list[dict]) -> dict:
     return {'id': trace_id, 'start_at': timestamp(root.get('startTime')) or min((timestamp(r.get('startTime')) for r in rows if timestamp(r.get('startTime'))), default=None), 'name': root.get('name') if root.get('name') in SAFE_NAMES else '未记录根节点', 'source': 'aiden_support' if is_online(rows) else 'other', 'source_detail': 'online' if is_online(rows) else 'evaluation' if any(metadata(r).get('aiden_source') == 'evaluation' for r in rows) else 'unrecorded', 'intents': intents(rows), 'intents_recorded': any(isinstance(metadata(r).get('recognized_intents'), list) for r in roots), 'models': sorted({str(r['model'])[:200] for r in generations(rows) if r.get('model')}), 'status': status(root), 'duration_ms': duration(root), 'tokens': tokens(rows), 'costs': costs(rows), 'conversation_id': association(rows, 'conversation_id'), 'message_id': association(rows, 'assistant_message_id'), 'external_url': None}
 
 
-def envelope(state: str, *, rows: list[dict] | None = None, limit: int = 5000, truncated: bool = False, start: datetime | None = None, end: datetime | None = None, source: str = 'aiden_support', data: Any = None, matched: int = 0, matched_rows: list[dict] | None = None) -> dict:
+def envelope(state: str, *, rows: list[dict] | None = None, limit: int = 5000, truncated: bool = False, start: datetime | None = None, end: datetime | None = None, source: str = 'aiden_support', data: Any = None, matched: int = 0, matched_rows: list[dict] | None = None, source_matched: int = 0, excluded_by_source: int = 0) -> dict:
     rows = rows or []
     visible = matched_rows if matched_rows is not None else []
-    messages = {'unconfigured': 'Langfuse 未配置', 'configured_unverified': '已配置，尚未执行读取验证',
-                'ready': '真实观测读取成功；异步上报可能尚未完整', 'empty': '读取成功，当前范围没有匹配观测',
-                'auth_failed': '上游认证或权限失败', 'connection_failed': '上游连接或读取失败',
-                'unsupported': '上游不支持此观测读取接口'}
+    messages = {'unconfigured': '观测服务未配置', 'configured_unverified': '已配置，尚未验证能否读取',
+                'ready': '读取成功；近期记录可能仍在上报，尚未全部可见', 'empty': '读取成功，当前筛选没有匹配记录',
+                'auth_failed': '观测服务认证或权限不足', 'connection_failed': '观测服务连接或读取失败',
+                'unsupported': '观测服务不支持当前读取方式'}
+    if state == 'empty':
+        messages['empty'] = ('已读取的部分记录没有匹配项，尚不能判断整个范围。' if truncated else
+                             '读取成功，整个时间范围没有观测记录。' if not rows else
+                             '读取成功，但已读记录不属于所选来源。' if not source_matched else
+                             '读取成功，但来源匹配记录被其他筛选条件排除。')
     return {
         'state': state, 'message': messages.get(state, state), 'queried_at': now(),
         'latest_record_at': max((timestamp(r.get('startTime')) for r in visible if timestamp(r.get('startTime'))), default=None),
         'coverage': {'observations_read': len(rows),
                      'generations_read': len(generations(rows)), 'matched_generations': len(generations(visible)),
                      'matched_traces': matched, 'truncated': truncated, 'limit': limit, 'scope': source,
+                     'matched_observations': len(visible), 'source_matched_traces': source_matched,
+                     'excluded_by_source': excluded_by_source, 'excluded_by_filters': source_matched - matched,
+                     'empty_reason': ('no_observations' if not rows else 'source_excluded' if not source_matched else 'filters_excluded') if state == 'empty' and not truncated else None,
                      'start_at': start.isoformat() if start else None, 'end_at': end.isoformat() if end else None},
         'availability': {'configured': settings.langfuse_enabled, 'query_verified': state in {'ready', 'empty'},
                          'upstream': state, 'async_incomplete': True},
@@ -205,7 +226,12 @@ def read_rows(*, limit: int, start: datetime | None = None, end: datetime | None
                         result[row['id']] = row
                         if len(result) > limit:
                             return list(result.values())[:limit], True, None
-                cursor = (payload.get('meta') or {}).get('cursor')
+                meta = payload.get('meta')
+                if meta is not None and not isinstance(meta, dict):
+                    return [], False, 'unsupported'
+                cursor = (meta or {}).get('cursor')
+                if cursor is not None and not isinstance(cursor, str):
+                    return [], False, 'unsupported'
                 if not cursor:
                     return list(result.values()), False, None
                 if cursor in cursors:
@@ -243,40 +269,87 @@ def observation_summary(row: dict) -> dict:
         'model': str(row['model'])[:200] if row.get('model') else None,
         'tokens': tokens([row]), 'costs': costs([row]),
         'usage_details': details('usageDetails'), 'cost_details': details('costDetails'),
-        'usage_details_source': 'Langfuse记录值，provider来源未核验' if metadata(row).get('aiden_usage_source') != 'provider' else 'provider响应原始计数与上游usage分项',
+        'usage_details_source': '观测平台记录分项，历史来源未核验' if metadata(row).get('aiden_usage_source') != 'provider' or not isinstance(metadata(row).get('aiden_provider_usage'), dict) else '观测平台记录分项；供应商原始用量及缺失情况见用量汇总',
         'error_summary': 'upstream_observation_error' if status(row) == 'error' else None,
     }
 
 
-def analysis(selected: list[tuple[dict, list[dict]]], rows: list[dict], truncated: bool) -> list[str]:
-    notes = ['按模型/意图筛选整条请求并保留全部 generation，共享分类不分摊；金额仅 Langfuse 聊天模型计价而非账单，不含工具/DB/GPU/embedding/rerank。']
-    coverage = tokens(rows)
-    notes.append('Usage 覆盖：' + '；'.join(f'{key} 已知 {value["known"]} / 缺失 {value["missing"]}' for key, value in coverage['field_coverage'].items()))
-    priced = sum(number((r.get('costDetails') or {}).get('total')) is not None for r in generations(rows))
-    notes.append(f'费用已知 {priced}/{len(generations(rows))}；缺失价格或费用不视为零。旧读取记录不能区分 provider usage 与上游推算，亦不能区分逐行上报费用与模型计价。')
-    for dimension in ['model', 'intent']:
-        ranked: dict[tuple[str, str], tuple[float, set[str]]] = {}
-        for row in generations(rows):
-            value = number((row.get('costDetails') or {}).get('total'))
-            if value is None:
-                continue
-            currency = str(row.get('currency') or row.get('costCurrency') or 'USD')
-            label = str(row.get('model') or 'unknown')[:200] if dimension == 'model' else bucket(row)
-            key = (currency, label)
-            subtotal, ids = ranked.get(key, (0.0, set()))
-            ranked[key] = (subtotal + value, ids | {row['id']})
-        per_currency: dict[str, int] = defaultdict(int)
-        for (currency, label), (value, ids) in sorted(ranked.items(), key=lambda item: (item[0][0], -item[1][0], item[0][1])):
-            if per_currency[currency] < 10:
-                notes.append(f'已知费用贡献 {dimension}={label} {currency} {value:.8g}；generation IDs={",".join(sorted(ids)[:5])}；仅已知小计，不是完整费用排名。')
-                per_currency[currency] += 1
-    for summary, _ in sorted(selected, key=lambda pair: (-(pair[0]['duration_ms'] or 0), pair[0]['id']))[:5]:
-        if summary['duration_ms'] is not None:
-            notes.append(f'根耗时排名 trace={summary["id"]} {summary["duration_ms"]:.3f}ms（图运行状态，不是业务成功率）。')
-    for row in sorted((r for r in rows if duration(r) is not None), key=lambda r: (-duration(r), r['id']))[:5]:
-        notes.append(f'观测耗时排名 observation={row["id"]} {duration(row):.3f}ms；并发节点耗时不得相加为根耗时。')
-    notes.append('比较依据不足：' + ('当前批次截断；' if truncated else '') + '没有同工作负载控制实验，不据成本/延迟排名推断模型质量、异常阈值或优化因果。')
-    return notes
+def data_quality(rows: list[dict]) -> dict:
+    calls = generations(rows)
+    verified = tokens(calls)['known_generations']
+    def recorded(row: dict) -> bool:
+        for raw in (row.get('usageDetails'), metadata(row).get('aiden_provider_usage')):
+            if isinstance(raw, dict) and any(number(raw.get(key)) is not None for key in ('input', 'output', 'total')):
+                return True
+        return False
+    unrecorded = sum(not recorded(r) for r in calls)
+    priced = sum(resolved_cost(r) is not None for r in calls)
+    return {'generations': len(calls), 'provider_verified': verified,
+            'usage_unrecorded': unrecorded, 'usage_unverified': sum(
+                metadata(r).get('aiden_usage_source') != 'provider' and recorded(r)
+                for r in calls), 'cost_recorded': priced, 'cost_missing': len(calls) - priced}
+
+
+def insights(selected: list[tuple[dict, list[dict]]], rows: list[dict], truncated: bool) -> dict:
+    quality = data_quality(rows)
+    processing_count = sum(len(root_rows(group)) for _, group in selected)
+    facts = [f'当前筛选匹配 {len(selected)} 组请求记录，可确认 {processing_count} 次处理，包含 {quality["generations"]} 次模型调用。',
+             f'{quality["provider_verified"]} 次调用的完整用量已由供应商响应确认；{quality["usage_unrecorded"]} 次用量未记录，{quality["usage_unverified"]} 次历史用量来源未核验。',
+             f'{quality["cost_recorded"]} 次调用有金额记录，{quality["cost_missing"]} 次金额未记录；已知金额只是小计，不把缺失金额当作零。']
+    incomplete = quality['generations'] - quality['provider_verified'] - quality['usage_unrecorded'] - quality['usage_unverified']
+    if incomplete:
+        facts.append(f'另有 {incomplete} 次调用只记录了部分用量，不能据此补算完整用量。')
+    purpose_names = {'intent_classification': '共享问题分类', 'logistics': '物流查询',
+                     'order': '订单查询', 'product': '商品咨询', 'refund_return': '退款退货',
+                     'after_sales': '售后服务', 'complaint': '投诉处理', 'smalltalk': '日常交流',
+                     'human': '转人工', 'other': '其他问题', 'unattributed': '用途未记录'}
+    usage_groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for row in generations(rows):
+        if tokens([row])['total'] is not None:
+            usage_groups[('业务用途', purpose_names[bucket(row)])].append(row)
+            usage_groups[('模型', str(row.get('model') or '未记录模型')[:200])].append(row)
+    for dimension in ('业务用途', '模型'):
+        candidates = [(label, group, tokens(group)['total']) for (kind, label), group in usage_groups.items() if kind == dimension]
+        if candidates:
+            label, group, total = min(candidates, key=lambda item: (-item[2], item[0]))
+            facts.append(f'在已确认总用量的调用中，{dimension}“{label}”用量最多：{len(group)} 次调用、{total:,.0f} 个词元。用量不是金额，不代表费用最高。')
+    ranked: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+    for row in generations(rows):
+        for dimension, label in [('model', str(row.get('model') or '未记录模型')[:200]), ('intent', bucket(row))]:
+            for cost in costs([row]):
+                if cost['known_cost'] is not None:
+                    ranked[(dimension, label, cost['currency'])].append(row)
+    contributions = []
+    for (dimension, label, currency), group in ranked.items():
+        cost = costs(group)[0]
+        contributions.append({'dimension': dimension, 'label': label, 'currency': currency,
+                              'known_cost': cost['known_cost'], 'known_generations': cost['known_generations']})
+    contributions.sort(key=lambda item: (item['dimension'], item['currency'], -item['known_cost'], item['label']))
+    limitations = ['费用按模型和业务用途展示已知小计；共享意图识别费用单独列出，不摊给业务用途。',
+                   '金额来自观测平台计价，不是供应商账单；不包含工具、数据库和检索服务等消耗。',
+                   '耗时列表只表示本批次中耗时较长的请求和步骤，不代表异常或模型质量；步骤可能包含子步骤，并行或嵌套步骤耗时不能相加为请求耗时。',
+                   '缺失金额的具体原因无法从当前记录确认，不能直接归因为缺少价格配置。']
+    if truncated:
+        limitations.insert(0, '读取已达到上限或分页未完成；统计和排序仅代表已读取的记录，不是全量结论。')
+    return {'facts': facts, 'limitations': limitations, 'cost_contributions': contributions}
+
+
+def slow_items(selected: list[tuple[dict, list[dict]]], rows: list[dict]) -> dict:
+    requests = [summary for summary, _ in selected if summary['duration_ms'] is not None]
+    requests.sort(key=lambda item: (-item['duration_ms'], item['id']))
+    roots = [root for _, group in selected for root in root_rows(group)]
+    container_ids = {root['id'] for root in roots} | {root['parentObservationId'] for root in roots if root.get('parentObservationId')}
+    container_ids.update(row['id'] for row in rows if row.get('isRootObservation') is True)
+    steps = [row for row in rows if duration(row) is not None and row.get('id') not in container_ids]
+    steps.sort(key=lambda row: (-duration(row), row['id']))
+    return {'requests': [{'trace_id': item['id'], 'start_at': item['start_at'],
+                          'duration_ms': item['duration_ms'], 'intents': item['intents'],
+                          'models': item['models']} for item in requests[:5]],
+            'steps': [{'trace_id': row['traceId'], 'observation_id': row['id'],
+                       'name': row.get('name') if row.get('name') in SAFE_NAMES else 'observation',
+                       'type': row.get('type') if row.get('type') in {'SPAN', 'GENERATION', 'EVENT', 'AGENT', 'TOOL', 'CHAIN', 'RETRIEVER', 'EMBEDDING', 'EVALUATOR', 'GUARDRAIL'} else '未记录',
+                       'duration_ms': duration(row), 'model': str(row['model'])[:200] if row.get('model') else None}
+                      for row in steps[:5]]}
 
 
 def query(*, kind: str, limit: int, start: datetime | None = None, end: datetime | None = None, source: str = 'aiden_support', model: str | None = None, intent: str | None = None, root_status: str | None = None, conversation_id: str | None = None, message_id: str | None = None, trace_id: str | None = None, page: int = 1, page_size: int = 20) -> dict:
@@ -290,10 +363,12 @@ def query(*, kind: str, limit: int, start: datetime | None = None, end: datetime
         if isinstance(row.get('traceId'), str):
             grouped[row['traceId']].append(row)
     selected: list[tuple[dict, list[dict]]] = []
+    source_matched = 0
     for tid, observations in grouped.items():
         summary = trace_summary(tid, observations)
         if source != 'all' and summary['source'] != source:
             continue
+        source_matched += 1
         if model and model not in summary['models'] or intent and intent not in (set(summary['intents']) | {bucket(r) for r in generations(observations)}) or root_status and root_status != summary['status']:
             continue
         if conversation_id and conversation_id != summary['conversation_id'] or message_id and message_id != summary['message_id']:
@@ -315,10 +390,11 @@ def query(*, kind: str, limit: int, start: datetime | None = None, end: datetime
                               'roots': len(root_rows(obs)), 'orphaned': orphaned,
                               'missing_parents': orphaned, 'cross_boundary': orphaned > 0,
                               'truncated': truncated},
-                'notes': ['真实 parent_id 树；缺失父节点可能在读取边界之外，不能确认其身份。',
-                          '旧记录可能没有内部会话/消息关联；根 trace metadata 不一定由 v2 observation 返回。',
-                          'usage_details 是 Langfuse 记录值，来源未核验不计入已确认 provider 汇总。',
-                          'search_faq 仅整体耗时；未采集内部检索阶段。'],
+                'notes': ['按记录的父子关联展示；缺失的上级步骤可能位于读取范围之外，不能确认其身份。',
+                          '历史记录可能未关联站内会话或消息，不能据此推断会话数量。',
+                          '分项用量是观测平台的记录值；只有来源已核验的供应商原始计数才进入用量汇总。',
+                          '知识查询只记录整体耗时，未单独记录内部检索阶段。',
+                          '上级步骤可能包含下级调用；嵌套或并行步骤耗时不能相加为总耗时。'],
             }
     else:
         observations = [r for _, obs in selected for r in obs]
@@ -351,7 +427,10 @@ def query(*, kind: str, limit: int, start: datetime | None = None, end: datetime
                             'generations': len(group), 'tokens': tokens(group), 'costs': costs(group)}
                            for (day, model_name, cost_bucket), group in sorted(by_cost_dimension.items())],
             'attribution': breakdown('bucket'), 'models': breakdown('model'),
-            'analysis': analysis(selected, observations, truncated),
+            'insights': insights(selected, observations, truncated),
+            'slow_items': slow_items(selected, observations),
+            'data_quality': data_quality(observations),
         }
     return envelope('ready' if selected else 'empty', **args, data=data, matched=len(selected),
-                    matched_rows=[r for _, obs in selected for r in obs])
+                    matched_rows=[r for _, obs in selected for r in obs],
+                    source_matched=source_matched, excluded_by_source=len(grouped) - source_matched)
