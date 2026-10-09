@@ -594,6 +594,10 @@ DeepSeek 携带 `tools` 的思考模式请求要求回传既有 `reasoning_conte
 
 详见[客服 RAG 评估说明](评估说明.md)，包括 CLI 参数、独立评审配置、validation 阈值校准、holdout 留出、人工抽查和知识导入边界。离线与在线任务分别由 `/api/rag/jobs/evaluate` 和 `/api/rag/jobs/evaluate-online` 启动；在线工作流报告通过 `/api/rag/evals/customer-workflow-v2` 读取。兼容读取 `/api/rag/evals/customer-rag-v1` 优先返回 v2 offline 报告；只有尚无 v2 报告时才回传旧报告，并显式标记 `schema_version=1`、`legacy=true`，页面应保留可读性但提示其为历史且不含新指标。
 
+网页离线/在线评估每次启动都选择重新开始或继续上次；请求分别携带 `evaluationAction: "restart"` / `"resume"`。`GET /api/rag/evals/checkpoints` 返回两模式各自的最后进度摘要；完整 checkpoint 保存于被 Git 忽略的 `backend/.tmp/rag-evaluations/{offline|online}.json`，只对本功能上线后新启动的任务有效，不能补录旧版未保存进度的任务。无记录或已完成不能继续；初始化失败的零完成记录可继续初始化。重新开始须先取得控制台锁，才替换对应模式记录。
+
+恢复跳过已原子保存的完整执行单元，并校验题集、模型/配置与相关代码；仍有未完成单位时严格校验 MySQL/Milvus 语料集合版本，不兼容保留旧进度并要求重新开始。在线所有 validation 阈值试跑及冻结选择都保存，holdout 不重新选阈值。`POST /api/rag/jobs/{job_id}/stop` 只支持评估：先显示 `stopping`，当前完整单元保存且后台退出后才 `cancelled`、释放锁，不终止 API 或模型服务。API 重启可发现 `interrupted` 记录，但未完成单位会重做。全部单元完成不等于报告完成；已完成的全部单位键及快照核对通过后，只做本地报告汇总，不要求模型或存储服务仍可用。正式报告原子写入成功才提交，取消/写入失败保留旧报告；报告的可选 `metadata.evaluation_run_id` 用于识别已提交但终态 checkpoint 失写的完成记录。CLI 保留非交互的一次性运行语义；细节见[客服 RAG 评估说明](评估说明.md)。
+
 题集 gold 引用的是实际知识文件章节，不代表这些文件均在目标集合中。当前可复现 remote 演示知识清单仍只导入 `商品FAQ.md`；扩充型号、配送等离线实验须在独立语料环境准备，不能自动扩大或改写现有知识库。缺少来源必须按报告的来源覆盖信息说明，不能伪称在线已验收。
 
 ## 历史对话挖掘

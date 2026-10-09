@@ -153,10 +153,25 @@ export interface RagChunk {
   vectorId?: string | null;
 }
 
+export type RagEvaluationMode = 'offline' | 'online';
+export type RagEvaluationAction = 'restart' | 'resume';
+export type RagEvaluationCheckpointStatus = 'none' | 'queued' | 'running' | 'stopping' | 'cancelled' | 'interrupted' | 'failed' | 'completed';
+export interface RagEvaluationCheckpoint {
+  mode: RagEvaluationMode;
+  exists: boolean;
+  resumable: boolean;
+  status: RagEvaluationCheckpointStatus;
+  runId: string | null;
+  updatedAt: string | null;
+  evaluationProgress: { completed: number; total: number } | null;
+  reason: string | null;
+}
+export type RagEvaluationCheckpoints = Record<RagEvaluationMode, RagEvaluationCheckpoint>;
+
 export interface RagJob {
   id: string;
   kind: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'stopping' | 'cancelled' | 'completed' | 'failed';
   progress: string | null;
   /** 一轮检索/生成/评审完成后推进；在线包含所有阈值试跑次数。 */
   evaluationProgress?: { completed: number; total: number };
@@ -392,6 +407,8 @@ export interface RagEvalReport {
   generated_at?: string;
   faithfulness_judge: string | null;
   metadata?: {
+    /** 正式报告提交标记对应的评估 run；仅供服务端关联 checkpoint，不作为展示字段。 */
+    evaluation_run_id?: string;
     effective_collection_sources?: string[];
     effective_collection_chunks?: number;
     dataset_version?: string;

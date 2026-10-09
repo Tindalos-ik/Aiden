@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Collapse, Descriptions, Empty, Progress, Select, Space, Spin, Table, Tabs, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Collapse, Descriptions, Empty, Modal, Progress, Select, Space, Spin, Table, Tabs, Tag, Typography, Popconfirm } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api, apiMode } from '../api';
 import { ragApi } from '../api/rag';
 import { PageHeader } from '../components/Common';
-import type { RagEvalCase, RagEvalMetrics, RagEvalReport, RagJob } from '../types';
+import type { RagEvalCase, RagEvalMetrics, RagEvalReport, RagEvaluationAction, RagEvaluationCheckpointStatus, RagEvaluationMode, RagJob } from '../types';
 
 const { Text, Title, Paragraph } = Typography;
-type EvalMode = 'offline' | 'online';
+type EvalMode = RagEvaluationMode;
 type MetricKey = 'recall@1' | 'recall@5' | 'recall@10' | 'mrr' | 'faithfulness' | 'completeness' | 'false_refusal' | 'unsafe_answer' | 'unanswerable_refusal_rate' | 'latency_ms' | 'intent_correct' | 'tool_correct' | 'refund_correct' | 'handoff_correct' | 'blocked_tool_correct';
 const strategyNames: Record<string, string> = {
   dense: '纯向量', bm25: '纯 BM25', hybrid: '混合 RRF', hybrid_rerank: '混合 + Rerank', online: '在线客服图',
@@ -19,6 +19,10 @@ const typeNames: Record<string, string> = {
   version_conflict: '来源/版本冲突', multi_evidence: '多证据', unanswerable: '库外问题',
 };
 const difficultyNames: Record<string, string> = { easy: '简单', medium: '中等', hard: '困难' };
+const checkpointStatusText: Record<RagEvaluationCheckpointStatus, string> = {
+  none: '无历史断点', queued: '排队中', running: '运行中', stopping: '正在终止', cancelled: '已终止',
+  interrupted: '已中断', failed: '上次失败', completed: '已完成',
+};
 const tokenText = (value?: { input: number | null; output: number | null; total: number | null }) =>
   value ? `输入 ${value.input ?? '未知'} / 输出 ${value.output ?? '未知'} / 合计 ${value.total ?? '未知'}` : '未记录';
 function rate(value: number | null | undefined): string {
@@ -149,11 +153,13 @@ function Metadata({ report }: { report: RagEvalReport }) {
 
 export function RagEvals() {
   const [mode, setMode] = useState<EvalMode>('offline');
+  const [decisionMode, setDecisionMode] = useState<EvalMode | null>(null);
   const [questionType, setQuestionType] = useState('all');
   const [difficulty, setDifficulty] = useState('all');
   const [split, setSplit] = useState('all');
   const [startError, setStartError] = useState('');
   const lastLoadedJobId = useRef<string | null>(null);
+  const lastLoadedCheckpointId = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const actor = useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: Infinity });
   const report = useQuery({
@@ -162,26 +168,62 @@ export function RagEvals() {
     enabled: apiMode === 'remote', retry: 0,
   });
   const jobs = useQuery({ queryKey: ['rag-jobs'], queryFn: ragApi.jobs, enabled: apiMode === 'remote', refetchInterval: 2000 });
+  const checkpoints = useQuery({
+    queryKey: ['rag-eval-checkpoints'], queryFn: ragApi.evaluationCheckpoints,
+    enabled: apiMode === 'remote', refetchInterval: 2000, retry: 0,
+  });
   const jobKind = mode === 'online' ? 'evaluate-online' : 'evaluate';
   const latestEvalJob = jobs.data?.items.find((item) => item.kind === jobKind);
-  const workingJob = jobs.data?.items.find((item) => item.status === 'queued' || item.status === 'running');
+  const evalJobs = jobs.data?.items.filter((item) => item.kind === 'evaluate' || item.kind === 'evaluate-online') ?? [];
+  const activeEvalJob = evalJobs.find((item) => item.status === 'queued' || item.status === 'running' || item.status === 'stopping');
+  const workingJob = jobs.data?.items.find((item) => item.status === 'queued' || item.status === 'running' || item.status === 'stopping');
+  const decisionCheckpoint = decisionMode ? checkpoints.data?.[decisionMode] : undefined;
+  const resumeDisabledReason = checkpoints.isError
+    ? '继续评估已禁用：无法读取断点。可重试读取或重新开始。'
+    : checkpoints.isLoading ? '正在读取断点，暂不可继续。'
+      : !decisionCheckpoint?.exists ? '没有已保存的断点，无法继续。请重新开始。'
+      : decisionCheckpoint.status === 'completed' ? '该评估已经完成，不能继续；可重新开始新一轮。'
+        : !decisionCheckpoint.resumable
+          ? decisionCheckpoint.reason || (decisionCheckpoint.status === 'failed'
+            ? '上次评估失败且没有可恢复断点；可重新开始。'
+            : `当前断点状态为“${decisionCheckpoint.status}”，不可继续。`)
+          : null;
   const startEvaluation = useMutation({
-    mutationFn: () => ragApi.startJob(jobKind),
+    mutationFn: ({ mode: startMode, action }: { mode: EvalMode; action: RagEvaluationAction }) =>
+      ragApi.startEvaluation(startMode === 'online' ? 'evaluate-online' : 'evaluate', action),
     onSuccess: (job) => {
       setStartError('');
-      // 立即展示 POST 返回的任务，不必等下一次轮询才从旧报告切到运行状态。
+      setDecisionMode(null);
       queryClient.setQueryData<{ items: RagJob[] }>(['rag-jobs'], (current) => ({
         items: [job, ...(current?.items ?? []).filter((item) => item.id !== job.id)],
       }));
       void jobs.refetch();
+      void checkpoints.refetch();
     },
     onError: (error) => setStartError(error instanceof Error ? error.message : '评估启动失败'),
+  });
+  const stopEvaluation = useMutation({
+    mutationFn: (jobId: string) => ragApi.stopEvaluation(jobId),
+    onSuccess: (job) => {
+      queryClient.setQueryData<{ items: RagJob[] }>(['rag-jobs'], (current) => ({
+        items: [job, ...(current?.items ?? []).filter((item) => item.id !== job.id)],
+      }));
+      void jobs.refetch();
+      void checkpoints.refetch();
+    },
+    onError: (error) => setStartError(error instanceof Error ? error.message : '终止评估请求失败'),
   });
   useEffect(() => {
     if (latestEvalJob?.status !== 'completed' || lastLoadedJobId.current === latestEvalJob.id) return;
     lastLoadedJobId.current = latestEvalJob.id;
     void report.refetch();
   }, [latestEvalJob?.id, latestEvalJob?.status, report.refetch]);
+  useEffect(() => {
+    const checkpoint = checkpoints.data?.[mode];
+    if (checkpoint?.status !== 'completed' || !checkpoint.runId || lastLoadedCheckpointId.current === checkpoint.runId) return;
+    lastLoadedCheckpointId.current = checkpoint.runId;
+    void report.refetch();
+  }, [checkpoints.data?.[mode]?.runId, checkpoints.data?.[mode]?.status, mode, report.refetch]);
 
   const questions = useMemo(() => {
     const grouped = new Map<string, RagEvalCase[]>();
@@ -206,13 +248,16 @@ export function RagEvals() {
   const legacy = data?.legacy === true || data?.schema_version === 1;
   const isOnline = mode === 'online';
   const strategies = data?.strategies ?? {};
-  const evaluationRunning = latestEvalJob?.status === 'queued' || latestEvalJob?.status === 'running';
-  const evaluationProgress = latestEvalJob?.evaluationProgress;
+  const currentCheckpoint = checkpoints.data?.[mode];
+  const evaluationRunning = latestEvalJob?.status === 'queued' || latestEvalJob?.status === 'running' || latestEvalJob?.status === 'stopping';
+  const evaluationProgress = latestEvalJob?.evaluationProgress ?? currentCheckpoint?.evaluationProgress;
 
   return <div className="workspace-shell rag-shell">
     <PageHeader actor={actor.data} />
     <main className="rag-main eval-main">
-      <div className="rag-heading"><div><Text className="section-kicker">RAG EVALUATION</Text><Title level={2}>客服 RAG 评估</Title><Paragraph type="secondary">离线策略检索与在线客服工作流分别评估；历史报告只读，不作为新版基线。</Paragraph></div><Space wrap><Link to="/staff/rag">返回建库控制台</Link><Button type="primary" disabled={apiMode !== 'remote' || !!workingJob || jobs.isLoading || jobs.isError} loading={startEvaluation.isPending} onClick={() => startEvaluation.mutate()}>{isOnline ? '运行在线工作流评估' : '运行离线四策略评估'}</Button><Button icon={<ReloadOutlined />} disabled={apiMode !== 'remote'} onClick={() => void report.refetch()}>刷新报告</Button></Space></div>
+      <div className="rag-heading"><div><Text className="section-kicker">RAG EVALUATION</Text><Title level={2}>客服 RAG 评估</Title><Paragraph type="secondary">离线策略检索与在线客服工作流分别评估；历史报告只读，不作为新版基线。</Paragraph></div><Space wrap><Link to="/staff/rag">返回建库控制台</Link><Button type="primary" disabled={apiMode !== 'remote' || !!workingJob || jobs.isLoading || jobs.isError || startEvaluation.isPending} onClick={() => setDecisionMode(mode)}>{isOnline ? '启动在线工作流评估' : '启动离线四策略评估'}</Button><Button icon={<ReloadOutlined />} disabled={apiMode !== 'remote'} onClick={() => void report.refetch()}>刷新报告</Button></Space></div>
+      {activeEvalJob && apiMode === 'remote' && <Alert showIcon type="warning" message={`${activeEvalJob.kind === 'evaluate-online' ? '在线工作流' : '离线四策略'}评估${activeEvalJob.status === 'stopping' ? '正在终止' : '正在运行'}`}
+        description={<Space wrap><Text>{activeEvalJob.status === 'stopping' ? '后台正在完成停止流程；请等待确认。' : '评估仍在运行；如需终止，请确认后请求停止。'} 可切换到对应评估页查看进度。</Text><Button size="small" onClick={() => setMode(activeEvalJob.kind === 'evaluate-online' ? 'online' : 'offline')}>查看此评估</Button><Popconfirm title="终止当前评估？" description="当前一轮检索、生成与评审完成并保存后停止；不会关闭模型服务。停止期间仍占用任务锁。" okText="终止评估" cancelText="继续运行" onConfirm={() => stopEvaluation.mutate(activeEvalJob.id)}><Button size="small" danger disabled={activeEvalJob.status === 'stopping' || stopEvaluation.isPending} loading={stopEvaluation.isPending}>终止评估</Button></Popconfirm></Space>} />}
       <Tabs activeKey={mode} onChange={(key) => { setMode(key as EvalMode); setQuestionType('all'); setDifficulty('all'); setSplit('all'); }} items={[
         { key: 'offline', label: '离线检索策略' }, { key: 'online', label: '在线工作流' },
       ]} />
@@ -220,20 +265,30 @@ export function RagEvals() {
         <Alert showIcon type="info" message="允许同模型评审" description="未配置 EVAL_JUDGE_* 时复用客服 OPENAI_* 模型；配置了评审服务则优先使用该服务。同模型评审可能偏乐观，报告会标记是否独立，建议人工抽查。" />
         {startError && <Alert showIcon type="error" message={startError} closable onClose={() => setStartError('')} />}
         {jobs.isError && <Alert showIcon type="error" message="评估任务状态读取失败" description={jobs.error instanceof Error ? jobs.error.message : '请检查后端服务'} action={<Button size="small" onClick={() => void jobs.refetch()}>重试</Button>} />}
+        {checkpoints.isError && <Alert showIcon type="error" message="评估断点读取失败" description={checkpoints.error instanceof Error ? checkpoints.error.message : '无法读取持久评估状态；可重新开始，但不可继续。'} action={<Button size="small" onClick={() => void checkpoints.refetch()}>重试</Button>} />}
+        {currentCheckpoint && <Alert
+          showIcon
+          type={currentCheckpoint.status === 'failed' ? 'error' : currentCheckpoint.status === 'completed' ? 'success' : currentCheckpoint.exists ? 'info' : 'warning'}
+          message={`${isOnline ? '在线工作流' : '离线四策略'}断点：${checkpointStatusText[currentCheckpoint.status]}`}
+          description={<>
+            {currentCheckpoint.reason && <Paragraph>{currentCheckpoint.reason}</Paragraph>}
+            {currentCheckpoint.updatedAt && <Text type="secondary">最后更新：{new Date(currentCheckpoint.updatedAt).toLocaleString('zh-CN')}　</Text>}
+            {currentCheckpoint.evaluationProgress && <Text>已完成 {currentCheckpoint.evaluationProgress.completed}/{currentCheckpoint.evaluationProgress.total} 次评估</Text>}
+          </>}
+        />}
         {latestEvalJob && <Alert
           showIcon
           icon={evaluationRunning ? <Spin size="small" /> : undefined}
-          type={latestEvalJob.status === 'failed' ? 'error' : latestEvalJob.status === 'completed' ? 'success' : 'info'}
-          message={latestEvalJob.status === 'completed' ? '评估任务已完成' : latestEvalJob.status === 'failed' ? '评估失败，旧报告仍可查看' : latestEvalJob.status === 'queued' ? '评估任务已排队' : '评估正在后台运行'}
+          type={latestEvalJob.status === 'failed' ? 'error' : latestEvalJob.status === 'completed' ? 'success' : latestEvalJob.status === 'cancelled' ? 'warning' : 'info'}
+          message={latestEvalJob.status === 'completed' ? '评估任务已完成' : latestEvalJob.status === 'failed' ? '评估失败，旧报告仍可查看' : latestEvalJob.status === 'cancelled' ? '评估已终止，断点已保留' : latestEvalJob.status === 'stopping' ? '评估正在停止后台任务' : latestEvalJob.status === 'queued' ? '评估任务已排队' : '评估正在后台运行'}
           description={<>
             <Paragraph>{latestEvalJob.error || (latestEvalJob.status === 'completed' ? '新报告已写入，页面会自动刷新。' : latestEvalJob.progress) || '正在初始化评估，请稍候。'}</Paragraph>
             {latestEvalJob.status === 'failed' && latestEvalJob.progress && <Paragraph type="secondary">失败阶段：{latestEvalJob.progress}</Paragraph>}
             {evaluationProgress && <>
               <Text>已完成 {evaluationProgress.completed}/{evaluationProgress.total} 次评估</Text>
-              <Progress
-                aria-label="评估完成进度"
+              <Progress aria-label="评估完成进度"
                 percent={evaluationProgress.total > 0 ? Math.floor(evaluationProgress.completed / evaluationProgress.total * 100) : 0}
-                status={latestEvalJob.status === 'failed' ? 'exception' : latestEvalJob.status === 'completed' ? 'success' : 'active'}
+                status={latestEvalJob.status === 'failed' ? 'exception' : latestEvalJob.status === 'completed' ? 'success' : latestEvalJob.status === 'cancelled' ? 'normal' : 'active'}
               />
               <Text type="secondary">每次检索、生成与评审完成后推进；次数达到总数后仍需等待报告写入完成。</Text>
             </>}
@@ -316,5 +371,35 @@ export function RagEvals() {
         </>}
       </>}
     </main>
+    <Modal
+      title={decisionMode === 'online' ? '在线工作流评估' : '离线四策略评估'}
+      open={decisionMode !== null}
+      onCancel={() => { if (!startEvaluation.isPending) setDecisionMode(null); }}
+      closable={!startEvaluation.isPending}
+      maskClosable={!startEvaluation.isPending}
+      footer={[
+        <Button key="cancel" disabled={startEvaluation.isPending} onClick={() => setDecisionMode(null)}>取消</Button>,
+        <Button key="restart" type="primary" danger loading={startEvaluation.isPending && startEvaluation.variables?.action === 'restart'}
+          disabled={apiMode !== 'remote' || !!workingJob || startEvaluation.isPending}
+          onClick={() => decisionMode && startEvaluation.mutate({ mode: decisionMode, action: 'restart' })}>重新开始（覆盖断点）</Button>,
+        <Button key="resume" type="primary" loading={startEvaluation.isPending && startEvaluation.variables?.action === 'resume'}
+          disabled={apiMode !== 'remote' || !!workingJob || startEvaluation.isPending || checkpoints.isLoading || checkpoints.isError || !decisionCheckpoint?.exists || !decisionCheckpoint.resumable || decisionCheckpoint.status === 'completed' || decisionCheckpoint.status === 'none'}
+          onClick={() => decisionMode && startEvaluation.mutate({ mode: decisionMode, action: 'resume' })}>继续上次评估</Button>,
+      ]}
+    >
+      <Paragraph>请选择本次启动方式。重新开始会替换该评估模式的断点，不会删除或覆盖现有报告；继续会从持久断点恢复已完成进度。</Paragraph>
+      {decisionCheckpoint && <Space direction="vertical" size={4} style={{ display: 'flex', marginBottom: 16 }}>
+        {decisionCheckpoint.evaluationProgress && <Text>已完成 {decisionCheckpoint.evaluationProgress.completed}/{decisionCheckpoint.evaluationProgress.total} 次评估</Text>}
+        {decisionCheckpoint.updatedAt && <Text type="secondary">最后更新：{new Date(decisionCheckpoint.updatedAt).toLocaleString('zh-CN')}</Text>}
+        <Text type="secondary">{decisionCheckpoint.resumable ? '此断点可继续。' : '此断点不可继续。'}</Text>
+      </Space>}
+      {decisionMode && <Alert showIcon type={checkpoints.isError ? 'error' : decisionCheckpoint?.exists ? 'info' : 'warning'}
+        message={checkpoints.isError ? '无法读取上次评估断点' : checkpoints.isLoading ? '正在读取上次评估断点' : decisionCheckpoint?.exists ? `${decisionMode === 'online' ? '在线工作流' : '离线四策略'}：${checkpointStatusText[decisionCheckpoint.status]}` : '没有可恢复的上次评估'}
+        description={resumeDisabledReason || decisionCheckpoint?.reason || (decisionCheckpoint?.evaluationProgress
+          ? `已完成 ${decisionCheckpoint.evaluationProgress.completed}/${decisionCheckpoint.evaluationProgress.total} 次评估。`
+          : decisionCheckpoint?.exists ? '服务器没有提供可显示的进度。' : '请重新开始以创建本模式的评估断点。')} />}
+      {workingJob && <Alert showIcon type="warning" message="当前有后台任务正在运行" description={`${workingJob.kind === 'evaluate-online' ? '在线工作流' : workingJob.kind === 'evaluate' ? '离线四策略' : '其他'}任务尚未结束，结束后才能启动另一轮。`} />}
+      {startError && <Alert showIcon type="error" message="评估操作未完成" description={startError} />}
+    </Modal>
   </div>;
 }

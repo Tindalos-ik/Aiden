@@ -1,4 +1,4 @@
-import type { RagChunk, RagEvalReport, RagJob, RagMilvusSnapshot, RagMiningSnapshot, RagOverview, RejectionReason, ReviewDetail, ReviewQueueFilters, ReviewQueueResponse } from '../types';
+import type { RagChunk, RagEvalReport, RagEvaluationAction, RagEvaluationCheckpoints, RagJob, RagMilvusSnapshot, RagMiningSnapshot, RagOverview, RejectionReason, ReviewDetail, ReviewQueueFilters, ReviewQueueResponse } from '../types';
 import { apiMode } from './index';
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
@@ -29,9 +29,16 @@ export const ragApi = {
   chunks: (offset = 0) => request<{ items: RagChunk[] }>(`/chunks?limit=20&offset=${offset}`),
   mining: () => request<RagMiningSnapshot>('/mining'),
   jobs: () => request<{ items: RagJob[] }>('/jobs', { cache: 'no-store' }),
+  evaluationCheckpoints: () => request<RagEvaluationCheckpoints>('/evals/checkpoints', { cache: 'no-store' }),
   startJob: (kind: string, file?: string) => request<RagJob>(`/jobs/${encodeURIComponent(kind)}`, {
     method: 'POST', body: JSON.stringify(file ? { file } : {}),
   }),
+  startEvaluation: (kind: 'evaluate' | 'evaluate-online', evaluationAction: RagEvaluationAction) =>
+    request<RagJob>(`/jobs/${encodeURIComponent(kind)}`, {
+      method: 'POST', body: JSON.stringify({ evaluationAction }),
+    }),
+  stopEvaluation: (jobId: string) =>
+    request<RagJob>(`/jobs/${encodeURIComponent(jobId)}/stop`, { method: 'POST' }),
   startEmbedding: () => request<{ state: string; managed: boolean }>('/embedding/start', { method: 'POST' }),
   stopEmbedding: () => request<{ state: string; managed: boolean }>('/embedding/stop', { method: 'POST' }),
   reviewQueue: (filters: ReviewQueueFilters) => {

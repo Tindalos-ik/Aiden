@@ -20,6 +20,7 @@ from langchain_openai import ChatOpenAI
 from app.config.settings import settings
 from app.config.rag import EvaluationConfigurationError, rag_settings
 from app.services.rag.retrieval import RetrievalStrategy, semantic_search
+from app.services.rag.evaluation_checkpoint import EvaluationCancelled, configuration_version
 
 STRATEGIES: tuple[RetrievalStrategy, ...] = ("dense", "bm25", "hybrid", "hybrid_rerank")
 DATASET = Path(__file__).with_name("customer_rag_v1.jsonl")
@@ -344,12 +345,17 @@ def run(*, dataset: Path | None = None, generate: bool = True, collection: str |
         mode: str = "offline", judge_model: str | None = None, judge_base_url: str | None = None,
         judge_key_env: str = "EVAL_JUDGE_API_KEY", allow_shared_judge: bool = False,
         thresholds: list[float] | None = None, allow_writes: bool = False,
-        isolated_account: str | None = None, isolated_environment: str | None = None) -> dict[str, Any]:
+        isolated_account: str | None = None, isolated_environment: str | None = None,
+        checkpoint: dict[str, Any] | None = None,
+        on_checkpoint: Callable[[dict[str, Any]], None] | None = None,
+        should_stop: Callable[[], bool] | None = None) -> dict[str, Any]:
     """阈值只用 validation，冻结后跑 holdout；不修改全局配置。
 
-    on_status 在耗时步骤开始前通知当前阶段；on_progress 初始化为 0/总次数，
-    然后仅在一轮检索/生成/评审全部完成时推进。在线总次数包含 validation
+    on_status 在耗时步骤开始前通知当前阶段；on_progress 新建时报告 0/总次数，恢复时先报告
+    已保存的完整评估单元数/总次数，然后仅在一轮检索/生成/评审全部完成时推进。在线总次数包含 validation
     的全部阈值试跑，而不是最终报告保留的行数。
+    网页传入 checkpoint 时，完整 row 原子持久化后才推进计数；恢复跳过已完成单元，
+    在线 validation 的全部试跑及冻结选择单独保留。CLI 不传这些参数，仍为一次性运行。
     """
     from app.persistence.milvus.knowledge_store import KnowledgeVectorStore
 
@@ -362,7 +368,13 @@ def run(*, dataset: Path | None = None, generate: bool = True, collection: str |
     cases = _cases(dataset)
     if mode == "online" and (not generate or collection is not None and collection != rag_settings.milvus_collection):
         raise ValueError("在线图使用真实配置集合且必须生成，不能用离线集合覆盖")
-    progress_done = 0
+    def check_stop() -> None:
+        if should_stop and should_stop():
+            raise EvaluationCancelled()
+
+    check_stop()
+    units = dict(checkpoint.get("completed_units", {})) if checkpoint is not None else None
+    progress_done = len(units) if units is not None else 0
     candidates = thresholds or ([0.2, rag_settings.online_min_rerank_score, 0.5]
                                 if mode == "online" else [rag_settings.online_min_rerank_score])
     candidates = sorted(set(candidates))
@@ -374,21 +386,110 @@ def run(*, dataset: Path | None = None, generate: bool = True, collection: str |
     if any(not 0 <= t <= 1 for t in candidates):
         raise ValueError("阈值必须在0..1")
     if on_progress:
-        on_progress(0, progress_total, "", "")
-    status("正在初始化生成与评审模型")
-    judge, judge_name, independent = _judge(judge_model, judge_base_url, judge_key_env, allow_shared_judge) if generate else (None, None, None)
-    model = _model() if generate and mode == "offline" else None
-    store = KnowledgeVectorStore(collection=collection)
-    status("正在读取 MySQL 语料快照")
-    corpus_manifest = _corpus_manifest()
-    status("正在读取 Milvus 集合快照")
-    collection_manifest = store.evaluation_manifest()
-    indexed_ids = set(collection_manifest["chunk_ids"])
-    effective_chunks = [chunk for chunk in corpus_manifest["chunks"] if chunk["id"] in indexed_ids]
-    effective_sources = sorted({Path(chunk["source_path"]).name for chunk in effective_chunks if chunk["source_path"]})
+        on_progress(progress_done, progress_total, "", "")
+    def key_for(case: dict[str, Any], strategy: str, threshold: float | None = None) -> str:
+        return json.dumps([case["split"], threshold, case["id"], strategy], separators=(",", ":"))
+
+    all_complete = False
+    if checkpoint is not None:
+        options = {"generate": generate, "collection": collection, "judge_model": judge_model,
+                   "judge_base_url_digest": hashlib.sha256((judge_base_url or "").encode()).hexdigest(),
+                   "judge_key_env": judge_key_env, "allow_shared_judge": allow_shared_judge,
+                   "thresholds": candidates, "allow_writes": allow_writes,
+                   "isolated_account_digest": hashlib.sha256((isolated_account or "").encode()).hexdigest(),
+                   "isolated_environment": isolated_environment}
+        configuration = configuration_version(mode, dataset=dataset, options=options)
+        previous = checkpoint.get("compatibility")
+        partial = checkpoint.get("partial_report")
+        partial_valid = (previous and isinstance(partial, dict) and partial.get("schema_version") == 2
+                         and partial.get("evaluation_mode") == ("online_workflow" if mode == "online" else "offline_retrieval")
+                         and isinstance(partial.get("metadata"), dict)
+                         and partial["metadata"].get("corpus_version") == previous["corpus"]
+                         and partial["metadata"].get("collection_version") == previous["collection"])
+        if (previous and previous["configuration"] != configuration or units and not partial_valid):
+            raise EvaluationConfigurationError("上次评估与当前题集、配置、代码或语料版本不兼容，请选择重新开始。")
+        if mode == "offline":
+            expected_units = {key_for(case, strategy) for strategy in STRATEGIES for case in cases}
+        else:
+            frozen = checkpoint.get("threshold_selection")
+            expected_units = ({key_for(case, "online", threshold) for threshold in candidates
+                               for case in cases if case["split"] == "validation"}
+                              | {key_for(case, "online", frozen["selected_threshold"])
+                                 for case in cases if case["split"] == "holdout"}) if (
+                                     frozen and frozen["selected_threshold"] in candidates) else None
+        # 完成必须逐个核对全部单位键，不能靠计数猜测；只剩汇总时不访问模型或语料服务。
+        all_complete = bool(partial_valid and expected_units is not None and set(units) == expected_units)
+
+    if not all_complete:
+        status("正在初始化生成与评审模型")
+        judge, judge_name, independent = _judge(judge_model, judge_base_url, judge_key_env, allow_shared_judge) if generate else (None, None, None)
+        model = _model() if generate and mode == "offline" else None
+        store = KnowledgeVectorStore(collection=collection)
+        status("正在读取 MySQL 语料快照")
+        corpus_manifest = _corpus_manifest()
+        status("正在读取 Milvus 集合快照")
+        collection_manifest = store.evaluation_manifest()
+        indexed_ids = set(collection_manifest["chunk_ids"])
+        effective_chunks = [chunk for chunk in corpus_manifest["chunks"] if chunk["id"] in indexed_ids]
+        effective_sources = sorted({Path(chunk["source_path"]).name for chunk in effective_chunks if chunk["source_path"]})
+        if checkpoint is not None:
+            compatibility = {"configuration": configuration, "corpus": corpus_manifest["sha256"],
+                             "collection": collection_manifest["sha256"]}
+            if previous not in (None, compatibility):
+                raise EvaluationConfigurationError("上次评估与当前题集、配置、代码或语料版本不兼容，请选择重新开始。")
+            checkpoint["compatibility"] = compatibility
+    if checkpoint is not None:
+        checkpoint["configuration_version"] = configuration_version(mode)
+        checkpoint["evaluationProgress"] = {"completed": progress_done, "total": progress_total}
+
+    def persist() -> None:
+        if checkpoint is not None and on_checkpoint:
+            checkpoint["completed_units"] = units
+            checkpoint["evaluationProgress"] = {"completed": len(units), "total": progress_total}
+            checkpoint["partial_report"]["cases"] = list(units.values())
+            on_checkpoint(checkpoint)
+
+    # 首次执行冻结报告元数据；恢复只使用历史模板，不能用当前配置补写历史字段。
+    report = checkpoint.get("partial_report") if checkpoint else None
+    if report is None:
+        report = {"schema_version": 2, "legacy": False,
+                  "evaluation_mode": "online_workflow" if mode == "online" else "offline_retrieval",
+                  "execution_environment": "real", "dataset": str(dataset),
+                  "collection": collection or rag_settings.milvus_collection,
+                  "generated_at": None, "faithfulness_judge": judge_name,
+                  "metadata": {"dataset_version": cases[0]["dataset_version"],
+                      "dataset_sha256": hashlib.sha256(dataset.read_bytes()).hexdigest(),
+                      "corpus_version": corpus_manifest["sha256"],
+                      "corpus_version_label": os.getenv("EVAL_CORPUS_VERSION") or None,
+                      "corpus_manifest": corpus_manifest,
+                      "collection_version": collection_manifest["sha256"], "collection_manifest": collection_manifest,
+                      "reranker_model": rag_settings.reranker_model,
+                      "online_threshold": rag_settings.online_min_rerank_score,
+                      "persistence_disabled": mode == "online",
+                      "handoff_boundary": "decision_only_not_actual_queue_commit" if mode == "online" else "not_exercised",
+                      "collection": collection or rag_settings.milvus_collection,
+                      "embedding_model": rag_settings.embedding_model, "embedding_dimension": rag_settings.embedding_dimension,
+                      "generation_model": settings.openai_model if generate else None,
+                      "judge_model": judge_name, "judge_independent": independent,
+                      "model_metadata_source": "configured_not_independently_verified",
+                      "expected_sources": sorted({g["source_path"] for c in cases for g in c["ground_truth"]}),
+                      "unobserved_sources": sorted({g["source_path"] for c in cases for g in c["ground_truth"]} - set(effective_sources)),
+                      "effective_collection_sources": effective_sources, "effective_collection_chunks": len(effective_chunks),
+                      "corpus_coverage_basis": "mysql_vectorized_manifest_intersect_milvus_ids",
+                      "allow_writes": allow_writes, "isolated_environment": isolated_environment},
+                  "threshold_selection": None, "strategies": {}, "workflows": None, "cases": []}
+        if checkpoint is not None:
+            checkpoint["partial_report"] = report
+    persist()
+    check_stop()
 
     def evaluate(case: dict[str, Any], strategy: str, threshold: float | None = None) -> dict[str, Any]:
         nonlocal progress_done
+        check_stop()
+        if units is not None:
+            unit_key = key_for(case, strategy, threshold)
+            if unit_key in units:
+                return units[unit_key]
         started = time.perf_counter()
         observed = {}
         tokens = {key: None for key in ("input", "output", "total")}
@@ -418,14 +519,19 @@ def run(*, dataset: Path | None = None, generate: bool = True, collection: str |
             "faithfulness": None, "completeness": None, "refused": None,
             "false_refusal": None, "unsafe_answer": None, "judge_reason": None,
             "judge_tokens": {key: None for key in ("input", "output", "total")}, "judge_latency_ms": None}
+        row = {**case, "strategy": strategy, "retrieved": evidence, "judge_evidence": judge_evidence,
+               **_retrieval_numbers_from_rows(evidence, case["ground_truth"]), "answer": answer,
+               **grade, "latency_ms": latency, "tokens": tokens, **observed,
+               "threshold": threshold, "manual_review": {"status": "pending"}}
+        if units is not None:
+            units[unit_key] = row
+            persist()
         progress_done += 1
         if on_progress:
             on_progress(progress_done, progress_total, strategy, case["id"])
         status(f"{case_note}：已完成")
-        return {**case, "strategy": strategy, "retrieved": evidence, "judge_evidence": judge_evidence,
-                **_retrieval_numbers_from_rows(evidence, case["ground_truth"]), "answer": answer,
-                **grade, "latency_ms": latency, "tokens": tokens, **observed,
-                "threshold": threshold, "manual_review": {"status": "pending"}}
+        check_stop()
+        return row
 
     if mode == "online":
         validation = [c for c in cases if c["split"] == "validation"]
@@ -443,14 +549,22 @@ def run(*, dataset: Path | None = None, generate: bool = True, collection: str |
             loss = sum((r["unsafe_answer"] or 0) + (r["false_refusal"] or 0) +
                        (0 if r["expected_refusal"] else 1 - r["completeness"]) for r in calibration) / len(calibration)
             scans.append((loss, threshold, trial))
-        _, selected, chosen = min(scans, key=lambda scan: (scan[0], scan[1]))
+        frozen = checkpoint.get("threshold_selection") if checkpoint else None
+        if frozen is None:
+            _, selected, chosen = min(scans, key=lambda scan: (scan[0], scan[1]))
+            frozen = {"validation_count": len(validation), "holdout_count": len(holdout),
+                      "candidates": [{"threshold": t, "loss": loss, "summary": _summary(trial), "cases": trial} for loss, t, trial in scans],
+                      "selected_threshold": selected, "validation": _summary(chosen),
+                      "objective": "validation search_faq mean(unsafe_answer + false_refusal + answerable incompleteness); ties lowest threshold"}
+            if checkpoint is not None:
+                checkpoint["threshold_selection"] = frozen
+                report["threshold_selection"] = frozen
+                persist()
+        selected = frozen["selected_threshold"]
+        chosen = next(trial for _, threshold, trial in scans if threshold == selected)
         status("已完成 validation 阈值比较，正在冻结阈值并运行 holdout")
         rows = chosen + [evaluate(c, "online", selected) for c in holdout]
-        selection = {"validation_count": len(validation), "holdout_count": len(holdout),
-                     "candidates": [{"threshold": t, "loss": loss, "summary": _summary(trial), "cases": trial} for loss, t, trial in scans],
-                     "selected_threshold": selected, "validation": _summary(chosen),
-                     "objective": "validation search_faq mean(unsafe_answer + false_refusal + answerable incompleteness); ties lowest threshold",
-                     "holdout": _summary(rows[len(chosen):])}
+        selection = {**frozen, "holdout": _summary(rows[len(chosen):])}
     else:
         # 四策略共享同一题集和短连接语料快照。
         for strategy in STRATEGIES:
@@ -458,37 +572,15 @@ def run(*, dataset: Path | None = None, generate: bool = True, collection: str |
                 rows.append(evaluate(case, strategy))
                 # evaluate 已通知进度，扫描与留出使用同一回调契约。
     sources = sorted({Path(r["source_path"]).name for row in rows for r in row["retrieved"] if r.get("source_path")})
-    expected_sources = sorted({g["source_path"] for c in cases for g in c["ground_truth"]})
+    check_stop()
     status("正在汇总评估报告")
-    return {"schema_version": 2, "legacy": False,
-            "evaluation_mode": "online_workflow" if mode == "online" else "offline_retrieval",
-            "execution_environment": "real", "dataset": str(dataset),
-            "collection": collection or rag_settings.milvus_collection,
-            "generated_at": datetime.now(timezone.utc).isoformat(), "faithfulness_judge": judge_name,
-            "metadata": {"dataset_version": cases[0]["dataset_version"],
-                "dataset_sha256": hashlib.sha256(dataset.read_bytes()).hexdigest(),
-                "corpus_version": corpus_manifest["sha256"],
-                "corpus_version_label": os.getenv("EVAL_CORPUS_VERSION") or None,
-                "corpus_manifest": corpus_manifest,
-                "collection_version": collection_manifest["sha256"],
-                "collection_manifest": collection_manifest,
-                "reranker_model": rag_settings.reranker_model,
-                "online_threshold": selection["selected_threshold"] if selection else rag_settings.online_min_rerank_score,
-                "persistence_disabled": mode == "online",
-                "handoff_boundary": "decision_only_not_actual_queue_commit" if mode == "online" else "not_exercised",
-                "collection": collection or rag_settings.milvus_collection,
-                "embedding_model": rag_settings.embedding_model, "embedding_dimension": rag_settings.embedding_dimension,
-                "generation_model": settings.openai_model if generate else None,
-                "judge_model": judge_name, "judge_independent": independent,
-                "model_metadata_source": "configured_not_independently_verified",
-                "retrieved_sources": sources, "expected_sources": expected_sources,
-                "unobserved_sources": sorted(set(expected_sources) - set(effective_sources)),
-                "effective_collection_sources": effective_sources,
-                "effective_collection_chunks": len(effective_chunks),
-                "corpus_coverage_basis": "mysql_vectorized_manifest_intersect_milvus_ids",
-                "allow_writes": allow_writes, "isolated_environment": isolated_environment},
-            "threshold_selection": selection, "strategies": _group(rows),
-            "workflows": _summary(rows) if mode == "online" else None, "cases": rows}
+    report["generated_at"] = datetime.now(timezone.utc).isoformat()
+    report["metadata"]["retrieved_sources"] = sources
+    if selection:
+        report["metadata"]["online_threshold"] = selection["selected_threshold"]
+    report.update(threshold_selection=selection, strategies=_group(rows),
+                  workflows=_summary(rows) if mode == "online" else None, cases=rows)
+    return report
 
 
 def write_report(report: dict[str, Any], path: Path) -> None:

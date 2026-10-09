@@ -14,7 +14,7 @@ import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import Any
 from urllib.error import URLError
 from urllib.parse import urlparse
@@ -28,12 +28,16 @@ from app.persistence.mysql import knowledge as knowledge_repo
 from app.services.rag import indexing
 from app.services.rag.runtime_control import AlreadyRunningError, MiningRuntimeControl, default_lock_path
 from app.services.rag.retrieval import RetrievalError
+from app.services.rag.evaluation_checkpoint import (
+    MODES, EvaluationCancelled, configuration_version, read_checkpoint, report_path, save_checkpoint,
+)
 
 _JOB_TYPES = {"import-markdown", "import-markdown-all", "import-faq", "mine", "vectorize", "cleanup", "evaluate", "evaluate-online", "low-confidence-review"}
 _lock = Lock()
 _jobs: list[dict[str, Any]] = []
 _process: subprocess.Popen[bytes] | None = None
 _MAX_HISTORY = 30
+_evaluation_contexts: dict[str, dict[str, Any]] = {}
 
 
 def _now() -> str:
@@ -364,6 +368,8 @@ def list_chunks(limit: int, offset: int) -> list[dict[str, Any]]:
 
 
 def _execute_job(kind: str, job: dict[str, Any], control: MiningRuntimeControl, relative_name: str | None) -> None:
+    outcome = "failed"
+    context = _evaluation_contexts.get(job["id"])
     try:
         if kind == "import-markdown":
             # 文件路径已在 HTTP 接入时校验；执行前再解析一次，防止预览后路径被替换。
@@ -429,39 +435,74 @@ def _execute_job(kind: str, job: dict[str, Any], control: MiningRuntimeControl, 
                     "judge_key_env": "OPENAI_API_KEY",
                 }
 
+            def persist_checkpoint(value: dict[str, Any]) -> None:
+                # worker 严格兼容检查通过后才允许更新旧记录；失败不得损坏可恢复的原件。
+                with _lock:
+                    value["status"] = "stopping" if context["stop"].is_set() else "running"
+                    value["updatedAt"] = _now()
+                    save_checkpoint(value)
+                    context["writable"] = True
+
             report = run(
                 collection=rag_settings.milvus_collection,
                 mode="online" if kind == "evaluate-online" else "offline",
                 allow_shared_judge=True,
                 **judge_options,
+                checkpoint=context["checkpoint"], on_checkpoint=persist_checkpoint,
+                should_stop=context["stop"].is_set,
                 on_status=lambda note: _set_progress(job, note),
                 on_progress=lambda done, total, _strategy, _case_id: _set_evaluation_progress(
                     job, done, total
                 ),
             )
-            filename = "customer_workflow_v2.json" if kind == "evaluate-online" else "customer_rag_v2.json"
-            _set_progress(job, "评估结果已汇总，正在写入报告")
-            write_report(report, BACKEND_DIR / "evals" / "reports" / filename)
             strategy_count = len(report["strategies"])
             result = {"questions": len(report["cases"]) // strategy_count,
                       "strategies": strategy_count, "generatedAt": report["generated_at"]}
+            report["metadata"]["evaluation_run_id"] = context["checkpoint"]["runId"]
+            _set_progress(job, "评估结果已汇总，正在写入报告")
+            with _lock:
+                if context["stop"].is_set():
+                    raise EvaluationCancelled()
+                write_report(report, report_path(MODES[kind]))
+                # 正式报告的原子替换是提交事实；terminal checkpoint 失写不能撤销成功。
+                context["checkpoint"]["status"] = "completed"
+                context["checkpoint"]["updatedAt"] = _now()
+                try:
+                    save_checkpoint(context["checkpoint"])
+                except Exception:
+                    # read_checkpoint 通过同 mode/runId 的正式报告识别 completed。
+                    pass
         else:
             result = {"removed": indexing.cleanup_superseded_vectors()}
         with _lock:
-            job["status"] = "failed" if kind == "low-confidence-review" and result["failed"] else "completed"
+            outcome = "failed" if kind == "low-confidence-review" and result["failed"] else "completed"
             job["result"] = [asdict(item) for item in result] if isinstance(result, list) else (
                 asdict(result) if hasattr(result, "__dataclass_fields__") else result
             )
             if kind == "low-confidence-review" and result["failed"]:
                 job["error"] = f"{result['failed']} 条原话未能归并；保留在原始队列，修复后可重跑。"
+    except EvaluationCancelled:
+        outcome = "cancelled"
     except Exception as exc:
         with _lock:
-            job["status"] = "failed"
+            outcome = "failed"
             job["error"] = _safe_error(exc)
     finally:
         with _lock:
-            job["finishedAt"] = _now()
-        control.release()
+            try:
+                if context and context["writable"] and outcome != "completed":
+                    context["checkpoint"]["status"] = outcome
+                    context["checkpoint"]["updatedAt"] = _now()
+                    save_checkpoint(context["checkpoint"])
+            except Exception as exc:
+                outcome = "failed"
+                job["error"] = _safe_error(exc)
+            finally:
+                # 锁生命周期不能依赖 JSON 序列化或 artifact I/O 成功。
+                control.release(keep_file=True)
+                job["status"] = outcome
+                job["finishedAt"] = _now()
+                _evaluation_contexts.pop(job["id"], None)
 
 
 def _set_progress(job: dict[str, Any], note: str) -> None:
@@ -475,17 +516,23 @@ def _set_evaluation_progress(job: dict[str, Any], completed: int, total: int) ->
         job["evaluationProgress"] = {"completed": completed, "total": total}
 
 
-def start_job(kind: str, relative_name: str | None = None) -> dict[str, Any]:
-    """全控制台同一时刻只运行一项写任务，跨 API 进程用同一把文件锁拦截。"""
+def start_job(kind: str, relative_name: str | None = None,
+              evaluation_action: str | None = None) -> dict[str, Any]:
+    """跨进程单任务锁；评估必须显式 restart/resume，只有拿锁成功才能丢弃旧进度。"""
     if kind not in _JOB_TYPES:
         raise ValueError("不支持的任务类型")
+    is_evaluation = kind in MODES
+    if is_evaluation and evaluation_action not in {"restart", "resume"}:
+        raise ValueError("每次评估请选择重新开始或继续上次。")
+    if not is_evaluation and evaluation_action is not None:
+        raise ValueError("只有离线和在线评估支持恢复选项。")
     if kind == "import-markdown":
         if not relative_name:
             raise ValueError("请选择知识目录中的 Markdown 文件")
         _document_path(relative_name)
     control = MiningRuntimeControl(default_lock_path().with_name("aiden-rag-console.lock"))
     with _lock:
-        if any(item["status"] in {"queued", "running"} for item in _jobs):
+        if any(item["status"] in {"queued", "running", "stopping"} for item in _jobs):
             raise AlreadyRunningError("已有建库任务正在运行，请等待完成")
         control.acquire()
         job: dict[str, Any] = {
@@ -494,12 +541,34 @@ def start_job(kind: str, relative_name: str | None = None) -> dict[str, Any]:
             "createdAt": _now(), "startedAt": None, "finishedAt": None,
             "error": None, "result": None,
         }
+        if is_evaluation:
+            try:
+                mode = MODES[kind]
+                checkpoint = read_checkpoint(mode) if evaluation_action == "resume" else None
+                if evaluation_action == "resume":
+                    if not checkpoint or checkpoint.get("status") == "completed":
+                        raise ValueError("没有可恢复的上次评估进度，请选择重新开始。")
+                    if checkpoint.get("configuration_version") not in (None, configuration_version(mode)):
+                        raise EvaluationConfigurationError("上次评估与当前题集、配置或代码版本不兼容，请选择重新开始。")
+                else:
+                    checkpoint = {"schema_version": 1, "mode": mode, "runId": job["id"],
+                                  "status": "queued", "updatedAt": _now(),
+                                  "configuration_version": configuration_version(mode),
+                                  "evaluationProgress": {"completed": 0, "total": 0},
+                                  "completed_units": {}, "partial_report": None}
+                    save_checkpoint(checkpoint)
+                job["evaluationProgress"] = dict(checkpoint["evaluationProgress"])
+                _evaluation_contexts[job["id"]] = {"checkpoint": checkpoint, "stop": Event(),
+                                                   "writable": evaluation_action == "restart"}
+            except Exception:
+                control.release(keep_file=True)
+                raise
         _jobs.insert(0, job)
         del _jobs[_MAX_HISTORY:]
 
     def worker() -> None:
         with _lock:
-            job["status"] = "running"
+            job["status"] = "stopping" if is_evaluation and _evaluation_contexts[job["id"]]["stop"].is_set() else "running"
             job["startedAt"] = _now()
         _execute_job(kind, job, control, relative_name)
 
@@ -508,7 +577,8 @@ def start_job(kind: str, relative_name: str | None = None) -> dict[str, Any]:
     except RuntimeError:
         with _lock:
             _jobs.remove(job)
-        control.release()
+            _evaluation_contexts.pop(job["id"], None)
+        control.release(keep_file=True)
         raise
     return dict(job)
 
@@ -516,3 +586,58 @@ def start_job(kind: str, relative_name: str | None = None) -> dict[str, Any]:
 def list_jobs() -> list[dict[str, Any]]:
     with _lock:
         return [dict(job) for job in _jobs]
+
+
+def stop_evaluation(job_id: str) -> dict[str, Any]:
+    """只请求评估协作停止；当前完整执行单元保存后退出，退出前持续占用锁。"""
+    with _lock:
+        job = next((item for item in _jobs if item["id"] == job_id), None)
+        if job is None:
+            raise LookupError("找不到当前进程中的评估任务。")
+        if job["kind"] not in MODES:
+            raise ValueError("只有离线和在线评估可以终止。")
+        if job["status"] not in {"queued", "running", "stopping"}:
+            raise ValueError("评估已退出，无需终止。")
+        context = _evaluation_contexts[job_id]
+        if context["checkpoint"]["status"] == "completed":
+            raise ValueError("评估报告已提交，无需终止。")
+        context["stop"].set()
+        job["status"] = "stopping"
+        job["progress"] = "正在停止：当前执行单元完整保存后退出，请等待。"
+        return dict(job)
+
+
+def evaluation_checkpoints() -> dict[str, Any]:
+    """只返回模式摘要；不返回题目/回答/业务原文，不进行外部依赖健康或快照检查。
+
+    无本进程活动任务的遗留 queued/running/stopping 只在响应中解释为 interrupted，
+    不改写磁盘；真正启动仍须跨进程文件锁成功，不能覆盖其他 API 进程的活任务。
+    """
+    result = {}
+    for mode in ("offline", "online"):
+        summary = {"mode": mode, "exists": False, "resumable": False, "status": "none",
+                   "runId": None, "updatedAt": None, "evaluationProgress": None,
+                   "reason": "没有可恢复记录；仅本功能上线后启动的新评估保存进度，旧任务无法补录。"}
+        try:
+            checkpoint = read_checkpoint(mode)
+            if checkpoint:
+                with _lock:
+                    active_job = next((job for job in _jobs if MODES.get(job["kind"]) == mode
+                                       and job["status"] in {"queued", "running", "stopping"}), None)
+                active = active_job is not None
+                status = active_job["status"] if active else checkpoint["status"]
+                if not active and status in {"queued", "running", "stopping"}:
+                    status = "interrupted"
+                compatible = status == "completed" or checkpoint["configuration_version"] == configuration_version(mode)
+                resumable = not active and status != "completed" and compatible
+                summary.update(exists=True, resumable=resumable, status=status,
+                               runId=checkpoint["runId"], updatedAt=checkpoint["updatedAt"],
+                               evaluationProgress=checkpoint.get("evaluationProgress"),
+                               reason=("评估正在运行或停止，请等待退出。" if active else
+                                       "上次评估已完成，无需继续。" if status == "completed" else
+                                       "上次进度与当前题集、配置或代码不兼容，请重新开始。" if not compatible else
+                                       "可继续上次进度；启动时会校验语料和集合版本。"))
+        except (EvaluationConfigurationError, OSError):
+            summary.update(exists=True, status="failed", reason="上次进度无法读取，请选择重新开始。")
+        result[mode] = summary
+    return result

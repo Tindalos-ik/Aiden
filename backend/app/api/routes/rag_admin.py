@@ -21,9 +21,10 @@ _EVAL_REPORT = Path(__file__).resolve().parents[3] / "evals" / "reports" / "cust
 
 
 class StartJobRequest(BaseModel):
-    """文件名是知识目录内的相对路径；其余任务不接受浏览器传入运行参数。"""
+    """file 为知识目录相对路径；两种评估必须显式选择 evaluationAction，其余任务禁止该字段。"""
 
     file: str | None = Field(default=None, max_length=500)
+    evaluationAction: Literal["restart", "resume"] | None = None
 
 class ApproveReviewRequest(BaseModel):
     approved_answer: str = Field(min_length=1, max_length=10000)
@@ -166,10 +167,27 @@ def jobs() -> dict:
     return {"items": admin_console.list_jobs()}
 
 
+@router.get("/evals/checkpoints")
+def evaluation_checkpoints() -> dict:
+    """离线/在线各自的最后进度摘要；不回传执行单元和业务数据。"""
+    return admin_console.evaluation_checkpoints()
+
+
+@router.post("/jobs/{job_id}/stop", status_code=202)
+def stop_evaluation(job_id: str) -> dict:
+    """仅请求评估安全退出；202/stopping 不代表模型请求或后台线程已经退出。"""
+    try:
+        return admin_console.stop_evaluation(job_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/jobs/{kind}", status_code=202)
 def start_job(kind: str, body: StartJobRequest) -> dict:
     try:
-        return admin_console.start_job(kind, body.file)
+        return admin_console.start_job(kind, body.file, body.evaluationAction)
     except AlreadyRunningError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:

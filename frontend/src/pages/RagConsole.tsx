@@ -34,7 +34,7 @@ function ChunkCard({ chunk }: { chunk: RagChunk }) {
 function JobPanel({ jobs }: { jobs: RagJob[] }) {
   if (!jobs.length) return <Empty description="尚无控制台任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
   return <div className="rag-stack">{jobs.map((job) => <Card key={job.id} size="small" className="rag-job">
-    <Space wrap><Text strong>{job.kind}</Text><Tag color={job.status === 'completed' ? 'green' : job.status === 'failed' ? 'red' : 'blue'}>{job.status}</Tag><Text type="secondary">{new Date(job.createdAt).toLocaleString('zh-CN')}</Text></Space>
+    <Space wrap><Text strong>{job.kind}</Text><Tag color={job.status === 'completed' ? 'green' : job.status === 'failed' ? 'red' : job.status === 'cancelled' ? 'orange' : job.status === 'stopping' ? 'gold' : 'blue'}>{job.status}</Tag><Text type="secondary">{new Date(job.createdAt).toLocaleString('zh-CN')}</Text></Space>
     {job.progress && <Paragraph className="rag-job-note">{job.progress}</Paragraph>}
     {job.error && <Alert type="error" showIcon message={job.error} />}
     {job.result != null && <pre className="rag-result">{JSON.stringify(job.result, null, 2)}</pre>}
@@ -70,7 +70,7 @@ export function RagConsole() {
     onError: (error) => setActionError(errorText(error)),
   });
   const run = (operation: () => Promise<unknown>) => action.mutate(operation);
-  const working = action.isPending || (jobs.data?.items.some((item) => item.status === 'queued' || item.status === 'running') ?? false);
+  const working = action.isPending || (jobs.data?.items.some((item) => item.status === 'queued' || item.status === 'running' || item.status === 'stopping') ?? false);
 
   if (actorQuery.isLoading) return <div className="full-screen-state"><Spin /></div>;
   if (!actorQuery.data) return <div className="full-screen-state"><Alert type="error" message="登录状态不可用" /></div>;
