@@ -255,8 +255,10 @@ graph TD
 数据库表结构由 Alembic 迁移管理。导入应用模块不会自动创建表；手动只启动 FastAPI 时，需先配置数据库并应用迁移。根目录的 [`start.ps1`](../start.ps1) 则会检查本地配置，启动 MySQL、应用迁移、准备演示用户，然后启动 FastAPI 和前端。若只想运行后端，官方项目文档给出的开发命令是在 `backend/` 目录运行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
+
+此命令与 `start.ps1` 默认都不启用热重载。控制台评估是进程内后台任务；`--reload` 重启 worker 会中断任务、清空内存进度，并触发关闭该 worker 拥有的本地向量进程。修改后端代码后应等待任务结束，再手动重启；不要在长评估期间使用热重载。
 
 启动后可打开 `http://127.0.0.1:8000/docs` 查看当前注册的接口。`/api/health` 返回成功只代表 API 进程已响应，并不能证明数据库迁移、登录或模型配置都正常。聊天模型还需要 `backend/.env` 中的模型配置；具体数据库准备方式见 [`数据库.md`](数据库.md)。
 

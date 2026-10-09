@@ -153,7 +153,7 @@ function Stop-StartedProcessTree {
         $Process.Refresh()
         if ($Process.HasExited) { return }
 
-        # Uvicorn --reload 会创建子进程；只 Stop-Process 父 PID 会留下监听端口的 worker。
+        # API 和 Vite 都可能创建子进程；按脚本明确退出时清理整个进程树。
         & taskkill.exe /PID $Process.Id /T /F *> $null
         if ($LASTEXITCODE -ne 0) { throw "taskkill exited with $LASTEXITCODE" }
         $Process.WaitForExit(5000) | Out-Null
@@ -173,8 +173,10 @@ $frontendProcess = $null
 
 try {
     Write-Host 'Starting FastAPI...'
+    # 控制台长任务与向量子进程由 API 持有；自动 reload 会中断任务并关闭模型。
+    # 使用稳定进程，修改后端代码后请等待任务完成，再手动重启。
     $apiProcess = Start-Process -FilePath $python `
-        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$apiPort", '--reload') `
+        -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$apiPort") `
         -WorkingDirectory $backend -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput $apiStdout -RedirectStandardError $apiStderr
 

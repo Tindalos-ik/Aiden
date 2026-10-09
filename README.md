@@ -134,6 +134,8 @@ if (!(Test-Path backend/.venv/Scripts/python.exe)) { python -m venv backend/.ven
 
 脚本会按需创建后端虚拟环境、安装基础后端依赖和前端依赖，随后启动 API 与 Vite，并在前端进程中强制设置 remote 模式及代理目标。
 
+API 默认不启用自动热重载：评估等控制台任务运行在 API 后台线程，任务历史只保存在内存；重载会中断任务、清空进度，并关闭该 API 启动的本地向量服务。后端代码或配置修改后，等待任务结束再手动重启。仅调试短请求时可自行启用 `--reload`，不要在长评估期间使用。
+
 | 入口 | 默认地址 |
 | --- | --- |
 | 前端 | `http://127.0.0.1:5173` |
@@ -168,7 +170,7 @@ remote 的 Cookie 在同站点标签页间共享。用户与员工并行演示�
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 前端窗口，从仓库根目录进入 `frontend/`：
