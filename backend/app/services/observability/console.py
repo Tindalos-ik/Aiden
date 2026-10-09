@@ -1,6 +1,7 @@
 """员工只读 Langfuse v2 适配；不返回输入、输出或任意 metadata。"""
 from __future__ import annotations
 
+import logging
 import math
 import os
 from collections import defaultdict
@@ -14,6 +15,7 @@ from app.config.settings import settings
 INTENTS = frozenset({'logistics', 'order', 'product', 'refund_return', 'after_sales', 'complaint', 'smalltalk', 'human', 'other'})
 SAFE_NAMES = frozenset({'aiden_support', 'load_context', 'recognize_intent', 'route_intent', 'dispatch_tool_call', 'generate', 'assess_knowledge', 'after_tools', 'finish_request', 'save_answer', 'query_order', 'query_logistics', 'search_faq', 'query_refund_policy', 'query_after_sale', 'query_ticket', 'create_ticket', 'cost_bucket_intent_classification'}) | {f'cost_intent_{i}' for i in INTENTS}
 FIELDS = 'basic,usage,model,metadata,trace_context'
+logger = logging.getLogger(__name__)
 
 
 def now() -> str:
@@ -210,7 +212,18 @@ def read_rows(*, limit: int, start: datetime | None = None, end: datetime | None
                     return list(result.values())[:limit], True, None
                 cursors.add(cursor)
                 params['cursor'] = cursor
-    except (httpx.HTTPError, ValueError, TypeError):
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        # 仅记录固定分类与状态码；异常文本可能包含 URL、凭据或上游内容。
+        error_type = next((name for cls, name in (
+            (httpx.HTTPStatusError, 'HTTPStatusError'),
+            (httpx.TimeoutException, 'TimeoutException'),
+            (httpx.ConnectError, 'ConnectError'),
+            (httpx.HTTPError, 'HTTPError'),
+            (ValueError, 'ValueError'),
+            (TypeError, 'TypeError'),
+        ) if isinstance(exc, cls)), 'HTTPError')
+        http_status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        logger.warning('Langfuse observation read failed: error_type=%s http_status=%s', error_type, http_status)
         return [], False, 'connection_failed'
 
 
