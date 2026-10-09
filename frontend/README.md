@@ -55,7 +55,7 @@ remote 用户页中，知识类回答的 `[1]` 等引用编号可点击查看来
 
 ### 员工观测与成本
 
-员工从顶部“观测与成本”或 `/staff/observability` 进入；路由要求 staff 身份。页面仅 remote 模式读取 Cookie 鉴权的 `/api/observability/*` 接口，mock 不生成或回退到假观测。可按固定提交的时间范围（最多 31 天）、source、model、intent、状态、conversation ID 和 message ID 筛选；默认 source 为在线客服 `aiden_support`，其他来源单独选择，不与在线客服费用混合。历史记录若无可靠 source marker 会归入其他/未记录来源，不能据此推断其属于在线或评测。
+员工从顶部“观测与成本”或 `/staff/observability` 进入；路由要求 staff 身份。页面仅 remote 模式读取 Cookie 鉴权的 `/api/observability/*` 接口，mock 不生成或回退到假观测。可按时间范围（最多 31 天）、source、model、intent、状态、conversation ID 和 message ID 筛选；默认 source 为在线客服 `aiden_support`，其他来源单独选择，不与在线客服费用混合。相对时间范围在打开、选择或点击“刷新数据”时更新结束时间；自定义范围刷新会重读原固定区间。手动刷新保留已应用的其他筛选，不会应用尚未提交的筛选草稿，也不启用自动轮询。历史记录若无可靠 source marker 会归入其他/未记录来源，不能据此推断其属于在线或评测。
 
 概览显示根请求（不是会话）、generation 数、成功/错误/未知、时长样本及分位数、token、费用覆盖和按日请求量趋势；另有按唯一 generation 的 UTC 日期、模型、业务桶展示费用/token/调用数的每日明细，可在本地选择模型与业务桶。共享分类和未归因分别保留，不会复制或按根请求意图分摊。历史 Langfuse usage 是记录值，不等同于经 provider source marker 确认的用量；详情会标明来源是否核验。分页链路可打开 Trace 详情，按真实 parent ID 展示 observation 树。缺少父项的节点单列；循环引用安全停止。历史 trace 未记录 root intents 时显示未采集，不会从 generation attribution bucket 推断根意图。概览、链路和详情各自显示 envelope 状态与截断/失败信息；数据状态包含查询时间、最新记录与覆盖。上游查询错误显式显示，不静默回退。
 
