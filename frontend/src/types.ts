@@ -158,6 +158,8 @@ export interface RagJob {
   kind: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
   progress: string | null;
+  /** 一轮检索/生成/评审完成后推进；在线包含所有阈值试跑次数。 */
+  evaluationProgress?: { completed: number; total: number };
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;

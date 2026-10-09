@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Collapse, Empty, Select, Space, Spin, Table, Tabs, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Collapse, Descriptions, Empty, Progress, Select, Space, Spin, Table, Tabs, Tag, Typography } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api, apiMode } from '../api';
 import { ragApi } from '../api/rag';
 import { PageHeader } from '../components/Common';
-import type { RagEvalCase, RagEvalMetrics, RagEvalReport } from '../types';
+import type { RagEvalCase, RagEvalMetrics, RagEvalReport, RagJob } from '../types';
 
 const { Text, Title, Paragraph } = Typography;
 type EvalMode = 'offline' | 'online';
@@ -88,14 +88,63 @@ function StrategyResult({ item }: { item: RagEvalCase }) {
 }
 function Metadata({ report }: { report: RagEvalReport }) {
   const meta = report.metadata;
-  return <Paragraph type="secondary">
-    模式：{report.evaluation_mode ?? '历史/未标记'}；环境：{report.execution_environment ?? '未记录'}；
-    题集：{meta?.dataset_version ?? report.dataset}；题集 SHA-256：{meta?.dataset_sha256 ?? '未记录'}；
-    语料版本标签：{meta?.corpus_version_label ?? '未记录'}；语料清单 SHA-256：{meta?.corpus_manifest?.sha256 ?? meta?.corpus_version ?? '未记录'}（{meta?.corpus_manifest?.count ?? '未知'} 块；来源：{meta?.effective_collection_sources?.join('、') ?? meta?.corpus_manifest?.sources?.join('、') ?? meta?.retrieved_sources?.join('、') ?? '未记录'}）；
-    当前有效集合：{meta?.effective_collection_chunks ?? meta?.collection_manifest?.count ?? '未知'} 向量；集合：{meta?.collection ?? report.collection}；集合版本 SHA-256：{meta?.collection_version ?? '未记录'}；
-    embedding：{meta?.embedding_model ?? '未记录'}{meta?.embedding_dimension ? ` / ${meta.embedding_dimension}维` : ''}；reranker：{meta?.reranker_model ?? '未记录'}；生成模型：{meta?.generation_model ?? '未记录'}；judge：{meta?.judge_model ?? report.faithfulness_judge ?? '未记录'}（独立：{meta?.judge_independent == null ? '未知' : meta.judge_independent ? '是' : '否'}）；
-    在线阈值：{meta?.online_threshold ?? report.threshold_selection?.selected_threshold ?? '未记录'}；持久化关闭：{meta?.persistence_disabled == null ? '未记录' : meta.persistence_disabled ? '是' : '否'}；生成时间：{report.generated_at ? new Date(report.generated_at).toLocaleString('zh-CN') : '历史报告未记录'}。
-  </Paragraph>;
+  const legacy = report.legacy === true || report.schema_version === 1;
+  const corpusHash = meta?.corpus_manifest?.sha256 ?? meta?.corpus_version;
+  const collectionHash = meta?.collection_version ?? meta?.collection_manifest?.sha256;
+  const judgeModel = meta?.judge_model ?? report.faithfulness_judge;
+  // 只展示报告确实提供的值；0 和 false 不是缺失，不用当前服务配置补填旧快照。
+  const configuration = [
+    { key: 'mode', label: '评估模式', value: report.evaluation_mode === 'online_workflow' ? '在线客服工作流' : report.evaluation_mode === 'offline_retrieval' ? '离线四策略检索' : undefined },
+    { key: 'environment', label: '运行环境', value: report.execution_environment === 'real' ? '真实依赖' : report.execution_environment === 'fixture' ? '隔离 Fixture' : report.execution_environment === 'historical_unverified' ? '历史环境，未经核验' : undefined },
+    { key: 'dataset', label: '题集', value: meta?.dataset_version ?? report.dataset },
+    { key: 'collection', label: '集合', value: meta?.collection ?? report.collection },
+    { key: 'generated', label: '报告生成时间', value: report.generated_at ? new Date(report.generated_at).toLocaleString('zh-CN') : undefined },
+    { key: 'embedding', label: 'Embedding 模型', value: meta?.embedding_model },
+    { key: 'dimension', label: 'Embedding 维度', value: meta?.embedding_dimension },
+    { key: 'reranker', label: 'Reranker 模型', value: meta?.reranker_model },
+    { key: 'generation', label: '回答生成模型', value: meta?.generation_model },
+    { key: 'judge', label: '评审模型', value: judgeModel },
+    { key: 'independent', label: '评审是否独立', value: meta?.judge_independent == null ? undefined : meta.judge_independent ? '是' : '否' },
+    { key: 'threshold', label: '在线选定阈值', value: report.evaluation_mode === 'online_workflow' ? meta?.online_threshold ?? report.threshold_selection?.selected_threshold : undefined },
+    { key: 'persistence', label: '会话持久化关闭', value: report.evaluation_mode === 'online_workflow' && meta?.persistence_disabled != null ? meta.persistence_disabled ? '是' : '否' : undefined },
+  ].filter(({ value }) => value != null && value !== '').map(({ key, label, value }) => ({
+    key, label, children: <span style={{ overflowWrap: 'anywhere' }}>{value}</span>,
+  }));
+  const evidence = [
+    { key: 'datasetHash', label: '题集 SHA-256', value: meta?.dataset_sha256 },
+    { key: 'corpusLabel', label: '语料版本标签', value: meta?.corpus_version_label },
+    { key: 'corpusHash', label: 'MySQL 语料清单 SHA-256', value: corpusHash },
+    { key: 'corpusCount', label: 'MySQL vectorized 块数', value: meta?.corpus_manifest?.count },
+    { key: 'collectionHash', label: 'Milvus 集合 SHA-256', value: collectionHash },
+    { key: 'collectionCount', label: 'Milvus 集合总向量数', value: meta?.collection_manifest?.count },
+    { key: 'effectiveCount', label: 'MySQL/Milvus 有效交集块数', value: meta?.effective_collection_chunks },
+    { key: 'effectiveSources', label: '有效交集来源', value: meta?.effective_collection_sources ? meta.effective_collection_sources.join('、') || '无' : undefined },
+    { key: 'corpusSources', label: 'MySQL 语料清单来源', value: meta?.corpus_manifest?.sources ? meta.corpus_manifest.sources.join('、') || '无' : undefined },
+    { key: 'retrievedSources', label: '本次实际召回来源', value: meta?.retrieved_sources ? meta.retrieved_sources.join('、') || '无' : undefined },
+  ].filter(({ value }) => value != null && value !== '').map(({ key, label, value }) => ({
+    key, label, children: <span style={{ overflowWrap: 'anywhere' }}>{value}</span>,
+  }));
+  const missing = [
+    { label: '生成时间', value: report.generated_at },
+    { label: '题集指纹', value: meta?.dataset_sha256 },
+    { label: '语料指纹', value: corpusHash },
+    { label: '集合指纹', value: collectionHash },
+    { label: 'Embedding 模型', value: meta?.embedding_model },
+    { label: 'Embedding 维度', value: meta?.embedding_dimension },
+    { label: '评审独立性', value: judgeModel ? meta?.judge_independent : true },
+  ].filter(({ value }) => value == null || value === '').map(({ label }) => label);
+  return <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Text type="secondary">以下配置来自本报告生成时的记录，不代表当前后端设置。</Text>
+    {legacy
+      ? <Text type="secondary">历史报告未采集完整运行快照；这里只展示已有信息，完成新版评估后会更新。</Text>
+      : missing.length > 0 && <Alert showIcon type="warning" message="报告缺少关键运行记录" description={`本报告未提供：${missing.join('、')}。这些值不能由当前配置或旧报告推断。`} />}
+    <Descriptions bordered size="small" column={{ xs: 1, md: 2 }} items={configuration} />
+    {meta?.model_metadata_source === 'configured_not_independently_verified' && <Text type="secondary">模型名称来自当时配置，未独立核验服务返回的模型身份。</Text>}
+    {evidence.length > 0 && <Collapse items={[{
+      key: 'evidence', label: '版本指纹与来源明细',
+      children: <Descriptions bordered size="small" column={1} items={evidence} />,
+    }]} />}
+  </Space>;
 }
 
 export function RagEvals() {
@@ -105,6 +154,7 @@ export function RagEvals() {
   const [split, setSplit] = useState('all');
   const [startError, setStartError] = useState('');
   const lastLoadedJobId = useRef<string | null>(null);
+  const queryClient = useQueryClient();
   const actor = useQuery({ queryKey: ['me'], queryFn: api.me, staleTime: Infinity });
   const report = useQuery({
     queryKey: ['rag-eval-report', mode],
@@ -117,7 +167,14 @@ export function RagEvals() {
   const workingJob = jobs.data?.items.find((item) => item.status === 'queued' || item.status === 'running');
   const startEvaluation = useMutation({
     mutationFn: () => ragApi.startJob(jobKind),
-    onSuccess: () => { setStartError(''); void jobs.refetch(); },
+    onSuccess: (job) => {
+      setStartError('');
+      // 立即展示 POST 返回的任务，不必等下一次轮询才从旧报告切到运行状态。
+      queryClient.setQueryData<{ items: RagJob[] }>(['rag-jobs'], (current) => ({
+        items: [job, ...(current?.items ?? []).filter((item) => item.id !== job.id)],
+      }));
+      void jobs.refetch();
+    },
     onError: (error) => setStartError(error instanceof Error ? error.message : '评估启动失败'),
   });
   useEffect(() => {
@@ -149,6 +206,8 @@ export function RagEvals() {
   const legacy = data?.legacy === true || data?.schema_version === 1;
   const isOnline = mode === 'online';
   const strategies = data?.strategies ?? {};
+  const evaluationRunning = latestEvalJob?.status === 'queued' || latestEvalJob?.status === 'running';
+  const evaluationProgress = latestEvalJob?.evaluationProgress;
 
   return <div className="workspace-shell rag-shell">
     <PageHeader actor={actor.data} />
@@ -158,14 +217,34 @@ export function RagEvals() {
         { key: 'offline', label: '离线检索策略' }, { key: 'online', label: '在线工作流' },
       ]} />
       {apiMode === 'mock' ? <Alert showIcon type="warning" message="演示模式不提供真实评估报告" description="请切换 VITE_API_MODE=remote 并使用员工账号登录；mock 不生成评估结果。" /> : <>
+        <Alert showIcon type="info" message="允许同模型评审" description="未配置 EVAL_JUDGE_* 时复用客服 OPENAI_* 模型；配置了评审服务则优先使用该服务。同模型评审可能偏乐观，报告会标记是否独立，建议人工抽查。" />
         {startError && <Alert showIcon type="error" message={startError} closable onClose={() => setStartError('')} />}
         {jobs.isError && <Alert showIcon type="error" message="评估任务状态读取失败" description={jobs.error instanceof Error ? jobs.error.message : '请检查后端服务'} action={<Button size="small" onClick={() => void jobs.refetch()}>重试</Button>} />}
-        {latestEvalJob && <Alert showIcon type={latestEvalJob.status === 'failed' ? 'error' : latestEvalJob.status === 'completed' ? 'success' : 'info'} message={latestEvalJob.status === 'completed' ? '评估任务已完成' : latestEvalJob.status === 'failed' ? '评估失败，旧报告仍可查看' : '评估正在后台运行'} description={latestEvalJob.error || (latestEvalJob.status === 'completed' ? '新报告已写入，页面会自动刷新。' : latestEvalJob.progress) || `启动时间：${new Date(latestEvalJob.createdAt).toLocaleString('zh-CN')}`} />}
+        {latestEvalJob && <Alert
+          showIcon
+          icon={evaluationRunning ? <Spin size="small" /> : undefined}
+          type={latestEvalJob.status === 'failed' ? 'error' : latestEvalJob.status === 'completed' ? 'success' : 'info'}
+          message={latestEvalJob.status === 'completed' ? '评估任务已完成' : latestEvalJob.status === 'failed' ? '评估失败，旧报告仍可查看' : latestEvalJob.status === 'queued' ? '评估任务已排队' : '评估正在后台运行'}
+          description={<>
+            <Paragraph>{latestEvalJob.error || (latestEvalJob.status === 'completed' ? '新报告已写入，页面会自动刷新。' : latestEvalJob.progress) || '正在初始化评估，请稍候。'}</Paragraph>
+            {latestEvalJob.status === 'failed' && latestEvalJob.progress && <Paragraph type="secondary">失败阶段：{latestEvalJob.progress}</Paragraph>}
+            {evaluationProgress && <>
+              <Text>已完成 {evaluationProgress.completed}/{evaluationProgress.total} 次评估</Text>
+              <Progress
+                aria-label="评估完成进度"
+                percent={evaluationProgress.total > 0 ? Math.floor(evaluationProgress.completed / evaluationProgress.total * 100) : 0}
+                status={latestEvalJob.status === 'failed' ? 'exception' : latestEvalJob.status === 'completed' ? 'success' : 'active'}
+              />
+              <Text type="secondary">每次检索、生成与评审完成后推进；次数达到总数后仍需等待报告写入完成。</Text>
+            </>}
+          </>}
+        />}
         {report.isLoading && <Card><Spin /></Card>}
         {report.isError && <Alert showIcon type="error" message="评估报告加载失败" description={report.error instanceof Error ? report.error.message : '请检查后端服务'} action={<Button size="small" onClick={() => void report.refetch()}>重试</Button>} />}
         {data && <>
           {legacy && <Alert showIcon type="warning" message="历史报告（schema v1）" description="此报告沿用旧版 15 题结果，不含 v2 完整性、误拒答、应拒未拒、模型/token 与留出集指标；不能作为新题集基线。" />}
           {data.execution_environment === 'fixture' && <Alert showIcon type="info" message="Fixture 环境结果" description="此结果用于确定性工作流验证，不代表真实模型、知识库或依赖环境验收。" />}
+          {data.metadata?.judge_independent === false && <Alert showIcon type="warning" message="本报告使用非独立评审模型" description="评审与回答生成使用相同 provider/model，评分可能存在相关性偏差，不应作为独立质量验收结论。" />}
           {data.metadata?.unobserved_sources?.length ? <Alert showIcon type="warning" message="题集来源覆盖不完整" description={`当前报告未观察到这些gold来源：${data.metadata.unobserved_sources.join('、')}；不可将该语料覆盖表述为完整在线验收。`} /> : null}
           <Card className="rag-card" title="报告与运行配置"><Metadata report={data} /></Card>
           {overall && <Card className="rag-card" title={isOnline ? '在线工作流总体指标' : '离线总体指标'}>

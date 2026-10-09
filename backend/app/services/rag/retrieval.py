@@ -18,7 +18,7 @@ from app.persistence.mysql import knowledge as knowledge_repo
 from app.persistence.mysql.knowledge import KnowledgeChunkRow
 from app.persistence.milvus.knowledge_store import KnowledgeVectorStore
 
-from .embedding import EmbeddingClient, EmbeddingError
+from .embedding import EmbeddingClient
 from .embedding_text import build_query_embedding_text
 
 RetrievalStrategy = Literal["dense", "bm25", "hybrid", "hybrid_rerank"]
@@ -36,7 +36,15 @@ _SYNONYMS = {
 
 
 class RetrievalError(RuntimeError):
-    """检索依赖不可用或返回结果不符合约定。"""
+    """受控的检索失败阶段；底层细节只保留在异常链，不进入浏览器文案。"""
+
+    def __init__(self, stage: Literal["embedding", "milvus", "rerank"]) -> None:
+        self.stage = stage
+        super().__init__({
+            "embedding": "生成问题向量失败。",
+            "milvus": "Milvus 集合校验或检索失败。",
+            "rerank": "重排模型加载、调用或结果校验失败。",
+        }[stage])
 
 
 @dataclass(frozen=True)
@@ -96,7 +104,7 @@ def _load_reranker(model_name: str):
     try:
         from FlagEmbedding import FlagReranker
     except ImportError as exc:
-        raise RetrievalError("缺少 FlagEmbedding，无法运行 bge-reranker-v2-m3 精排。") from exc
+        raise RetrievalError("rerank") from exc
     return FlagReranker(model_name, use_fp16=False)
 
 
@@ -113,12 +121,12 @@ def _rerank(question: str, chunks: list[KnowledgeChunkRow]) -> list[float]:
     except RetrievalError:
         raise
     except Exception as exc:
-        raise RetrievalError(f"重排模型调用失败：{exc}") from exc
+        raise RetrievalError("rerank") from exc
     # 单候选时某些 FlagEmbedding 版本返回 numpy 标量，它不是 Python float。
     if isinstance(raw_scores, (float, int)) or not hasattr(raw_scores, "__len__"):
         raw_scores = [raw_scores]
     if len(raw_scores) != len(chunks):
-        raise RetrievalError("重排模型返回的分数条数与候选条数不一致。")
+        raise RetrievalError("rerank")
     # 对极端 logit 使用稳定写法，保持分数在 0..1。
     normalized_scores: list[float] = []
     for score in raw_scores:
@@ -171,7 +179,7 @@ def semantic_search(
     )
     lexical_query = expand_retrieval_query(normalized)
 
-    # 先校验集合，确保旧 schema 即使遇到未启动的向量服务，也能给出明确迁移提示。
+    # 在向量调用前检查集合可用性；失败阶段使用固定文案，底层细节保留在异常链。
     try:
         configured_dimension = client.expected_dimension if client else rag_settings.embedding_dimension
         if store is not None and collection is not None and store.collection != collection:
@@ -182,16 +190,16 @@ def semantic_search(
         if selected != "dense":
             active_store.require_bm25_schema(check_dimension=selected != "bm25")
     except Exception as exc:
-        raise RetrievalError(f"Milvus 集合不可用于 {selected} 检索：{exc}") from exc
+        raise RetrievalError("milvus") from exc
 
     vector = None
     active_client = None
     if selected != "bm25":
-        active_client = client or EmbeddingClient()
         try:
+            active_client = client or EmbeddingClient()
             vector = active_client.embed_documents([build_query_embedding_text(normalized)])[0]
-        except EmbeddingError as exc:
-            raise RetrievalError(f"生成问题向量失败：{exc}") from exc
+        except Exception as exc:
+            raise RetrievalError("embedding") from exc
 
     try:
         if selected == "dense":
@@ -201,7 +209,7 @@ def semantic_search(
         else:
             matches = active_store.hybrid_search(vector, lexical_query, limit=pool, filter=expression)
     except Exception as exc:
-        raise RetrievalError(f"Milvus 检索失败：{exc}") from exc
+        raise RetrievalError("milvus") from exc
     if not matches:
         return []
 

@@ -21,11 +21,13 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 from uuid import uuid4
 
-from app.config.rag import BACKEND_DIR, rag_settings
+from app.config.rag import BACKEND_DIR, EvaluationConfigurationError, rag_settings
+from app.config.settings import settings
 from app.persistence.mysql import conversation_mining as mining_repo
 from app.persistence.mysql import knowledge as knowledge_repo
 from app.services.rag import indexing
 from app.services.rag.runtime_control import AlreadyRunningError, MiningRuntimeControl, default_lock_path
+from app.services.rag.retrieval import RetrievalError
 
 _JOB_TYPES = {"import-markdown", "import-markdown-all", "import-faq", "mine", "vectorize", "cleanup", "evaluate", "evaluate-online", "low-confidence-review"}
 _lock = Lock()
@@ -39,9 +41,16 @@ def _now() -> str:
 
 
 def _safe_error(exc: Exception) -> str:
-    """异常可能携带带凭据的 URL，只向浏览器给出安全的故障分类。"""
-    if isinstance(exc, AlreadyRunningError):
+    """只返回固定安全建议；检索阶段来自受控字段，不暴露底层异常或 URL。"""
+    if isinstance(exc, (AlreadyRunningError, EvaluationConfigurationError)):
         return str(exc)
+    if isinstance(exc, RetrievalError):
+        advice = {
+            "embedding": "问题向量生成失败，请检查向量服务是否启动，以及配置模型和维度是否一致。",
+            "milvus": "Milvus 集合校验或检索失败，请检查 Milvus 连接、集合和索引配置。",
+            "rerank": "重排失败，请检查本地重排模型权重和 FlagEmbedding 运行依赖。",
+        }.get(exc.stage, "检索失败，请检查后端检索依赖。")
+        return f"RetrievalError：{advice}"
     return f"{type(exc).__name__}：操作失败，请检查后端服务、配置和依赖。"
 
 
@@ -405,16 +414,33 @@ def _execute_job(kind: str, job: dict[str, Any], control: MiningRuntimeControl, 
             result = indexing.vectorize_pending()
         elif kind in {"evaluate", "evaluate-online"}:
             # 与建库任务共用锁，避免控制台在评估期间改动知识块和向量。
+            _set_progress(job, "正在加载评估程序")
             from evals.run_customer_rag import run, write_report
+
+            # 网页允许同模型评审；完全未配置 judge 时才整组复用客服模型，
+            # 避免把独立模型地址与客服密钥拼接成一个错误或泄露凭据的请求。
+            judge_options: dict[str, Any] = {}
+            if not any(os.getenv(name, "").strip() for name in (
+                "EVAL_JUDGE_MODEL", "EVAL_JUDGE_BASE_URL", "EVAL_JUDGE_API_KEY",
+            )):
+                judge_options = {
+                    "judge_model": settings.openai_model,
+                    "judge_base_url": settings.openai_base_url,
+                    "judge_key_env": "OPENAI_API_KEY",
+                }
 
             report = run(
                 collection=rag_settings.milvus_collection,
                 mode="online" if kind == "evaluate-online" else "offline",
-                on_progress=lambda done, total, strategy, case_id: _set_progress(
-                    job, f"已完成 {done}/{total}：{strategy} · {case_id}"
+                allow_shared_judge=True,
+                **judge_options,
+                on_status=lambda note: _set_progress(job, note),
+                on_progress=lambda done, total, _strategy, _case_id: _set_evaluation_progress(
+                    job, done, total
                 ),
             )
             filename = "customer_workflow_v2.json" if kind == "evaluate-online" else "customer_rag_v2.json"
+            _set_progress(job, "评估结果已汇总，正在写入报告")
             write_report(report, BACKEND_DIR / "evals" / "reports" / filename)
             strategy_count = len(report["strategies"])
             result = {"questions": len(report["cases"]) // strategy_count,
@@ -443,6 +469,12 @@ def _set_progress(job: dict[str, Any], note: str) -> None:
         job["progress"] = note[:200]
 
 
+def _set_evaluation_progress(job: dict[str, Any], completed: int, total: int) -> None:
+    """次数与阶段分开存储；计数不根据耗时估算，也不在单轮执行中虚增。"""
+    with _lock:
+        job["evaluationProgress"] = {"completed": completed, "total": total}
+
+
 def start_job(kind: str, relative_name: str | None = None) -> dict[str, Any]:
     """全控制台同一时刻只运行一项写任务，跨 API 进程用同一把文件锁拦截。"""
     if kind not in _JOB_TYPES:
@@ -457,7 +489,8 @@ def start_job(kind: str, relative_name: str | None = None) -> dict[str, Any]:
             raise AlreadyRunningError("已有建库任务正在运行，请等待完成")
         control.acquire()
         job: dict[str, Any] = {
-            "id": str(uuid4()), "kind": kind, "status": "queued", "progress": None,
+            "id": str(uuid4()), "kind": kind, "status": "queued",
+            "progress": "等待评估启动" if kind in {"evaluate", "evaluate-online"} else None,
             "createdAt": _now(), "startedAt": None, "finishedAt": None,
             "error": None, "result": None,
         }

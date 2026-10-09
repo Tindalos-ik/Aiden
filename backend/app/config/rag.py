@@ -24,6 +24,13 @@ from . import settings as _settings  # noqa: F401
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
+class EvaluationConfigurationError(ValueError):
+    """评估配置阻断；消息只含固定配置项与操作建议，可安全返回员工页面。
+
+    不得携带环境变量值、服务响应或底层异常文本，其他异常仍须走通用脱敏。
+    """
+
+
 def _env_int(name: str, default: int) -> int:
     """读取整数环境变量；为空时使用默认值，非法值直接报错而不是静默取默认。"""
     raw = os.getenv(name, "").strip()
