@@ -1,0 +1,9 @@
+{
+  "version": "vibe-topics-fixed-v2",
+  "source": "Supervised Vibe worker instructions approved before any split or test expressions existed",
+  "scene_authoring": "作者good和fast直接创作独立场景(product,stage,problem,user_request,canonical_semantics)，先场景后组切分再创作表达。每个场景必须真正独立的业务阶段、具体问题、诉求和关键条件，不得只换商品名作为新场景。130个单标签场景每类；good10类及500双90三，fast7类及300双50三（真实纠标预留允许额外）。商品鞋服家电数码日用品交叉；size必须明确用户选码、合身尺寸请求，不能只有接口尺寸。other仅清楚与电商无关生活科学文化数学自然问题，绝不含商城社区或客服投诉。多标签同一购物链真实诉求，不机械拼接。不要真实身份、号码、地址、品牌。字面紧凑表格可机械解码，但文本与语义由worker逐条直接创作。",
+  "semantic_review": "根据两个canonical_semantics判断阶段、具体障碍、用户请求、关键限制实质是否相同。商品变化不是独立性理由，不能因同类就判重复。逐对直接作出duplicate和reason；确认重复取传递闭包后组切分；保留实际决策，不伪造全对保证或人工确认。",
+  "expression_authoring": "每单标签场景直接创作两条中文自然用户原话，每双三标签场景三条，全部字面字符串。不得通过拼接场景字段、固定模板、suffix、标点改写膨胀。各表达保留全部明确诉求且不添加不相关诉求。独立口语措辞和句型，混合短长、标准与口语、礼貌焦急抱怨情绪，少量真实错字或词重复、语序变化。部分避免标签关键词，部分有否定、条件、转折、引用作硬负例但目标诉求仍清楚。不能给答案、标签、注释或指令。先冻结场景分组与80/10/10组split；表达绑定同一冻结manifest hash；测试场景不作为训练改写源。",
+  "blind_review": "另一worker仅看到id和original_question，不看到labels、scene、target或split。逐条读实际原话，直接给labels/status/naturalness/flags/evidence；标签按taxonomyaiden-topic-v1顺序，status predicted/uncertain/insufficient_context，后两者labels为空；naturalness1到5；flags列问题。每个标签证据必须原文中的字面引句。背景、否定、引用、未明确请求的假设不加标签，坏了不推断退货/维修，断码不自动尺码，投诉不自动评价。other仅非电商清楚内容。不能用关键词程序伪装模型盲审；不能把crossworker自动判断称人工真值。",
+  "pending_delivery": "human_reviewed=false privacy_confirmed=false annotation_status=prelabel semantic_review.confirmed=false，原生prepare/validate应拒绝。最终约5000，3250单1500双250三，每类至少100合并后独立组，每组最多5。疑义标签不盲目重标，拒绝或保留disputes。保留生成排除计数、原始实际批次、prompt/config模型worker身份hash、场景与组lineage及待审抽样清单。禁止外部provider API，禁止DeepSeek数据进入v2。精确offline重放可复现捕获文本；全新Vibe生成不保证bitwise一致。"
+}

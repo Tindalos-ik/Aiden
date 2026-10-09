@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 import hashlib
 import json
@@ -17,7 +18,7 @@ sys.path.insert(0, str(BACKEND))
 from app.services.topic_classification.data import INPUT_VERSION, dataset_coverage, fingerprint, input_hash, prepare_input
 from app.services.topic_classification.taxonomy import LABEL_IDS, TAXONOMY_VERSION, validate_labels
 
-CORE_NAMES={'dataset.json','train.jsonl','validation.jsonl','test.jsonl','provenance.jsonl','ambiguity_challenge.jsonl','rejections.jsonl','disputes.jsonl','scenes.jsonl','scene_split_manifest.json','final_split_manifest.json','semantic_candidates.jsonl','semantic_candidates_manifest.json','prompt_snapshot.json','config_snapshot.json','scenario_exclusions.json','variant_identity_audit.json','blind_review_index.json'}
+CORE_NAMES={'dataset.json','train.jsonl','validation.jsonl','test.jsonl','provenance.jsonl','ambiguity_challenge.jsonl','rejections.jsonl','disputes.jsonl','scenes.jsonl','scene_split_manifest.json','final_split_manifest.json','semantic_candidates.jsonl','semantic_candidates_manifest.json','prompt_snapshot.json','config_snapshot.json','scenario_exclusions.json','variant_identity_audit.json','blind_review_index.json','style_audit_candidates.json','language_coverage_additions.json','language_coverage_audit.json'}
 
 
 def save(path: Path, value):
@@ -85,7 +86,41 @@ def forms(text):
     if len(text)>=65: result.append('long')
     if not re.search(r'咋|啥|呗|嘛|咱|[“”「」]|(.)\1{2,}',text): result.append('standard')
     if re.search(r'(.)\1{2,}',text): result.append('word_repeat')
-    return {'method':'observable_text_heuristics_not_human_truth','forms':result,'length':len(text),'typo':'not_claimed_without_validated_review'}
+    return {'method':'observable_text_heuristics_approximate_overlapping_not_human_truth','forms':result,'length':len(text)}
+
+
+REQUIRED_LANGUAGE_STYLES={'standard','short','colloquial_short','colloquial_long','long_narrative','emotional','polite','urgent','complaint','natural_typo','word_repetition','word_order_variation','keyword_free_clear','keyword_hard_negative','negation','contrast','conditional','quotation','natural_multi_request'}
+
+
+def language_examples(root):
+    """Only literal model-audited candidates; no automatic inference of typo/order."""
+    aliases={'emotion':'emotional','repetition':'word_repetition','word_order_context_fronted':'word_order_variation','word_order_request_led':'word_order_variation','condition':'conditional'}
+    result=[]
+    for name in ('style_audit_candidates.json','language_coverage_additions.json'):
+        artifact=json.loads((root/name).read_text(encoding='utf-8'))
+        for example in artifact['style_examples']:
+            style=aliases.get(example['style'],example['style'])
+            if style not in REQUIRED_LANGUAGE_STYLES: continue
+            review=example.get('opposite_review',{})
+            if review and (review.get('score',0)<4 or review.get('flags')): continue
+            result.append({**example,'style':style,'excerpt':example.get('excerpt',example.get('text')),'audit_source':name})
+    return result
+
+
+def language_coverage(chosen,examples):
+    by_id={row['id']:row for row in chosen}; supported=defaultdict(list)
+    for example in examples:
+        row=by_id.get(example['source_sample_id'])
+        if row is None: continue
+        excerpt=example['excerpt']
+        if not isinstance(excerpt,str) or not excerpt or excerpt not in row['original_question']:
+            raise ValueError('language-audit excerpt differs from captured original expression')
+        if example.get('input_hash',row['input_hash'])!=row['input_hash']:
+            raise ValueError('language-audit input hash differs from captured expression')
+        review=row['prelabel_history'][0]
+        supported[example['style']].append({'sample_id':row['id'],'input_hash':row['input_hash'],'literal_excerpt':excerpt,'question_length':len(row['original_question']),'reasoning':example['reasoning'],'audit_source':example['audit_source'],'crossworker_review_id':review['review']['review_id'],'crossworker_author':review['author'],'naturalness':review['review']['naturalness'],'flags':review['review']['flags'],'human_reviewed':False})
+    approximations=Counter(form for row in chosen for form in forms(row['original_question'])['forms'])
+    return {'status':'actual_final_retained_model_examples_not_human_audit','sample_count':len(chosen),'human_reviewed':False,'privacy_confirmed':False,'required_styles':sorted(REQUIRED_LANGUAGE_STYLES),'model_audited_example_counts':{style:len(supported[style]) for style in sorted(REQUIRED_LANGUAGE_STYLES)},'style_examples':dict(supported),'approximate_heuristic_counts':dict(approximations),'heuristic_method':'Regex and character lengths only; approximate and overlapping. Emotional 烦 excludes 麻烦. No typo/order/semantic classifier and no extrapolation from the selected model examples.'}
 
 
 def scenes(root):
@@ -193,6 +228,8 @@ def assemble(root,seed):
             reviews[source_id]={**review,'review_id':opaque,'id':source_id}
             review_authors[source_id]=batch['author']
     candidates=[]; rejected=[]; disputed=[]; expression_ids=set(); generated=Counter()
+    style_examples=language_examples(root)
+    style_required_ids={example['source_sample_id'] for example in style_examples}
     for _,batch in batches(root,'expressions'):
         generated[batch['author']['flavor']]+=sum(len(item['variants']) if isinstance(item,dict) else len(dict(zip(batch['columns'],item,strict=True))['variants']) for item in batch['expressions'])
         if batch.get('split_manifest_hash')!=frozen['manifest_hash']: raise ValueError('expression batch must bind frozen pre-expression scene split')
@@ -228,6 +265,9 @@ def assemble(root,seed):
                     groups.union(a['scenario_id'],b['scenario_id'])
     allocation=allocate(groups,seed)
     kept=[]; counts=Counter(); hashes=set(); normalized_kept=set()
+    # Required language examples still pass the same blind gate; prioritize only
+    # before the whole-group five-variant cap, never bypass quality or labels.
+    candidates.sort(key=lambda row:(row['id'] not in style_required_ids,row['id']))
     for row in candidates:
         d=reviews.get(row['id']); text=row['original_question']
         if not d or review_authors[row['id']]['flavor']==row['generation_author']['flavor']:
@@ -247,12 +287,12 @@ def assemble(root,seed):
     target={1:3250,2:1500,3:250}; chosen=[]
     for n in (1,2,3):
         bucket=[r for r in kept if len(r['labels'])==n]; random.Random(seed+n).shuffle(bucket)
-        mandatory=[]; used=set()
+        mandatory=[row for row in bucket if row['id'] in style_required_ids]; used={row['id'] for row in mandatory}
         if n==1:
             for label in LABEL_IDS:
-                seen=set()
+                seen={row['group_id'] for row in mandatory if row['labels']==[label]}
                 for r in bucket:
-                    if r['labels']==[label] and r['group_id'] not in seen and len(seen)<100:
+                    if r['id'] not in used and r['labels']==[label] and r['group_id'] not in seen and len(seen)<100:
                         seen.add(r['group_id']); mandatory.append(r); used.add(r['id'])
         selected=mandatory+[r for r in bucket if r['id'] not in used][:max(0,target[n]-len(mandatory))]
         chosen.extend(selected); selected_ids={r['id'] for r in selected}
@@ -274,14 +314,19 @@ def assemble(root,seed):
             if d.get('labels') or d.get('status') not in ('uncertain','insufficient_context') or normalized in normalized_kept or any(SequenceMatcher(None,normalized,match_texts[r['id']]).ratio()>=.9 for r in chosen): rejected.append({'id':item['id'],'reason':'ambiguity_concrete_or_duplicate'}); continue
             hashes.add(input_hash(text)); normalized_kept.add(normalized); amb.append({**item,'labels':[],'classification_status':d['status'],'input_hash':input_hash(text),'source':'synthetic','human_reviewed':False,'privacy_confirmed':False,'annotation_status':'prelabel','blind_review':d})
     support={label:len({r['group_id'] for r in chosen if label in r['labels']}) for label in LABEL_IDS}
-    complete=len(chosen)==5000 and all(n>=100 for n in support.values()) and not any(r['reason']=='missing_crossworker_blind_review' for r in disputed)
+    style_audit=language_coverage(chosen,style_examples)
+    missing_styles=sorted(style for style in REQUIRED_LANGUAGE_STYLES if not style_audit['style_examples'].get(style))
+    missing_style_samples=sorted(style_required_ids-{row['id'] for row in chosen})
+    review_coverage_sha256=hashlib.sha256('\n'.join(sorted(f'{review["review_id"]}\t{blind_index[review["review_id"]]["input_hash"]}\t{review_authors[source_id]["flavor"]}' for source_id,review in reviews.items())).encode('utf-8')).hexdigest()
+    complete=len(chosen)==5000 and all(n>=100 for n in support.values()) and not any(r['reason']=='missing_crossworker_blind_review' for r in disputed) and not missing_styles and not missing_style_samples
     if not complete:
-        diagnostic={'publication_status':'provisional_only_no_final_core_written','raw_supervised_attempts':sum(generated.values()),'eligible_candidates':len(candidates),'qa_kept':len(kept),'provisional_selected':len(chosen),'independent_groups_per_label':support,'missing_crossworker_reviews':sum(r['reason']=='missing_crossworker_blind_review' for r in disputed),'disputes_by_reason':dict(Counter(r['reason'] for r in disputed)),'rejections_by_reason':dict(Counter(r['reason'] for r in rejected))}
+        diagnostic={'snapshot_utc':datetime.now(timezone.utc).isoformat(),'publication_status':'provisional_only_no_final_core_written','final_published_count':None,'review_coverage_sha256':review_coverage_sha256,'active_reviewed_unique_ids':len(reviews),'raw_supervised_attempts':sum(generated.values()),'eligible_candidates':len(candidates),'qa_kept':len(kept),'provisional_selected':len(chosen),'independent_groups_per_label':support,'missing_crossworker_reviews':sum(r['reason']=='missing_crossworker_blind_review' for r in disputed),'missing_language_styles':missing_styles,'missing_required_style_samples':missing_style_samples,'disputes_by_reason':dict(Counter(r['reason'] for r in disputed)),'rejections_by_reason':dict(Counter(r['reason'] for r in rejected))}
         save(root/'provisional_diagnostic.json',diagnostic)
         print(json.dumps(diagnostic,ensure_ascii=True))
         return 2
     save(root/'final_split_manifest.json',{'seed':seed,'origins':allocation,'reason':'entire merged semantic origins reassigned after lexical duplicate detection','semantic_decisions':decisions})
     save(root/'dataset.json',data)
+    save(root/'language_coverage_audit.json',style_audit)
     for k,v in splits.items(): jsonl(root/f'{k}.jsonl',v)
     jsonl(root/'provenance.jsonl',[{'id':r['id'],'sample_id':r['id'],'source':'synthetic','human_reviewed':False,'privacy_confirmed':False,'split':allocation[r['scenario_id']]['split'],'scenario_id':r['scenario_id'],'origin_group_id':r['group_id'],'group_id':r['group_id'],'generation_batch':r['generation_batch'],'scenario_batch':index[r['scenario_id']]['generation_batch'],'author':r['generation_author'],'product':index[r['scenario_id']]['product'],'language_forms':forms(r['original_question']),'input_hash':r['input_hash']} for r in chosen])
     jsonl(root/'ambiguity_challenge.jsonl',amb); jsonl(root/'rejections.jsonl',rejected); jsonl(root/'disputes.jsonl',disputed)
@@ -289,6 +334,7 @@ def assemble(root,seed):
     core_files.extend(p for p in (root/'raw').glob('*.json') if p.is_file())
     hashes={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in core_files}
     manifest={'dataset_version':dataset_version,'delivery_status':'pending_human_review','taxonomy_version':TAXONOMY_VERSION,'label_ids':list(LABEL_IDS),'dataset_hash':digest,'split_hashes':data['split_hashes'],'file_sha256':hashes,'sample_count':len(chosen),'label_cardinality':dict(Counter(len(r['labels']) for r in chosen)),'independent_groups_per_label':support,'generated_counts':{'scenes':len(items),'eligible_scenes':sum(groups.find(s['scenario_id']) not in excluded_groups for s in items),'raw_supervised_attempts':sum(generated.values()),'supervised_by_author':dict(generated),'unique_sample_ids':len(expression_ids),'eligible_expressions':len(candidates),'active_crossworker_reviews':len(reviews),'unreviewed_supervised_candidates':sum(r['reason']=='missing_crossworker_blind_review' for r in disputed if r['id'] in expression_ids),'blind_review_retained':len(kept),'final':len(chosen),'ambiguity_raw':ambiguity_raw,'ambiguity_retained':len(amb)},'excluded_by_reason':dict(Counter(r['reason'] for r in rejected)),'unresolved_disputes':len(disputed),'disputes_by_reason':dict(Counter(r['reason'] for r in disputed)),'language_form_counts':dict(Counter(f for r in chosen for f in forms(r['original_question'])['forms'])),'sampled_human_audit_ids':random.Random(seed).sample([r['id'] for r in chosen],min(100,len(chosen))),'human_reviewed':False,'privacy_confirmed':False,'semantic_review_confirmed':False,'seed':seed,'seed_scope':'offline group assignment/quota only; fresh Vibe model outputs not bitwise reproducible','review_limit':'Cross-worker blind automated review, not human truth. Semantic candidate review not exhaustive all-pairs guarantee.','generation_method':'supervised Vibe literal worker tool writes, no provider API','config':config}
+    manifest.update(review_coverage_sha256=review_coverage_sha256,language_coverage_audit='language_coverage_audit.json',language_form_count_method='observable regex/length approximations, overlapping; semantic examples audited separately, not human truth')
     save(root/'manifest.json',manifest)
     save(root/'status.json',{'phase':'complete' if complete else 'needs_more_actual_worker_batches','retained':len(chosen),'independent_groups_per_label':support,'split_counts':{k:len(v) for k,v in splits.items()},'external_provider_calls':0,'human_reviewed':False})
     print(json.dumps({'retained':len(chosen),'complete':complete,'groups':support},ensure_ascii=True))
@@ -352,7 +398,7 @@ def replay(source,output,seed):
     for name,expected in manifest['file_sha256'].items():
         if hashlib.sha256((source/name).read_bytes()).hexdigest()!=expected: raise ValueError(f'captured core hash changed: {name}')
     output.mkdir(parents=True)
-    inputs=CORE_NAMES-{'dataset.json','train.jsonl','validation.jsonl','test.jsonl','provenance.jsonl','ambiguity_challenge.jsonl','rejections.jsonl','disputes.jsonl','final_split_manifest.json'}
+    inputs=CORE_NAMES-{'dataset.json','train.jsonl','validation.jsonl','test.jsonl','provenance.jsonl','ambiguity_challenge.jsonl','rejections.jsonl','disputes.jsonl','final_split_manifest.json','language_coverage_audit.json'}
     for name in sorted(inputs):
         if (source/name).is_file(): shutil.copy2(source/name,output/name)
     (output/'raw').mkdir()

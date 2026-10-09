@@ -17,6 +17,7 @@ class Cursor(BaseModel):
     source_id: UUID
 class BatchRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    model_key: str = Field(min_length=1, max_length=100, pattern=r'^[A-Za-z0-9_-]+$')
     start_at: datetime | None = None
     end_at: datetime | None = None
     limit: int = Field(default=100, ge=1, le=5000)
@@ -24,6 +25,7 @@ class BatchRequest(BaseModel):
     after: Cursor | None = None
 class EvaluationRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    model_key: str = Field(min_length=1, max_length=100, pattern=r'^[A-Za-z0-9_-]+$')
     batch_size: int = Field(default=32, ge=1, le=500)
 
 def utc(value):
@@ -55,12 +57,14 @@ def db_call(fn, **kwargs):
 def runtime_call(fn):
     try:
         return fn()
+    except console.UnknownModel:
+        raise HTTPException(404, detail={'code': 'unknown_model_key', 'message': '执行模型未注册，未回退到其他模型'}) from None
     except Exception:
         raise HTTPException(503, detail=console.safe_error('runtime_unavailable')) from None
 
 @router.get('/availability')
-def availability():
-    return runtime_call(console.availability)
+def availability(model_key: str | None = Query(None, min_length=1, max_length=100)):
+    return runtime_call(lambda: console.availability(model_key))
 @router.get('/jobs')
 def jobs():
     return {'items': runtime_call(console.jobs)}
@@ -71,9 +75,11 @@ def job_detail(job_id: UUID):
         raise HTTPException(404, detail={'code': 'job_not_found'})
     return job
 
-def launch(kind, params):
+def launch(kind, params, model_key):
     try:
-        return console.start(kind, params)
+        return console.start(kind, params, model_key=model_key)
+    except console.UnknownModel:
+        raise HTTPException(404, detail={'code': 'unknown_model_key', 'message': '执行模型未注册，未回退到其他模型'}) from None
     except AlreadyRunningError:
         raise HTTPException(409, detail={'code': 'job_already_running', 'message': '已有主题任务运行'}) from None
     except console.PrerequisitesBlocked as exc:
@@ -85,10 +91,21 @@ def start_batch(body: BatchRequest):
     start, end = scope(body.start_at, body.end_at)
     return launch('batch', {'start_at': start.isoformat() if start else None, 'end_at': end.isoformat() if end else None,
                            'limit': body.limit, 'batch_size': body.batch_size,
-                           'after': {'created_at': utc(body.after.created_at).isoformat(), 'source_id': str(body.after.source_id)} if body.after else None})
+                           'after': {'created_at': utc(body.after.created_at).isoformat(), 'source_id': str(body.after.source_id)} if body.after else None}, body.model_key)
 @router.post('/jobs/evaluation', status_code=202)
 def start_evaluation(body: EvaluationRequest):
-    return launch('evaluation', {'batch_size': body.batch_size})
+    return launch('evaluation', {'batch_size': body.batch_size}, body.model_key)
+
+def label_prediction_sources(rows):
+    versions = {prediction['model_version'] for row in rows for field in ('current_prediction', 'latest_prediction')
+                if (prediction := row.get(field)) is not None}
+    origins = {version: console.version_source(version) for version in versions}
+    for row in rows:
+        for field in ('current_prediction', 'latest_prediction'):
+            if row.get(field) is not None:
+                row[field].update(origins[row[field]['model_version']])
+    return rows
+
 @router.get('/results')
 def results(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
             model_version: str | None = Query(None, max_length=255), start_at: datetime | None = None,
@@ -100,20 +117,21 @@ def results(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
         raise HTTPException(422, detail={'code': 'invalid_topic'})
     rows = db_call(repo.result_rows, model_version=model_version, start_at=start, end_at=end,
                    topic=topic, status=status, current_prediction=current_prediction, has_human=has_human)
-    return {'items': rows[offset:offset+limit], 'total': len(rows), 'limit': limit, 'offset': offset}
+    return {'items': label_prediction_sources(rows[offset:offset+limit]), 'total': len(rows), 'limit': limit, 'offset': offset}
 @router.get('/results/{source_id}')
 def result_detail(source_id: UUID, model_version: str | None = Query(None, max_length=255)):
     rows = db_call(repo.result_rows, source_id=str(source_id), model_version=model_version)
     if not rows:
         raise HTTPException(404, detail={'code': 'source_not_found'})
-    return rows[0]
+    return label_prediction_sources(rows)[0]
 @router.get('/stats')
 def stats(model_version: str = Query(min_length=1, max_length=255), start_at: datetime | None = None, end_at: datetime | None = None):
     start, end = scope(start_at, end_at)
-    return db_call(repo.statistics, model_version=model_version, start_at=start, end_at=end)
+    result = db_call(repo.statistics, model_version=model_version, start_at=start, end_at=end)
+    return {**result, **console.version_source(model_version)}
 @router.get('/reports')
-def reports():
-    return {'items': runtime_call(console.reports)}
+def reports(model_version: str | None = Query(None, min_length=1, max_length=255)):
+    return {'items': runtime_call(lambda: console.reports(model_version))}
 @router.get('/reports/{report_id}')
 def report_detail(report_id: UUID):
     try:

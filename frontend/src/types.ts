@@ -440,22 +440,35 @@ export interface RagEvalReport {
 // 员工专用真实编码器主题分类；mock 适配器不得使用。
 export interface TopicCheck { name: string; ready: boolean; code: string; message: string; missing_tables?: string[]; missing_columns?: Record<string, string[]> }
 export interface TopicCursor { created_at: string; source_id: string }
-export interface TopicBatchInput { start_at?: string; end_at?: string; limit: number; batch_size: number; after?: TopicCursor }
+export type TopicDataMode = 'human_reviewed' | 'synthetic_experiment';
+export interface TopicRegisteredModel {
+  model_key: string; display_name: string; model_version: string | null;
+  data_mode: TopicDataMode; evaluation_source: string | null;
+  training_summary: { epochs?: number; max_length?: number; batch_size?: number; learning_rate?: number };
+  blocked_reason: { code: string; message: string } | null; validated: boolean;
+}
+export interface TopicBatchInput { model_key: string; start_at?: string; end_at?: string; limit: number; batch_size: number; after?: TopicCursor }
 export interface TopicJob {
   id: string; kind: 'batch' | 'evaluation'; state: 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted';
   created_at: string; started_at: string | null; finished_at: string | null;
   model_version: string | null; taxonomy_version: string; parameters: Record<string, unknown>;
+  model_key: string | null; data_mode: TopicDataMode | null; evaluation_source: string | null;
+  artifact_identity: string | null; dataset_identity: string | null; dataset_hash: string | null;
+  split_hashes: { train?: string; validation?: string; test?: string } | null;
   result: { processed?: number; persisted?: number; stale_source?: number; next_cursor?: TopicCursor | null; report_id?: string } | null;
   error: { code: string; message: string; stage?: string } | null; report_id: string | null;
 }
 export interface TopicAvailability {
   taxonomy: { version: string | null; labels: Array<{ id: string; display: string; include: string; exclude: string }> };
   selected_model_version: string | null; model_versions: string[]; checks: TopicCheck[];
+  models: TopicRegisteredModel[]; selected_model_key: string | null;
+  data_mode: TopicDataMode | null; evaluation_source: string | null;
   can_classify: boolean; can_evaluate: boolean; active_job: TopicJob | null;
 }
 export interface TopicPrediction {
   id: string; input_hash: string; scores: Record<string, number>; predicted_labels: string[]; status: string;
   model_version: string; taxonomy_version: string; created_at: string; updated_at: string; current: boolean;
+  data_mode: TopicDataMode | null; evaluation_source: string | null;
 }
 export interface TopicHuman {
   id: string; input_hash: string; labels: string[]; status: string; reviewed_by_id: string;
@@ -476,9 +489,11 @@ export interface TopicReportSummary {
   id: string; created_at: string | null; model_version: string | null; taxonomy_version: string | null;
   dataset_hash: string | null; test_split_hash: string | null; available: boolean; reason: string | null;
   conclusions: TopicConclusions | null;
+  model_key: string | null; data_mode: TopicDataMode | null; evaluation_source: string | null;
 }
 export interface TopicStats {
   model_version: string; taxonomy_version: string; source_unique_count: number; review_unique_count: number;
+  data_mode: TopicDataMode | null; evaluation_source: string | null;
   linked_reviews_lifetime_occurrence_count: number;
   model: { source_count: number; scope_source_count: number; unclassified_count: number; status_counts: Record<string, number>; label_counts: Record<string, number> };
   human: { source_count: number; scope_source_count: number; unreviewed_count: number; status_counts: Record<string, number>; label_counts: Record<string, number> };
@@ -486,12 +501,13 @@ export interface TopicStats {
 }
 export interface TopicEvaluation {
   model_version: string; taxonomy_version: string; test_split_hash: string;
+  model_key: string | null; data_mode: TopicDataMode | null; evaluation_source: string | null;
   dataset_hash: string; split_hashes: { train: string; validation: string; test: string };
   metrics: { micro_f1: number | null; macro_f1_supported_classes: number | null; supported_class_count: number; unevaluable_classes: string[];
     per_class: Record<string, { support: number; evaluable: boolean; precision: number | null; recall: number | null; f1: number | null; tp: number; fp: number; fn: number }> };
   coverage: { samples: number; groups: number; multilabel_samples: number; label_support: Record<string, number> };
   status_metrics: { confusion: Record<string, number>; label_confusion_pairs: Record<string, number>; revision_needed_count: number; revision_needed_rate: number; completed_human_revisions: number; insufficient_context_is_uncertain_for_comparison: boolean };
-  errors: Array<{ id: string; redacted_text: string; human_truth_labels: string[]; expected_status: string; raw_prediction: unknown; missing: string[]; extra: string[]; human_revision: unknown }>;
+  errors: Array<{ id: string; redacted_text: string; human_truth_labels?: string[] | null; synthetic_prelabel_labels?: string[] | null; expected_status: string; raw_prediction: unknown; missing: string[]; extra: string[]; human_revision: unknown }>;
   elapsed_seconds: number; samples_per_second: number; baseline_configuration?: unknown; resource_usage: unknown; usage: unknown; cost: number | null;
 }
 export type ObservationStatus = 'success' | 'error' | 'unknown';

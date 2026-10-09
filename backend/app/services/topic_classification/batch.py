@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.persistence.mysql import topic_classification as repo
-from .data import prepare_input
+from .data import HUMAN_REVIEWED, prepare_input, require_data_mode
 from .model import EncoderPredictor
 from .taxonomy import TAXONOMY_VERSION
 
@@ -42,7 +42,11 @@ def _run_with_predictor(
     after: tuple[datetime, str] | None, limit: int, batch_size: int,
     on_outcome: Callable[[dict[str, Any], dict[str, str]], None] | None = None,
     on_stage: Callable[[str], None] | None = None,
+    data_mode: str = HUMAN_REVIEWED,
+    before_inference: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
+    metadata = getattr(predictor, 'metadata', {})
+    require_data_mode(metadata, data_mode)
     if not 1 <= limit <= 5000:
         raise ValueError("limit must be between 1 and 5000")
     if not 1 <= batch_size <= 500:
@@ -66,6 +70,8 @@ def _run_with_predictor(
             break
         if on_stage is not None:
             on_stage("inference")
+        if before_inference is not None:
+            before_inference()
         predictions = predictor.predict_batch([row["raw_question"] for row in rows])
         if len(predictions) != len(rows):
             raise ValueError("predictor returned a mismatched batch length")
@@ -86,6 +92,8 @@ def _run_with_predictor(
                 "status": prediction["status"],
                 "model_version": predictor.model_version,
                 "taxonomy_version": predictor.taxonomy_version,
+                "data_mode": data_mode,
+                "evaluation_source": metadata.get("evaluation_source", "human_confirmed"),
                 "persistence_outcome": persistence_outcome,
             })
             if on_outcome is not None:
@@ -106,15 +114,18 @@ def run_batch(
     expected_model_version: str | None = None,
     on_stage: Callable[[str], None] | None = None,
     predictor: EncoderPredictor | None = None,
+    data_mode: str = HUMAN_REVIEWED,
+    before_inference: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
     """默认真实加载；控制台可复用已校验EncoderPredictor，避免同时驻留两份GPU权重。"""
     if predictor is None:
-        predictor = EncoderPredictor(artifact_dir, device=device)
+        predictor = EncoderPredictor(artifact_dir, device=device, data_mode=data_mode)
     if expected_model_version is not None and predictor.model_version != expected_model_version:
         raise ValueError("artifact changed after job acceptance")
     return _run_with_predictor(
         predictor, start_at=start_at, end_at=end_at, after=after,
         limit=limit, batch_size=batch_size, on_outcome=on_outcome, on_stage=on_stage,
+        data_mode=data_mode, before_inference=before_inference,
     )
 
 

@@ -42,14 +42,14 @@ function params(filters: TopicFilters): URLSearchParams {
   return result;
 }
 export const topicApi = {
-  availability: () => request<TopicAvailability>('/availability'),
+  availability: (model_key?: string) => request<TopicAvailability>(`/availability${model_key ? `?model_key=${encodeURIComponent(model_key)}` : ''}`),
   jobs: () => request<{ items: TopicJob[] }>('/jobs'),
   job: (id: string) => request<TopicJob>(`/jobs/${encodeURIComponent(id)}`),
   startBatch: (body: TopicBatchInput) => request<TopicJob>('/jobs/batch', { method: 'POST', body: JSON.stringify(body) }),
-  startEvaluation: (batch_size: number) => request<TopicJob>('/jobs/evaluation', { method: 'POST', body: JSON.stringify({ batch_size }) }),
+  startEvaluation: (model_key: string, batch_size: number) => request<TopicJob>('/jobs/evaluation', { method: 'POST', body: JSON.stringify({ model_key, batch_size }) }),
   results: (filters: TopicFilters, offset: number) => request<{ items: TopicResult[]; total: number; limit: number; offset: number }>(`/results?${params(filters)}&limit=20&offset=${offset}`),
   result: (id: string, model_version?: string) => request<TopicResult>(`/results/${encodeURIComponent(id)}?${params({ model_version })}`),
   stats: (filters: Pick<TopicFilters, 'model_version' | 'start_at' | 'end_at'>) => request<TopicStats>(`/stats?${params(filters)}`),
-  reports: () => request<{ items: TopicReportSummary[] }>('/reports'),
-  report: (id: string) => request<{ id: string; created_at: string; report: TopicEvaluation; conclusions: TopicConclusions }>(`/reports/${encodeURIComponent(id)}`),
+  reports: (model_version: string) => request<{ items: TopicReportSummary[] }>(`/reports?${params({ model_version })}`),
+  report: (id: string) => request<{ id: string; created_at: string; model_key: string | null; data_mode: TopicEvaluation['data_mode']; evaluation_source: string | null; report: TopicEvaluation; conclusions: TopicConclusions }>(`/reports/${encodeURIComponent(id)}`),
 };

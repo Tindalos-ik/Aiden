@@ -3,18 +3,18 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
-from .data import INPUT_VERSION, fingerprint, validate_dataset
+from .data import INPUT_VERSION, HUMAN_REVIEWED, SYNTHETIC_EXPERIMENT, fingerprint, validate_dataset
 from .taxonomy import LABEL_IDS, TAXONOMY_VERSION, load_taxonomy
 from .model import file_hash, select_labels
 from .evaluation import metrics
 
 
-def train(dataset: dict, *, base_dir: str, provenance_path: str, artifact_dir: str, epochs=3, batch_size=16, learning_rate=2e-5, max_length=256, device='cpu', seed=42) -> dict:
+def train(dataset: dict, *, base_dir: str, provenance_path: str, artifact_dir: str, epochs=3, batch_size=16, learning_rate=2e-5, max_length=256, device='cpu', seed=42, data_mode: str = HUMAN_REVIEWED) -> dict:
     """provenance必须人工核查本地来源/许可/revision，绝不下载替代基座。"""
     import math
     if epochs < 1 or batch_size < 1 or max_length < 1 or not math.isfinite(learning_rate) or learning_rate <= 0:
         raise ValueError('positive epochs/batch_size/max_length/learning_rate required')
-    validate_dataset(dataset)
+    validate_dataset(dataset, data_mode=data_mode)
     base = Path(base_dir)
     if not base.is_dir():
         raise ValueError('local pretrained model directory unavailable; download is not authorized')
@@ -32,8 +32,8 @@ def train(dataset: dict, *, base_dir: str, provenance_path: str, artifact_dir: s
     train_rows = [x for x in splits['train'] if x.get('classification_status','predicted') == 'predicted' and x['labels']]
     val_rows = splits['validation']
     val_labeled = [x for x in val_rows if x['classification_status'] == 'predicted']
-    if not train_rows or not val_labeled or any(x['annotation_status'] != 'human_confirmed' for x in splits['validation']):
-        raise ValueError('nonempty labeled training and human validation required')
+    if not train_rows or not val_labeled or (data_mode != SYNTHETIC_EXPERIMENT and any(x['annotation_status'] != 'human_confirmed' for x in splits['validation'])):
+        raise ValueError('nonempty labeled training and mode-appropriate validation required')
     output = Path(artifact_dir)
     if output.exists():
         raise ValueError('artifact output already exists; refusing overwrite')
@@ -93,6 +93,8 @@ def train(dataset: dict, *, base_dir: str, provenance_path: str, artifact_dir: s
     metadata = {'trained':True,'taxonomy':load_taxonomy(),'taxonomy_hash':fingerprint(load_taxonomy()),'taxonomy_version':TAXONOMY_VERSION,'label_ids':list(LABEL_IDS),'input_version':INPUT_VERSION,'thresholds':dict.fromkeys(LABEL_IDS,chosen),'threshold_source':'validation','threshold_mode':'global','calibration':calibration,'base_provenance':provenance,'split_hashes':dataset['split_hashes'],'dataset_hash':dataset['dataset_hash'],'seed':seed,'train_args':{'epochs':epochs,'batch_size':batch_size,'learning_rate':learning_rate,'max_length':max_length,'device':device,'full_parameter':True,'loss':'BCEWithLogitsLoss','pos_weight_train_only':pos_weight.cpu().tolist()},'history':history,'best_epoch':best_epoch,'files':{p.relative_to(output).as_posix():file_hash(p) for p in output.rglob('*') if p.is_file()}}
     import transformers
     metadata['software_versions'] = {'torch':torch.__version__,'transformers':transformers.__version__}
+    metadata['data_mode'] = data_mode
+    metadata['evaluation_source'] = 'synthetic_model_prelabels' if data_mode == SYNTHETIC_EXPERIMENT else 'human_confirmed'
     metadata['split_manifest'] = {name:[{'id':r['id'],'input_hash':r['input_hash'],'group_id':r['group_id']} for r in rows] for name,rows in splits.items()}
     metadata['dataset_coverage'] = dataset['coverage']
     metadata['checkpoint_selection'] = {'metric':'validation_BCE_loss','direction':'min','best_loss':best_loss,'epoch':best_epoch}

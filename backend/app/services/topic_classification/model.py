@@ -4,7 +4,7 @@ import hashlib
 import math
 from pathlib import Path
 import json
-from .data import INPUT_VERSION, fingerprint, prepare_input
+from .data import INPUT_VERSION, HUMAN_REVIEWED, fingerprint, prepare_input, require_data_mode
 from .taxonomy import LABEL_IDS, TAXONOMY_VERSION, load_taxonomy
 
 
@@ -26,27 +26,36 @@ def select_labels(scores: dict, thresholds: dict) -> tuple[list[str], str]:
     return labels, 'predicted' if labels else 'uncertain'
 
 
+def validate_metadata(metadata: dict, *, data_mode: str = HUMAN_REVIEWED) -> None:
+    """候选静态契约校验；不校验磁盘权重或授予模型执行就绪状态。"""
+    m = metadata
+    require_data_mode(m, data_mode)
+    if m.get('taxonomy') != load_taxonomy() or m.get('label_ids') != list(LABEL_IDS) or m.get('taxonomy_version') != TAXONOMY_VERSION or m.get('input_version') != INPUT_VERSION:
+        raise ValueError('artifact taxonomy/order/input version mismatch')
+    if m.get('taxonomy_hash') != fingerprint(load_taxonomy()) or not m.get('trained'):
+        raise ValueError('artifact is not a trained taxonomy-compatible classifier')
+    thresholds = m.get('thresholds')
+    if not isinstance(thresholds, dict) or set(thresholds) != set(LABEL_IDS) or any(not isinstance(v, (float, int)) or isinstance(v, bool) or not math.isfinite(v) or not 0 < v < 1 for v in thresholds.values()):
+        raise ValueError('invalid threshold vector')
+    split_hashes = m.get('split_hashes')
+    if m.get('threshold_source') != 'validation' or not isinstance(split_hashes, dict) or any(not split_hashes.get(name) for name in ('train', 'validation', 'test')):
+        raise ValueError('missing validation calibration/data lineage')
+    expected = fingerprint({k: v for k, v in m.items() if k != 'model_version'})
+    if m.get('model_version') != expected:
+        raise ValueError('model version content mismatch')
+
+
 class EncoderPredictor:
-    def __init__(self, artifact_dir, device='cpu'):
+    def __init__(self, artifact_dir, device='cpu', *, data_mode: str = HUMAN_REVIEWED):
         directory = Path(artifact_dir)
         self.metadata = json.loads((directory / 'metadata.json').read_text(encoding='utf-8'))
         m = self.metadata
-        if m.get('taxonomy') != load_taxonomy() or m.get('label_ids') != list(LABEL_IDS) or m.get('taxonomy_version') != TAXONOMY_VERSION or m.get('input_version') != INPUT_VERSION:
-            raise ValueError('artifact taxonomy/order/input version mismatch')
-        if m.get('taxonomy_hash') != fingerprint(load_taxonomy()) or not m.get('trained'):
-            raise ValueError('artifact is not a trained taxonomy-compatible classifier')
+        validate_metadata(m, data_mode=data_mode)
         thresholds = m['thresholds']
-        if set(thresholds) != set(LABEL_IDS) or any(not isinstance(v, (float,int)) or not math.isfinite(v) or not 0 < v < 1 for v in thresholds.values()):
-            raise ValueError('invalid threshold vector')
-        if m.get('threshold_source') != 'validation' or not m.get('split_hashes'):
-            raise ValueError('missing validation calibration/data lineage')
         files = m['files']
         actual = {p.relative_to(directory).as_posix(): file_hash(p) for p in directory.rglob('*') if p.is_file() and p.name != 'metadata.json'}
         if files != actual or not any(k.endswith(('.safetensors','.bin')) for k in files):
             raise ValueError('artifact content checksum mismatch or missing weights')
-        expected = fingerprint({k:v for k,v in m.items() if k != 'model_version'})
-        if m['model_version'] != expected:
-            raise ValueError('model version content mismatch')
         import torch
         from transformers import AutoModelForSequenceClassification, AutoTokenizer
         self.torch = torch

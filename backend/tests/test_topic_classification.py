@@ -4,10 +4,10 @@ import json
 import tempfile
 from pathlib import Path
 from app.services.topic_classification.taxonomy import LABEL_IDS, TAXONOMY_VERSION, validate_labels, load_taxonomy
-from app.services.topic_classification.data import prepare_input, input_hash, INPUT_VERSION, fingerprint
+from app.services.topic_classification.data import prepare_input, input_hash, INPUT_VERSION, fingerprint, require_data_mode, HUMAN_REVIEWED, SYNTHETIC_EXPERIMENT
 from app.services.topic_classification.baselines import RulePredictor, LLMPredictor
-from app.services.topic_classification.model import select_labels, EncoderPredictor
-from app.services.topic_classification.evaluation import metrics
+from app.services.topic_classification.model import select_labels, EncoderPredictor, validate_metadata
+from app.services.topic_classification.evaluation import metrics, evaluate, validate_frozen_evaluation
 
 
 class TopicBehaviorTests(unittest.TestCase):
@@ -74,6 +74,63 @@ class TopicBehaviorTests(unittest.TestCase):
         # 原问题仍相同，但重切分可把训练样本放进test，必须拒绝评价。
         dataset['split_hashes'].update(train='train-seed43',test='test-seed43')
         with self.assertRaisesRegex(ValueError,'original frozen'): validate_frozen_evaluation(metadata,dataset)
+    def test_mode_source_gate_preserves_only_legacy_human_defaults(self):
+        require_data_mode({})
+        require_data_mode({'data_mode': HUMAN_REVIEWED, 'evaluation_source': 'human_confirmed'})
+        with self.assertRaisesRegex(ValueError, 'human-reviewed evaluation source'):
+            require_data_mode({'evaluation_source': 'synthetic_model_prelabels'})
+        synthetic = {'data_mode': SYNTHETIC_EXPERIMENT, 'evaluation_source': 'synthetic_model_prelabels'}
+        with self.assertRaisesRegex(ValueError, 'explicit matching authorization'):
+            require_data_mode(synthetic)
+        require_data_mode(synthetic, SYNTHETIC_EXPERIMENT)
+        with self.assertRaisesRegex(ValueError, 'synthetic experiment evaluation source'):
+            require_data_mode({'data_mode': SYNTHETIC_EXPERIMENT}, SYNTHETIC_EXPERIMENT)
+
+    def test_static_metadata_validates_version_without_loading_weights(self):
+        metadata = {
+            'taxonomy': load_taxonomy(), 'taxonomy_hash': fingerprint(load_taxonomy()),
+            'taxonomy_version': TAXONOMY_VERSION, 'label_ids': list(LABEL_IDS),
+            'input_version': INPUT_VERSION, 'trained': True,
+            'thresholds': dict.fromkeys(LABEL_IDS, .5), 'threshold_source': 'validation',
+            'split_hashes': {'train': 'train', 'validation': 'validation', 'test': 'test'},
+            'data_mode': SYNTHETIC_EXPERIMENT, 'evaluation_source': 'synthetic_model_prelabels',
+        }
+        metadata['model_version'] = fingerprint(metadata)
+        validate_metadata(metadata, data_mode=SYNTHETIC_EXPERIMENT)
+        with self.assertRaisesRegex(ValueError, 'explicit matching authorization'):
+            validate_metadata(metadata)
+        metadata['thresholds']['quality'] = .6
+        with self.assertRaisesRegex(ValueError, 'model version content mismatch'):
+            validate_metadata(metadata, data_mode=SYNTHETIC_EXPERIMENT)
+
+    def test_frozen_evaluation_requires_all_splits_and_separate_sources(self):
+        metadata = {'dataset_hash': 'dataset', 'split_hashes': {'test': 'test'}}
+        with self.assertRaisesRegex(ValueError, 'original frozen'):
+            validate_frozen_evaluation(metadata, dict(metadata))
+        metadata['split_hashes'].update(train='train', validation='validation')
+        metadata.update(data_mode=SYNTHETIC_EXPERIMENT, evaluation_source='synthetic_model_prelabels')
+        dataset = dict(metadata)
+        validate_frozen_evaluation(metadata, dataset)
+        dataset = {**dataset, 'data_mode': HUMAN_REVIEWED, 'evaluation_source': 'human_confirmed'}
+        with self.assertRaisesRegex(ValueError, 'explicit matching authorization'):
+            validate_frozen_evaluation(metadata, dataset)
+
+    def test_evaluation_checks_snapshot_before_each_inference(self):
+        from unittest.mock import Mock
+        predictor = RulePredictor()
+        predictor.predict_batch = Mock(wraps=predictor.predict_batch)
+        rows = [
+            {'id': str(i), 'original_question': text, 'input_hash': input_hash(text),
+             'group_id': str(i), 'labels': ['quality'], 'classification_status': 'predicted',
+             'annotation_status': 'human_confirmed', 'privacy_confirmed': True,
+             'privacy_reviewer': 'fixture'}
+            for i, text in enumerate(['鞋坏了', '商品损坏了'])
+        ]
+        guard = Mock(side_effect=[None, ValueError('frozen input changed')])
+        with self.assertRaisesRegex(ValueError, 'frozen input changed'):
+            evaluate(predictor, rows, split_hash='fixture', batch_size=1, before_inference=guard)
+        self.assertEqual(guard.call_count, 2)
+        predictor.predict_batch.assert_called_once_with(['鞋坏了'])
 
 
 if __name__ == '__main__': unittest.main()

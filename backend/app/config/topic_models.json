@@ -1,0 +1,16 @@
+[
+  {
+    "model_key": "topic-synthetic-run001",
+    "display_name": "合成实验 run001",
+    "artifact_dir": ".tmp/topic-synthetic-model-run001",
+    "dataset": "datasets/topic_synthetic_v2_experiment_20261009/dataset.json",
+    "data_mode": "synthetic_experiment"
+  },
+  {
+    "model_key": "topic-synthetic-run002",
+    "display_name": "合成实验 run002",
+    "artifact_dir": ".tmp/topic-synthetic-model-run002",
+    "dataset": "datasets/topic_synthetic_v2_experiment_20261009/dataset.json",
+    "data_mode": "synthetic_experiment"
+  }
+]

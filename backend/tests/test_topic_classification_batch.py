@@ -4,15 +4,88 @@ from __future__ import annotations
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from app.persistence.mysql import topic_classification as repo
 from app.services.topic_classification import batch
-from app.services.topic_classification.data import input_hash
+from app.services.topic_classification.data import HUMAN_REVIEWED, SYNTHETIC_EXPERIMENT, input_hash
 from app.services.topic_classification.taxonomy import LABEL_IDS, TAXONOMY_VERSION
 
 
 class TopicClassificationBatchTests(unittest.TestCase):
+
+    def predictor(self, data_mode=HUMAN_REVIEWED):
+        predictor = Mock(
+            model_version="fixture-real-version",
+            taxonomy_version=TAXONOMY_VERSION,
+            metadata={"data_mode": data_mode, "evaluation_source": (
+                "synthetic_model_prelabels" if data_mode == SYNTHETIC_EXPERIMENT else "human_confirmed"
+            )},
+        )
+        predictor.predict_batch.return_value = [{
+            "scores": dict.fromkeys(LABEL_IDS, 0.1),
+            "predicted_labels": [], "status": "uncertain",
+        }]
+        return predictor
+
+    def source(self, source_id):
+        return {"source_id": source_id, "raw_question": "商品坏了",
+                "input_hash": input_hash("商品坏了"), "created_at": datetime(2026, 1, 1)}
+
+    def test_default_batch_rejects_experiment_before_reading_or_writing(self):
+        predictor = self.predictor(SYNTHETIC_EXPERIMENT)
+        with patch.object(batch.repo, "list_source_batch") as read, patch.object(batch.repo, "persist_prediction") as persist:
+            with self.assertRaisesRegex(ValueError, "explicit matching authorization"):
+                batch.run_batch(artifact_dir="fixture", predictor=predictor)
+        read.assert_not_called()
+        predictor.predict_batch.assert_not_called()
+        persist.assert_not_called()
+
+    def test_explicit_experiment_propagates_to_loader_and_results(self):
+        predictor = self.predictor(SYNTHETIC_EXPERIMENT)
+        with patch.object(batch, "EncoderPredictor", return_value=predictor) as load, patch.object(batch.repo, "list_source_batch", return_value=[self.source("one")]), patch.object(batch.repo, "persist_prediction", return_value="persisted") as persist:
+            result = batch.run_batch(artifact_dir="fixture", data_mode=SYNTHETIC_EXPERIMENT, limit=1)
+        load.assert_called_once_with("fixture", device="cpu", data_mode=SYNTHETIC_EXPERIMENT)
+        self.assertEqual(result[0]["data_mode"], SYNTHETIC_EXPERIMENT)
+        self.assertEqual(result[0]["evaluation_source"], "synthetic_model_prelabels")
+        self.assertEqual(persist.call_args.kwargs["model_version"], predictor.model_version)
+        self.assertEqual(persist.call_args.kwargs["taxonomy_version"], TAXONOMY_VERSION)
+
+    def test_snapshot_checked_before_every_inference_and_changed_content_blocks(self):
+        predictor = self.predictor()
+        guard = Mock(side_effect=[None, ValueError("artifact changed after job acceptance")])
+        outcomes = []
+        with patch.object(batch.repo, "list_source_batch", side_effect=[[self.source("one")], [self.source("two")]]), patch.object(batch.repo, "persist_prediction", return_value="unchanged") as persist:
+            with self.assertRaisesRegex(ValueError, "artifact changed"):
+                batch.run_batch(
+                    artifact_dir="fixture", predictor=predictor, limit=2, batch_size=1,
+                    before_inference=guard, on_outcome=lambda row, cursor: outcomes.append(row),
+                )
+        self.assertEqual(guard.call_count, 2)
+        predictor.predict_batch.assert_called_once_with(["商品坏了"])
+        persist.assert_called_once()
+        self.assertEqual(outcomes[0]["persistence_outcome"], "unchanged")
+        self.assertEqual(outcomes[0]["evaluation_source"], "human_confirmed")
+
+    def test_first_snapshot_failure_never_predicts_or_persists(self):
+        predictor = self.predictor()
+        guard = Mock(side_effect=ValueError("dataset changed after job acceptance"))
+        with patch.object(batch.repo, "list_source_batch", return_value=[self.source("one")]), patch.object(batch.repo, "persist_prediction") as persist:
+            with self.assertRaisesRegex(ValueError, "dataset changed"):
+                batch.run_batch(artifact_dir="fixture", predictor=predictor, before_inference=guard)
+        predictor.predict_batch.assert_not_called()
+        persist.assert_not_called()
+
+    def test_cli_batch_stays_human_reviewed_and_has_no_experiment_override(self):
+        from scripts.topic_classifier import main
+        with patch.object(batch, "run_batch", return_value=[]) as run, patch("builtins.print"):
+            self.assertEqual(main(["batch", "--artifact-dir", "fixture"]), 0)
+        self.assertEqual(run.call_args.kwargs["data_mode"], HUMAN_REVIEWED)
+        with patch.object(batch, "run_batch") as run, patch("sys.stderr"):
+            with self.assertRaises(SystemExit) as error:
+                main(["batch", "--artifact-dir", "fixture", "--synthetic-experiment"])
+        self.assertEqual(error.exception.code, 2)
+        run.assert_not_called()
 
     def test_export_redacts_original_question_for_external_annotation(self):
         question = "订单号 SO123456 怎么改收件人？"

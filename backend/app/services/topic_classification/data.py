@@ -1,4 +1,4 @@
-"""脱敏原话数据契约与先归组后切分。正则不能证明隐私安全，必须人工确认。"""
+"""默认人工隐私/语义门控；显式合成实验仅消费未人审预标签，并先归组后切分。"""
 from __future__ import annotations
 import hashlib
 import json
@@ -7,9 +7,47 @@ import re
 from difflib import SequenceMatcher
 from pathlib import Path
 from app.services.rag.sanitization import redact_sensitive_text
-from .taxonomy import TAXONOMY_VERSION, validate_labels
+from .taxonomy import TAXONOMY_VERSION, LABEL_IDS, validate_labels
 
 INPUT_VERSION = 'topic-raw-redacted-v1'
+
+HUMAN_REVIEWED = 'human_reviewed'
+SYNTHETIC_EXPERIMENT = 'synthetic_experiment'
+
+
+def require_data_mode(value: dict, data_mode: str = HUMAN_REVIEWED) -> None:
+    """默认消费者拒绝实验数据/模型；旧版未写模式的人工产物仍按原契约消费。"""
+    if data_mode not in (HUMAN_REVIEWED, SYNTHETIC_EXPERIMENT):
+        raise ValueError('unknown topic data mode')
+    if value.get('data_mode', HUMAN_REVIEWED) != data_mode:
+        raise ValueError('topic data mode requires explicit matching authorization')
+    if data_mode == SYNTHETIC_EXPERIMENT and value.get('evaluation_source') != 'synthetic_model_prelabels':
+        raise ValueError('synthetic experiment evaluation source required')
+    if data_mode == HUMAN_REVIEWED and value.get('evaluation_source', 'human_confirmed') != 'human_confirmed':
+        raise ValueError('human-reviewed evaluation source required')
+
+
+def validate_synthetic_row(row: dict) -> None:
+    """仅接受明确合成预标签，不制造人工隐私或标签确认身份。"""
+    refs = row.get('source_refs')
+    if row.get('source') != 'synthetic' or not isinstance(refs, list) or not refs or any(ref.get('source') != 'synthetic' for ref in refs):
+        raise ValueError('synthetic experiment requires exclusively synthetic sources')
+    if row.get('annotation_status') != 'prelabel' or row.get('human_reviewed') is not False or row.get('privacy_confirmed') is not False:
+        raise ValueError('synthetic experiment requires unconfirmed model prelabels')
+    if any(row.get(k) for k in ('privacy_reviewer', 'annotator', 'human_confirmed', 'reviewer')):
+        raise ValueError('synthetic experiment must not claim human review')
+    if row.get('classification_status') != 'predicted' or not row.get('labels'):
+        raise ValueError('synthetic supervised rows require nonempty predicted labels')
+    expected = [int(label in row['labels']) for label in LABEL_IDS]
+    if 'multi_hot' in row and row['multi_hot'] != expected:
+        raise ValueError('synthetic label encoding mismatch')
+
+
+def prepare_synthetic_dataset(rows: list[dict], *, seed: int = 42) -> dict:
+    """从原生监督记录重建实验切分；原生组/hash不是新产物的准入证明。"""
+    originals = [{**{k:v for k,v in row.items() if k != 'group_id'}, 'multi_hot': [int(label in row['labels']) for label in LABEL_IDS]} for row in rows]
+    result = prepare_dataset(originals, seed=seed, semantic_review=None, data_mode=SYNTHETIC_EXPERIMENT)
+    return result
 
 
 def prepare_input(text: str) -> str:
@@ -54,17 +92,22 @@ def dataset_coverage(splits: dict) -> dict:
     return result
 
 
-def prepare_dataset(rows: list[dict], *, seed: int = 42, semantic_review: dict) -> dict:
-    """全部候选之间的语义复核声明绑定精确指纹；人工同义簇、会话与近重复取传递闭包。
+def prepare_dataset(rows: list[dict], *, seed: int = 42, semantic_review: dict | None, data_mode: str = HUMAN_REVIEWED) -> dict:
+    """默认人工契约要求指纹绑定的人工语义复核；实验模式只声明自动分组。
 
-    精确原话合并来源审计，近重复保留自然问法但共组；部署统计仍按原始来源计数。
-    semantic_review={dataset_hash,confirmed,reviewer,revision}必须由人工签署，不能自动生成确认。
+    精确原话合并来源审计，近重复保留自然问法但共组。实验预标签不成为人工真值。
+    默认semantic_review={dataset_hash,confirmed,reviewer,revision}必须由人工签署。
     """
+    if data_mode not in (HUMAN_REVIEWED, SYNTHETIC_EXPERIMENT):
+        raise ValueError('unknown topic data mode')
+    synthetic = data_mode == SYNTHETIC_EXPERIMENT
     if not rows:
         raise ValueError('no annotated raw user questions')
     records = []
     for row in rows:
-        if not row.get('privacy_confirmed') or not row.get('privacy_reviewer'):
+        if synthetic:
+            validate_synthetic_row(row)
+        elif not row.get('privacy_confirmed') or not row.get('privacy_reviewer'):
             raise ValueError('human privacy confirmation required')
         if row.get('taxonomy_version') != TAXONOMY_VERSION:
             raise ValueError('annotation taxonomy mismatch')
@@ -102,7 +145,12 @@ def prepare_dataset(rows: list[dict], *, seed: int = 42, semantic_review: dict) 
     records = list(unique.values())
     ids = [x['id'] for x in records]
     dataset_hash = fingerprint(records)
-    if semantic_review.get('dataset_hash') != dataset_hash or semantic_review.get('confirmed') is not True or not semantic_review.get('reviewer') or not semantic_review.get('revision'):
+    if synthetic:
+        experiment_review = {'dataset_hash': dataset_hash, 'confirmed': False, 'method': 'synthetic_cluster_and_near_duplicate_grouping', 'human_reviewed': False}
+        if semantic_review is not None and semantic_review != experiment_review:
+            raise ValueError('synthetic grouping manifest mismatch')
+        semantic_review = experiment_review
+    elif not semantic_review or semantic_review.get('dataset_hash') != dataset_hash or semantic_review.get('confirmed') is not True or not semantic_review.get('reviewer') or not semantic_review.get('revision'):
         raise ValueError(f'human semantic review required for dataset_hash={dataset_hash}')
     parent = list(range(len(records)))
     def find(i):
@@ -110,13 +158,20 @@ def prepare_dataset(rows: list[dict], *, seed: int = 42, semantic_review: dict) 
             parent[i] = parent[parent[i]]
             i = parent[i]
         return i
+    conversations = [{s.get('conversation_id') for s in row['source_refs']} - {None, ''} for row in records]
     for i, a in enumerate(records):
         for j in range(i):
             b = records[j]
-            conversations_a = {s.get('conversation_id') for s in a['source_refs']} - {None, ''}
-            conversations_b = {s.get('conversation_id') for s in b['source_refs']} - {None, ''}
+            conversations_a = conversations[i]
+            conversations_b = conversations[j]
             same_semantics = bool(a.get('semantic_cluster') and a.get('semantic_cluster') == b.get('semantic_cluster'))
-            if conversations_a & conversations_b or same_semantics or a['input_hash'] == b['input_hash'] or SequenceMatcher(None, a['original_question'], b['original_question']).ratio() >= .9:
+            # 长度与quick_ratio仅作保证上界筛选；通过quick_ratio仍须同一Matcher精确ratio >= .9，不能据其直接判重复。
+            lengths = (len(a['original_question']), len(b['original_question']))
+            duplicate = bool(conversations_a & conversations_b) or same_semantics or a['input_hash'] == b['input_hash']
+            if not duplicate and 2 * min(lengths) >= .9 * sum(lengths):
+                matcher = SequenceMatcher(None, a['original_question'], b['original_question'])
+                duplicate = matcher.quick_ratio() >= .9 and matcher.ratio() >= .9
+            if duplicate:
                 parent[find(i)] = find(j)
     groups = {}
     for i, row in enumerate(records):
@@ -131,31 +186,38 @@ def prepare_dataset(rows: list[dict], *, seed: int = 42, semantic_review: dict) 
     group_labels = {k:{label for r in groups[k] for label in r['labels']} for k in keys}
     remaining = list(keys)
     allocation = {}
+    remaining_counts = {label: sum(label in group_labels[k] for k in remaining) for label in LABEL_IDS}
     # 固定种子破平局；优先让验证/测试覆盖未覆盖的稀有类，保留至少一个训练来源组。
     for split in ('test','validation'):
         covered = set()
         for _ in range(n_eval):
-            candidates = [k for k in remaining if all(r['annotation_status'] == 'human_confirmed' for r in groups[k])]
+            candidates = [k for k in remaining if synthetic or all(r['annotation_status'] == 'human_confirmed' for r in groups[k])]
             if not candidates:
                 raise ValueError('insufficient human-confirmed held-out groups')
             def score(k):
-                counts = {label:sum(label in group_labels[j] for j in remaining) for label in group_labels[k]}
+                counts = {label:remaining_counts[label] for label in group_labels[k]}
                 return (all(n > 1 for n in counts.values()), sum(1/counts[label] for label in group_labels[k]-covered))
             chosen = max(candidates,key=score)
             allocation[chosen] = split
             covered.update(group_labels[chosen])
             remaining.remove(chosen)
+            for label in group_labels[chosen]:
+                remaining_counts[label] -= 1
     for key in keys:
         split = allocation.get(key,'train')
         group_id = fingerprint(sorted(x['id'] for x in groups[key]))
         for row in groups[key]:
-            if split != 'train' and row['annotation_status'] != 'human_confirmed':
+            if not synthetic and split != 'train' and row['annotation_status'] != 'human_confirmed':
                 raise ValueError('validation/test require exclusively human-confirmed annotations')
             splits[split].append({**row, 'group_id': group_id})
-    return {'taxonomy_version': TAXONOMY_VERSION, 'input_version': INPUT_VERSION, 'seed': seed, 'dataset_hash': dataset_hash, 'original_ids':ids, 'dedup':{'source_samples':sum(len(r['dedup_source_ids']) for r in records),'unique_inputs':len(records)}, 'semantic_review': semantic_review, 'splits': splits, 'coverage':dataset_coverage(splits), 'split_hashes': {k: fingerprint(v) for k, v in splits.items()}}
+    result = {'taxonomy_version': TAXONOMY_VERSION, 'input_version': INPUT_VERSION, 'seed': seed, 'dataset_hash': dataset_hash, 'original_ids':ids, 'dedup':{'source_samples':sum(len(r['dedup_source_ids']) for r in records),'unique_inputs':len(records)}, 'semantic_review': semantic_review, 'splits': splits, 'coverage':dataset_coverage(splits), 'split_hashes': {k: fingerprint(v) for k, v in splits.items()}}
+    if synthetic:
+        result.update(data_mode=SYNTHETIC_EXPERIMENT, evaluation_source='synthetic_model_prelabels', label_ids=list(LABEL_IDS))
+    return result
 
 
 def attach_augmentations(dataset: dict, rows: list[dict]) -> dict:
+    require_data_mode(dataset)
     parents = {r['id']: r for r in dataset['splits']['train']}
     for row in rows:
         p = parents.get(row.get('augmentation_parent'))
@@ -179,8 +241,11 @@ def attach_augmentations(dataset: dict, rows: list[dict]) -> dict:
     return result
 
 
-def validate_dataset(dataset: dict) -> None:
+def validate_dataset(dataset: dict, *, data_mode: str = HUMAN_REVIEWED) -> None:
     """消费端重新构建原始分组切分，防止自改hash绕过泄漏与人工gate。"""
+    require_data_mode(dataset, data_mode)
+    if data_mode == SYNTHETIC_EXPERIMENT and dataset.get('label_ids') != list(LABEL_IDS):
+        raise ValueError('synthetic label order mismatch')
     if dataset.get('taxonomy_version') != TAXONOMY_VERSION or dataset.get('input_version') != INPUT_VERSION:
         raise ValueError('dataset taxonomy/input version mismatch')
     if set(dataset['splits']) != {'train','validation','test'}:
@@ -195,9 +260,13 @@ def validate_dataset(dataset: dict) -> None:
             if row['id'] in identities:
                 raise ValueError('duplicate dataset/augmentation id')
             identities.add(row['id'])
+            if data_mode == SYNTHETIC_EXPERIMENT and 'multi_hot' not in row:
+                raise ValueError('synthetic label encoding missing')
             if row['input_hash'] != input_hash(row['original_question']):
                 raise ValueError('input fingerprint mismatch')
             if row.get('augmentation_parent'):
+                if data_mode == SYNTHETIC_EXPERIMENT:
+                    raise ValueError('synthetic experiment augmentations are not supported')
                 if split != 'train':
                     raise ValueError('augmentation outside train')
                 augmentations.append(row)
@@ -208,7 +277,7 @@ def validate_dataset(dataset: dict) -> None:
     if not order or set(order) != {r['id'] for r in originals}:
         raise ValueError('original dataset order manifest missing')
     by_id = {r['id']:r for r in originals}
-    rebuilt = prepare_dataset([by_id[i] for i in order], seed=dataset['seed'], semantic_review=dataset['semantic_review'])
+    rebuilt = prepare_dataset([by_id[i] for i in order], seed=dataset['seed'], semantic_review=dataset['semantic_review'], data_mode=data_mode)
     if rebuilt['dataset_hash'] != dataset['dataset_hash']:
         raise ValueError('dataset hash mismatch')
     for split in ('train','validation','test'):
