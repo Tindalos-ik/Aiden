@@ -294,8 +294,7 @@ def insights(selected: list[tuple[dict, list[dict]]], rows: list[dict], truncate
     quality = data_quality(rows)
     processing_count = sum(len(root_rows(group)) for _, group in selected)
     facts = [f'当前筛选匹配 {len(selected)} 组请求记录，可确认 {processing_count} 次处理，包含 {quality["generations"]} 次模型调用。',
-             f'{quality["provider_verified"]} 次调用的完整用量已由供应商响应确认；{quality["usage_unrecorded"]} 次用量未记录，{quality["usage_unverified"]} 次历史用量来源未核验。',
-             f'{quality["cost_recorded"]} 次调用有金额记录，{quality["cost_missing"]} 次金额未记录；已知金额只是小计，不把缺失金额当作零。']
+             f'{quality["provider_verified"]} 次调用的完整用量已由供应商响应确认；{quality["usage_unrecorded"]} 次用量未记录，{quality["usage_unverified"]} 次历史用量来源未核验。']
     incomplete = quality['generations'] - quality['provider_verified'] - quality['usage_unrecorded'] - quality['usage_unverified']
     if incomplete:
         facts.append(f'另有 {incomplete} 次调用只记录了部分用量，不能据此补算完整用量。')
@@ -312,26 +311,12 @@ def insights(selected: list[tuple[dict, list[dict]]], rows: list[dict], truncate
         candidates = [(label, group, tokens(group)['total']) for (kind, label), group in usage_groups.items() if kind == dimension]
         if candidates:
             label, group, total = min(candidates, key=lambda item: (-item[2], item[0]))
-            facts.append(f'在已确认总用量的调用中，{dimension}“{label}”用量最多：{len(group)} 次调用、{total:,.0f} 个词元。用量不是金额，不代表费用最高。')
-    ranked: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
-    for row in generations(rows):
-        for dimension, label in [('model', str(row.get('model') or '未记录模型')[:200]), ('intent', bucket(row))]:
-            for cost in costs([row]):
-                if cost['known_cost'] is not None:
-                    ranked[(dimension, label, cost['currency'])].append(row)
-    contributions = []
-    for (dimension, label, currency), group in ranked.items():
-        cost = costs(group)[0]
-        contributions.append({'dimension': dimension, 'label': label, 'currency': currency,
-                              'known_cost': cost['known_cost'], 'known_generations': cost['known_generations']})
-    contributions.sort(key=lambda item: (item['dimension'], item['currency'], -item['known_cost'], item['label']))
-    limitations = ['费用按模型和业务用途展示已知小计；共享意图识别费用单独列出，不摊给业务用途。',
-                   '金额来自观测平台计价，不是供应商账单；不包含工具、数据库和检索服务等消耗。',
-                   '耗时列表只表示本批次中耗时较长的请求和步骤，不代表异常或模型质量；步骤可能包含子步骤，并行或嵌套步骤耗时不能相加为请求耗时。',
-                   '缺失金额的具体原因无法从当前记录确认，不能直接归因为缺少价格配置。']
+            facts.append(f'在已确认总用量的调用中，{dimension}“{label}”用量最多：{len(group)} 次调用、{total:,.0f} 个 Token。')
+    limitations = ['用量按模型和业务用途统计；共享意图识别用量单独列出，不摊给业务用途。',
+                   '耗时列表只表示本批次中耗时较长的请求和步骤，不代表异常或模型质量；步骤可能包含子步骤，并行或嵌套步骤耗时不能相加为请求耗时。']
     if truncated:
         limitations.insert(0, '读取已达到上限或分页未完成；统计和排序仅代表已读取的记录，不是全量结论。')
-    return {'facts': facts, 'limitations': limitations, 'cost_contributions': contributions}
+    return {'facts': facts, 'limitations': limitations}
 
 
 def slow_items(selected: list[tuple[dict, list[dict]]], rows: list[dict]) -> dict:
@@ -399,12 +384,12 @@ def query(*, kind: str, limit: int, start: datetime | None = None, end: datetime
     else:
         observations = [r for _, obs in selected for r in obs]
         roots = [r for _, obs in selected for r in root_rows(obs)]
-        by_cost_dimension: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+        by_token_dimension: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
         for row in generations(observations):
             start_time = timestamp(row.get('startTime'))
             dimension = (start_time[:10] if start_time else 'unknown',
                          str(row.get('model') or 'unknown')[:200], bucket(row))
-            by_cost_dimension[dimension].append(row)
+            by_token_dimension[dimension].append(row)
         by_day: dict[str, list[dict]] = defaultdict(list)
         for _, obs in selected:
             root = root_rows(obs)
@@ -423,9 +408,9 @@ def query(*, kind: str, limit: int, start: datetime | None = None, end: datetime
                        'duration': durations(root_rows(group)), 'tokens': tokens(group),
                        'known_costs': [{'currency': cost['currency'], 'known_cost': cost['known_cost']}
                                        for cost in costs(group) if cost['known_cost'] is not None]} for day, group in sorted(by_day.items())],
-            'cost_trend': [{'date': day, 'model': model_name, 'bucket': cost_bucket,
-                            'generations': len(group), 'tokens': tokens(group), 'costs': costs(group)}
-                           for (day, model_name, cost_bucket), group in sorted(by_cost_dimension.items())],
+            'token_trend': [{'date': day, 'model': model_name, 'bucket': token_bucket,
+                             'generations': len(group), 'tokens': tokens(group)}
+                            for (day, model_name, token_bucket), group in sorted(by_token_dimension.items())],
             'attribution': breakdown('bucket'), 'models': breakdown('model'),
             'insights': insights(selected, observations, truncated),
             'slow_items': slow_items(selected, observations),

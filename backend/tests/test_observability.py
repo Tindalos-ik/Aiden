@@ -185,33 +185,43 @@ def test_latest_record_follows_matched_scope_not_read_batch():
     assert unmatched['state'] == 'empty' and unmatched['latest_record_at'] is None
 
 
-def test_generation_cost_trend_preserves_each_currency_and_shared_bucket():
+def test_generation_token_trend_preserves_verified_usage_and_shared_bucket():
     root = {'id': 'root', 'traceId': 'trace', 'type': 'CHAIN', 'name': 'aiden_support',
             'isRootObservation': True, 'startTime': '2026-10-01T23:59:00Z',
             'metadata': {'aiden_source': 'online'}}
     rows = [
         root,
         generation('shared', 'cost_bucket_intent_classification', model='model-a',
-                   startTime='2026-10-01T23:59:30Z', costDetails={'total': 1}),
+                   startTime='2026-10-01T23:59:30Z', costDetails={'total': 1},
+                   usageDetails={'input': 5, 'output': 1, 'total': 6}),
         generation('order', model='model-a', startTime='2026-10-02T00:00:00Z',
-                   costDetails={'total': 2}),
+                   costDetails={'total': 2}, usageDetails={'input': 0, 'output': 2, 'total': 2}),
         generation('logistics', 'cost_intent_logistics', model='model-b',
-                   startTime='2026-10-02T08:00:00+08:00', costDetails={'total': 3}, currency='EUR'),
+                   startTime='2026-10-02T08:00:00+08:00', costDetails={'total': 3}, currency='EUR',
+                   usageDetails={'input': 3}),
         generation('unattributed', 'unknown-name', model='model-b',
-                   startTime='2026-10-03T00:00:00Z', costDetails={'total': 0}, currency='EUR'),
+                   startTime='2026-10-03T00:00:00Z', costDetails={'total': 0}, currency='EUR',
+                   usageDetails={'total': 999}, metadata={}),
     ]
     with patch.object(c, 'read_rows', return_value=(rows, False, None)):
         result = c.query(kind='overview', limit=20, intent='order')['data']
-    trend = result['cost_trend']
+    trend = result['token_trend']
     assert sum(row['generations'] for row in trend) == result['counts']['generations'] == 4
     shared = [row for row in trend if row['bucket'] == 'intent_classification']
     assert len(shared) == 1 and shared[0]['generations'] == 1
     assert {row['date'] for row in trend if row['bucket'] == 'logistics'} == {'2026-10-02'}
     assert any(row['bucket'] == 'unattributed' for row in trend)
-    for total in result['costs']:
-        subtotal = sum(cost['known_cost'] for row in trend for cost in row['costs']
-                       if cost['currency'] == total['currency'] and cost['known_cost'] is not None)
-        assert subtotal == total['known_cost']
+    assert 'cost_trend' not in result
+    assert all(set(row) == {'date', 'model', 'bucket', 'generations', 'tokens'} for row in trend)
+    for field, expected in [('input', 8), ('output', 3), ('total', 8)]:
+        assert sum(row['tokens'][field] or 0 for row in trend) == result['tokens'][field] == expected
+    assert next(row for row in trend if row['bucket'] == 'unattributed')['tokens']['total'] is None
+    assert next(row for row in trend if row['bucket'] == 'logistics')['tokens']['total'] is None
+    for dimension in ('models', 'attribution'):
+        for total in result['costs']:
+            subtotal = sum(cost['known_cost'] for row in result[dimension] for cost in row['costs']
+                           if cost['currency'] == total['currency'] and cost['known_cost'] is not None)
+            assert subtotal == total['known_cost']
 
 
 def test_employee_insights_cover_whole_selection_and_traceable_slow_items():
@@ -233,8 +243,9 @@ def test_employee_insights_cover_whole_selection_and_traceable_slow_items():
     assert len(listing['items']) == 1 and listing['total'] == 7
     assert overview['data_quality']['provider_verified'] == 7
     assert overview['data_quality']['cost_recorded'] == 7
-    assert {v['known_cost'] for v in overview['insights']['cost_contributions']} == {21}
-    assert all(v['known_generations'] == 7 for v in overview['insights']['cost_contributions'])
+    assert overview['tokens']['known_generations'] == 7
+    assert overview['tokens']['total'] == 0
+    assert set(overview['insights']) == {'facts', 'limitations'}
     assert overview['slow_items']['requests'][0]['trace_id'] == 'trace-6'
     assert overview['slow_items']['steps'][0]['observation_id'] == 'call-6'
     assert overview['slow_items']['steps'][0]['trace_id'] == 'trace-6'
@@ -312,7 +323,7 @@ def test_v2_documented_total_cost_fallback_without_double_counting():
     with patch.object(c, 'read_rows', return_value=([root, *rows], False, None)):
         data = c.query(kind='overview', limit=20)['data']
     assert data['costs'][0]['known_cost'] == 3
-    assert {item['known_cost'] for item in data['insights']['cost_contributions']} == {3}
+    assert sum(item['costs'][0]['known_cost'] for item in data['models']) == 3
     assert sum(item['costs'][0]['known_cost'] for item in data['attribution']) == 3
 
 
@@ -328,9 +339,10 @@ def test_documented_v2_total_is_usd_not_relabelled_by_currency_field():
             'totalCost': 999, 'metadata': {'aiden_source': 'online'}}
     with patch.object(c, 'read_rows', return_value=([root, *rows], False, None)):
         data = c.query(kind='overview', limit=20)['data']
-    for total in data['costs']:
-        assert sum(cost['known_cost'] for item in data['cost_trend'] for cost in item['costs']
-                   if cost['currency'] == total['currency']) == total['known_cost']
+    for dimension in ('models', 'attribution'):
+        for total in data['costs']:
+            assert sum(cost['known_cost'] for item in data[dimension] for cost in item['costs']
+                       if cost['currency'] == total['currency']) == total['known_cost']
     assert data['data_quality']['cost_recorded'] == 3
 
 
@@ -400,6 +412,6 @@ def test_usage_insights_require_verified_totals_even_when_all_costs_missing():
     assert not any(low_model in fact or unknown_model in fact for fact in known['facts'])
     assert not any(unknown_model in fact for fact in unknown['facts'])
     assert any(zero_model in fact for fact in zero['facts'])
-    assert known['cost_contributions'] == zero['cost_contributions'] == []
+    assert set(known) == set(zero) == {'facts', 'limitations'}
     assert c.tokens([high, low, history])['total'] == 6
     assert c.data_quality([high, low, history])['cost_missing'] == 3
