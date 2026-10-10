@@ -2,6 +2,10 @@
 
 官方资料以 FastAPI 文档为准，查阅日期：2026-09-24。相关链接列在文末。
 
+阅读入口：[技术学习路线](技术学习路线.md)。先读本文的 HTTP 基础，再读 [LangChain](LangChain.md)、[LangGraph](LangGraph.md) 与 [Agent 实现详解](Agent实现详解.md)；知识检索另见 [RAG](RAG.md)。
+
+项目声明 `fastapi>=0.115,<1.0`、`uvicorn[standard]>=0.30,<1.0`，见 [requirements.txt](../backend/requirements.txt)。依赖范围不是当前安装版本；下面的独立练习不是项目业务接口或真实服务验收。
+
 ## 1. API 在做什么
 
 可以把 API 想成前端和后端之间约定好的一组“问答方式”：前端按约定发来一个请求，后端执行相应工作，再把结果发回去。比如网页要显示会话列表，就请求后端的会话接口；后端查数据库后把列表作为 JSON 返回。
@@ -214,7 +218,7 @@ graph TD
 
 | 文件 | 用途 |
 | --- | --- |
-| [`main.py`](../backend/app/main.py) | 创建 FastAPI 应用、注册认证和会话路由、提供健康检查接口 |
+| [`main.py`](../backend/app/main.py) | 创建应用，注册认证、会话、知识源、RAG、员工接待、主题、可观测性及用户/员工售后路由；提供进程健康检查 |
 | [`auth.py`](../backend/app/api/routes/auth.py) | 登录、读取当前用户、退出登录；登录成功时设置 HttpOnly Cookie |
 | [`conversations.py`](../backend/app/api/routes/conversations.py) | 列出和创建会话、读取消息历史、发送流式消息 |
 | [`schemas.py`](../backend/app/api/schemas.py) | 用 Pydantic 定义登录和消息请求体及字段限制 |
@@ -223,7 +227,7 @@ graph TD
 | [`graph.py`](../backend/app/agent/graph.py) | 组织上下文读取、模型生成和回答保存的 LangGraph 流程 |
 | [`sse.py`](../backend/app/api/sse.py) | 把事件名称和 JSON 数据编码成 SSE 文本格式 |
 
-主应用用 `include_router` 注册认证和会话两个路由组。比如 `auth.py` 中路由器的前缀是 `/api/auth`，某个接口再写 `@router.post("/login")`，组合后就是 `POST /api/auth/login`。`conversations.py` 同理使用 `/api/conversations` 前缀。
+主应用用 `include_router` 注册多个路由组，实际清单见 [`main.py`](../backend/app/main.py)：认证、会话、知识来源、RAG 管理、员工接待、主题分类、可观测性、用户售后和员工售后。路由器前缀与装饰器路径组合成最终路径，例如 `auth.py` 的 `/api/auth` 和 `/login` 组合为 `POST /api/auth/login`；不能把最初的认证/会话两个路由组当作当前完整接口范围。
 
 ### 后端当前实现的接口
 
@@ -231,7 +235,7 @@ graph TD
 | --- | --- | --- |
 | `GET /api/health` | 检查 API 进程是否能响应 | 返回 `{"status":"ok"}`；不检查 MySQL 或模型是否可用 |
 | `POST /api/auth/login` | 登录 | 请求体含 `account`、`password`、`role`；成功设置 HttpOnly Cookie，错误凭证返回 `401` |
-| `GET /api/auth/me` | 恢复当前登录用户 | 通过 `Depends(current_actor)` 验证 Cookie；未登录返回 `401` |
+| `GET /api/auth/me` | 恢复当前登录身份 | 通过 `Depends(current_identity)` 验证 Cookie；员工和普通用户均可恢复身份，未登录返回 `401` |
 | `POST /api/auth/logout` | 退出登录 | 撤销服务端会话并清除 Cookie，响应状态为 `204` |
 | `GET /api/conversations` | 获取当前用户的会话列表 | 只返回当前 Cookie 用户拥有的会话 |
 | `POST /api/conversations` | 新建会话 | 请求体为 `{}`，成功状态为 `201` |
@@ -241,6 +245,10 @@ graph TD
 | `GET /api/rag/milvus` | 员工查看 Milvus 实际集合 | 只读返回集合状态、记录统计数和分页标量字段，并回 MySQL 标示状态 |
 | `POST /api/rag/jobs/{kind}` | 员工排队建库任务 | `kind` 支持文档/FAQ 导入、对话挖掘一轮、向量化、作废向量清理；成功返回 `202` |
 | `POST /api/rag/embedding/start`、`/stop` | 员工管理本地向量服务 | 只管理当前 API 进程启动的子进程；成功返回 `202` |
+| `/api/staff/*` | 人工队列、接待、员工消息和关闭会话 | 已注册 [`staff.py`](../backend/app/api/routes/staff.py)，经 `current_staff` 限制角色 |
+| 用户/员工售后路由 | 申请、政策预览、工单及处理 | [`service_workflow.py`](../backend/app/api/routes/service_workflow.py) 分别提供 `user_router` 与 `staff_router` |
+| `/api/topics/*` | 主题分类控制台 | [`topics.py`](../backend/app/api/routes/topics.py)，具体方法与路径以装饰器为准 |
+| `/api/observability/*` | 可观测性控制台 | [`observability.py`](../backend/app/api/routes/observability.py)，不把观测记录等同于业务验收 |
 
 例如，会话相关路由中 `actor: dict = Depends(current_actor)` 会让 FastAPI 先取登录 Cookie 并查验用户。路由再把 `actor["id"]` 传给数据访问函数，因此查询会话和消息时会按用户 id 做归属过滤。
 
@@ -248,9 +256,27 @@ graph TD
 
 ### 一条聊天消息是怎样完成的
 
-普通读写路由多用同步 `def`，例如读取会话列表；需要异步消费模型事件的 `stream_message` 用 `async def`。发消息时，后端检查会话归属和状态，先把用户消息与助手消息占位记录写入 MySQL，再运行 LangGraph 的模型流程。模型生成期间，FastAPI 用 `StreamingResponse` 持续返回 `text/event-stream`：`start` 携带助手消息 id，`delta` 携带新生成的文本，最后以 `done` 或 `error` 结束。前端读取这些事件并逐段显示。
+普通读写路由多用同步 `def`，流式 `stream_message` 用 `async def` 消费 LangGraph 事件。先检查归属和输入，再由 `create_message_pair()` 原子写入用户消息与助手占位；数据库 Session 随短操作关闭，不跨模型 `await` 持有。`StreamingResponse` 持续返回 `text/event-stream`：`start` 带助手 id，`progress` 带受控阶段，`delta` 是生成中的未核验正文草稿；引用核验并由 `save_answer` 落库后，`final` 带权威 `text` 和 `citations`，替换草稿，必要时发 `handoff`，正常结束发 `done`。执行失败发 `error`，与 `done` 互斥。当前后端不另发 `citations` 事件。
 
 本项目直接用 `StreamingResponse` 和 [`sse.py`](../backend/app/api/sse.py) 编码 SSE，再由前端用 `fetch` 读取流。它不是普通的一次性 JSON 响应；也不是仅凭 `EventSource` 自动完成的连接。FastAPI 官方还介绍了自己的 SSE 响应工具，学习项目实现时要区分官方其他写法和这里实际使用的代码。
+
+### Cookie 与 Depends：认证不等于资源授权
+
+[`auth.py`](../backend/app/api/routes/auth.py) 的 `login()` 验证账号后设置 HttpOnly Cookie；[`chat.py`](../backend/app/persistence/mysql/chat.py) 的 `create_session()` 只保存令牌哈希和过期时间。HttpOnly 使页面脚本不能直接读取 Cookie，不意味着请求天然获得所有数据权限。
+
+[`deps.py`](../backend/app/api/deps.py) 先用 `current_identity()` 校验会话，再由 `current_actor()` 限制普通用户、`current_staff()` 限制员工。`Depends` 会把依赖的结果传入路由；路由仍需把可信 `actor["id"]` 传给仓储，并在 SQL 中检查会话、订单和消息归属。身份、角色和资源归属是三道不同检查。
+
+### HTTP 错误与流内错误的边界
+
+在返回流式响应前，Pydantic 输入错误或路由的 `HTTPException` 可以返回 `422/401/403/404/409` 等 HTTP 状态。开始发送 SSE 后，不能把已发送的成功响应追溯改成另一份 JSON 错误；因此模型配置或执行失败使用 `event: error` 通知客户端，并把消息状态写成 `error`。客户端既要检查 HTTP 状态，也要处理流内终止事件。
+
+[`conversations.py`](../backend/app/api/routes/conversations.py) 的 `stream_message()` 只把 `generate` 内 `support_answer_delta` 自定义事件转为草稿，不直接转发所有模型事件。收到 `save_answer` 的 `on_chain_end` 后才发 `final`；完成请求重放为 `start → final → done`。未保存取消用空正文 `stopped` 收尾，草稿不落库；仓储终态闸门阻止迟到取消降级已完成回答。
+
+### SSE 为什么需要显式解析
+
+[`sse.py`](../backend/app/api/sse.py) 的 `sse_event()` 输出事件名、JSON 数据和末尾空行。网络分块不等于事件边界，一次读取可能只有半行，也可能有多个事件。前端 [`remote.ts`](../frontend/src/api/remote.ts) 的 `readSseStream()` 负责拼接；POST 消息使用 `fetch`，不能直接套用只建立 GET 连接的 `EventSource` 示例。前端兼容某种旧事件，也不表示当前后端仍发送它。
+
+排查时按“请求状态 → 身份/归属 → start → progress/delta → final → done/error → 数据库终态”检查。`/api/health` 仅证明进程能响应；SSE有片段也不证明最终答案已保存。详细生命周期见 [Agent 实现详解](Agent实现详解.md)。
 
 数据库表结构由 Alembic 迁移管理。导入应用模块不会自动创建表；手动只启动 FastAPI 时，需先配置数据库并应用迁移。根目录的 [`start.ps1`](../start.ps1) 则会检查本地配置，启动 MySQL、应用迁移、准备演示用户，然后启动 FastAPI 和前端。若只想运行后端，官方项目文档给出的开发命令是在 `backend/` 目录运行：
 
@@ -262,7 +288,7 @@ graph TD
 
 启动后可打开 `http://127.0.0.1:8000/docs` 查看当前注册的接口。`/api/health` 返回成功只代表 API 进程已响应，并不能证明数据库迁移、登录或模型配置都正常。聊天模型还需要 `backend/.env` 中的模型配置；具体数据库准备方式见 [`数据库.md`](数据库.md)。
 
-员工登录已用于 `/staff/rag` 建库控制台，API 路由在 [`rag_admin.py`](../backend/app/api/routes/rag_admin.py)，具体任务与限制见 [`RAG.md`](RAG.md#员工建库控制台)。前端 [`remote.ts`](../frontend/src/api/remote.ts) 仍保留客服接管请求定义，但后端尚无 `/api/staff/*` 接待接口；员工能建库，不代表能在 remote 模式接管会话。判断服务端能力以 `backend/app/main.py` 注册的路由和实际接口为准。
+员工接待接口已经由 [`staff.py`](../backend/app/api/routes/staff.py) 注册，可查询人工队列并接受、发消息和关闭会话；员工售后处理由 [`service_workflow.py`](../backend/app/api/routes/service_workflow.py) 的独立员工路由提供。RAG、主题与可观测性是其他员工控制台，不应混为聊天接管。当前接待是 HTTP 接口配合页面刷新，不是 WebSocket 实时推送；实际可用性还需要真实登录、数据库前置状态和具体运行记录。
 
 
 

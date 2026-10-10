@@ -4,6 +4,26 @@
 
 Milvus 的部署、配置连接、集合索引、写入、查询与失效清理，以及对应项目代码片段，见 [Milvus 使用说明](Milvus.md)。
 
+## 基础与三级阅读路线
+
+总入口：[技术学习路线](技术学习路线.md)。模型接口基础见 [LangChain](LangChain.md)，编排见 [LangGraph](LangGraph.md)，HTTP与流协议见 [FastAPI](FastAPI.md)，完整在线客服链见 [Agent 实现详解](Agent实现详解.md)。
+
+RAG 是检索增强生成：先找到与当前问题相关且有效的外部证据，再让模型据此回答。它不是把知识训练进模型，也不是检索第一名就直接当结论。项目的质量闸门分为“候选召回 → 权威回表 → 精排 → 证据充分性 → 引用核验”；每层解决不同问题，后面一层不能弥补前面根本没有相关知识。
+
+例如用户问“某型号容量”，dense可以匹配不同说法，BM25帮助保留型号关键词；召回到相近型号不代表可以回答目标型号。回表保证原文当前有效，精排改善问题/正文相关性，证据核验还要检查型号、条件等是否足以回答。最终引用编号合法也不等于每条事实都得到语义证明。
+
+离线建库与在线回答要分开：切块和编码提前建立检索索引；在线编码当前问题，再在索引中找候选。切块太大可能混入无关内容，太小可能丢条件；本项目保留章节、完整句子与表头，并把无法安全处理的超长块显式标为待人工处理，而不静默截断。
+
+| 层级 | 先回答的问题 | 阅读与源码导航 |
+| --- | --- | --- |
+| 入门 | 原文、chunk、embedding、召回、生成各是什么 | 本节 → 全景 → 知识块；向量/相似度/BM25/RRF基础见Milvus |
+| 实现 | 一个问题从入口到最终证据如何经过各层 | 在线混合检索；[`customer.py`](../backend/app/services/tools/customer.py) `search_faq` → [`retrieval.py`](../backend/app/services/rag/retrieval.py) `semantic_search` → [`knowledge_store.py`](../backend/app/persistence/milvus/knowledge_store.py) `hybrid_search` → [`knowledge.py`](../backend/app/persistence/mysql/knowledge.py) `get_vectorized_chunks_by_ids` → `_rerank` |
+| 进阶 | 如何更新、续跑、审核补库并评估质量 | 离线建库/历史挖掘/审核补库/评估体系；[`indexing.py`](../backend/app/services/rag/indexing.py) `vectorize_pending`、[`conversation_mining.py`](../backend/app/services/rag/conversation_mining.py)、[`review_queue.py`](../backend/app/services/rag/review_queue.py) |
+
+建库入口与结果链：[`knowledge.py`](../backend/app/services/rag/knowledge.py) `parse_markdown_document` → [`chunking.py`](../backend/app/services/rag/chunking.py) `chunk_section` → `index_markdown_file` / `upsert_source_chunks` → MySQL pending → `vectorize_pending` → Milvus upsert → MySQL vectorized。MySQL与Milvus没有一个共同原子事务，稳定主键、状态回填和在线过滤共同处理短暂不一致。
+
+以下深层流程保留为实现参考。先理解只读检索，再看写入、清理和迁移命令；不要为学习而扩大现有知识导入清单。模型/服务调用记录和mock演示不能作为真实服务验收，历史运行记录只对应当时题目与配置。
+
 ## 全景
 
 三段能力的分工与衔接关系是理解本文其余部分的前提：
@@ -16,7 +36,7 @@ graph TD
     mine --> chunk
     chunk --> mysql["MySQL knowledge_chunks<br/>原文与向量状态的权威源"]
     mysql --> vec["BGE dense 向量"]
-    vec --> store["Milvus knowledge 集合<br/>只负责相似度"]
+    vec --> store["Milvus knowledge 集合<br/>dense 和 BM25 检索索引"]
     store --> online["search_faq 在线检索"]
     mysql --> online
     online --> agent["Agent 回答<br/>只依据召回内容"]
@@ -25,7 +45,7 @@ graph TD
 要点：
 
 - **两条离线路径、一张表**。Markdown/FAQ 导入与历史对话挖掘的输入不同，但最后都落到 `knowledge_chunks`、共用一套向量化流程，因此可以一同被在线检索到。
-- **MySQL 是权威源，Milvus 只是索引**。原文、问法、分类、章节路径与向量状态都在 MySQL；Milvus 只回答"哪条向量最像"。任何在线结果都要回 MySQL 取原文并校验状态。
+- **MySQL 是权威源，Milvus 只是索引**。原文、问法、分类、章节路径与向量状态都在 MySQL；Milvus 返回dense/BM25召回及融合候选。任何在线结果都要回 MySQL 取原文并校验状态。
 - **离线和在线必须同源**。两端共用 `build_embedding_text` 的模板与同一个 `EmbeddingClient`（同一模型、同一 L2 归一化），否则相似度不可比。
 - **知识只经工具结果进入模型**。`search_faq` 的返回值作为一轮工具结果交给模型，不拼进系统提示词；提示词只约束"只能依据召回内容作答"。
 
@@ -527,12 +547,13 @@ graph TD
     mysql --> rerank["重排并返回编号证据"]
     rerank --> assess["assess_knowledge 核验证据充分性"]
     assess --> generate["generate 生成或明确拒答"]
-    generate --> sse["SSE 发送校验后文本与引用"]
-    sse --> save["save_answer 保存回答与来源快照"]
-    save --> done["SSE 发送 done"]
+    generate --> draft["SSE delta 未核验草稿"]
+    generate --> save["save_answer 保存最终回答与来源快照"]
+    save --> final["SSE final 权威正文与引用"]
+    final --> done["SSE done"]
 ```
 
-`recognize_intent` 只接收分类提示词和对话上下文，不接收知识正文或工具定义；`route_intent` 决定是否允许 `search_faq`，`dispatch_tool_call` 把补全后的当前问题放入 `question`，由服务端合成工具调用。召回知识作为本轮 `ToolMessage` 进入 `generate`，没有拼进 System Prompt。历史消息只保存最终回答及来源快照，不保存本轮 ToolMessage；追问会重新检索。`app/api/routes/conversations.py` 在 `generate` 节点完成后发送已通过引用校验的最终文本（单次 `delta`）及可用的 `citations`，随后图内 `save_answer` 落库；图正常结束后才发送 `done`，不会先推送未经校验的模型草稿。
+`recognize_intent` 只接收识别提示词和对话上下文，不接收知识正文或业务工具定义；`route_intent` 决定是否允许 `search_faq`，`dispatch_tool_call` 把补全后的当前问题放入 `question`，由服务端合成调用。召回知识作为本轮工具结果供按项生成使用，不拼进System Prompt；历史保留最终回答及来源快照，不保留本轮ToolMessage，追问会重新检索。`generate` 通过 `support_answer_delta` 实时发布未核验草稿；引用核验可能替换成拒答。`save_answer` 提交最终正文与引用后，路由在该节点 `on_chain_end` 发 `final{text,citations}` 替换草稿，正常结束发 `done`。当前后端不另发 `citations` 事件，不能声称草稿从未暴露。
 
 ### 查询准备、召回与过滤
 
@@ -556,7 +577,7 @@ System Prompt 要求知识事实只依据本轮 `search_faq` 结果，并逐项�
 
 退款办理另有一个入口：本人订单没有正文覆盖用户陈述原因的现行商家政策时，`refund.py` 的 `_refund_policy_result()` 生成 `entrypoint = refund_policy_unavailable`（原因「没有可核验且覆盖本次退款原因的有效商家退款政策」）。它和上面的检索类入口写同一张表，但指向的是需要业务补录或核准商家政策，而不是知识库缺条目；知识库检索结果不能作为退款提交依据。
 
-用户点击已完成助手回答的满意度按钮时，带鉴权的 `POST /api/conversations/{conversation_id}/messages/{message_id}/feedback` 仅接收 `{"rating":"satisfied"}` 或 `{"rating":"unsatisfied"}`；服务端核验会话归属和目标消息，并在“不满意”时关联真实用户问题，以 `user_feedback_unresolved` 入同一问题池。满意反馈只保存到 `messages.feedback`，不入池；已记录的反馈重复提交返回原结果，不允许改选。历史消息回传 `feedback` 供刷新后回显；失败时页面提示错误，可重试。消息表的 `citations` JSON 保存生成时的来源快照；历史消息和 SSE 的 `citations` 事件使用同一结构，前端点击 `[n]` 可查看原 chunk 正文与章节。Markdown 来源还可经已认证的 `GET /api/knowledge/source/{chunk_id}` 打开原始文档。问题入池不等于人工审核或自动补库，后两项尚未实现。
+用户对已完成助手回答提交满意度时，带鉴权的 `POST /api/conversations/{conversation_id}/messages/{message_id}/feedback` 仅接受 `satisfied` 或 `unsatisfied`。服务端核验归属和消息，在不满意时关联真实用户问题，以 `user_feedback_unresolved` 入池；满意仅保存反馈。重复提交不改选。`messages.citations` 保存生成时来源快照，历史消息与SSE `final` 内的 `citations` 使用同一结构，点击引用可看原文和章节；Markdown原文可经认证的 `GET /api/knowledge/source/{chunk_id}` 读取。人工审核与补库已经有独立实现，见本文末节；入池本身不等于审核通过，审核通过也不等于知识已成功向量化上线。
 
 ### 运行配置与验证范围
 
@@ -573,7 +594,7 @@ DeepSeek 携带 `tools` 的思考模式请求要求回传既有 `reasoning_conte
 
 此前在 Milvus 2.5 `knowledge_bm25`、本地 `bge-reranker-v2-m3` 的进程环境中实测：询问库外型号 MH-LP999 的猫砂容量时，SSE 返回明确拒答、没有 `error` 事件，`low_confidence_questions` 新增一条原话一致的记录；当时的入口值为 `generation_self_check`（现已改为 `generation_insufficient_knowledge`）。这是修改前该次问法与配置下的验证，不代表新入口已在同环境重新实测，也不代表所有库外问题都会落在同一拒答入口。四策略离线评估的范围和局限见下一节。
 
-另用 MH-LP50 具体型号问题走真实在线链路，SSE 依次包含 `start`、`delta`、`citations`、`done`，返回 3 个引用；MySQL 助手消息也保存了相同的 3 个引用及对应 chunk ID，来源章节路径存在，已认证的来源原文接口返回 HTTP 200。这验证了该次问法的回答、引用持久化和原文回链；不代表所有题目都有相同的引用数。
+此前曾用 MH-LP50 具体型号问题验证旧在线链路，当时记录的事件为 `start`、`delta`、`citations`、`done`，并保存3个引用、验证原文回链。此处保留为历史记录：它不对应当前 `delta草稿 → final权威替换 → done` 契约，不能作为本次新契约验收，也不能外推所有问题都有相同引用数。
 
 本地 `backend/.env`、示例配置和代码默认值均指向 Milvus 2.5 的 `knowledge_bm25`。该集合已由旧数据迁移并核对为 84 条记录；新部署仍须按自己的 Milvus 地址和 embedding 维度配置环境变量。运行后端的虚拟环境需安装 `backend/requirements-rag.txt` 中的 `FlagEmbedding` 和 `torch`，否则精排模型无法加载。
 

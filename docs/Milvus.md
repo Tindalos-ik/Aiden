@@ -2,6 +2,51 @@
 
 本文按“部署 → 配置与连接 → 集合与索引 → 写入 → 查询 → 更新与删除 → 运维核对”说明当前项目如何使用 Milvus。代码摘录以仓库现有实现为准；可独立运行的示例另行标注，不能把片段中的局部变量当成完整脚本。
 
+阅读入口：[技术学习路线](技术学习路线.md) → 本文的基础与三级读法 → 原有部署和源码章节。完整业务编排见 [RAG](RAG.md)、[LangChain](LangChain.md)、[LangGraph](LangGraph.md)。
+
+## 基础：向量数据库到底查什么
+
+### 从文本到坐标，而不是把文字压缩成答案
+
+Embedding 把文本映射成固定维度的数值向量，同一模型下含义接近的文本通常更接近。向量不是可逆的原文压缩，也不包含业务有效性。模型、维度、输入模板改变后，即使数字长度相同，也不能假定它们还在同一语义空间。
+
+项目的 [`EmbeddingClient`](../backend/app/services/rag/embedding.py) 编码问题与知识；[`embedding_text.py`](../backend/app/services/rag/embedding_text.py) 的 `build_embedding_text()` / `build_query_embedding_text()` 控制模板。Milvus 保存检索索引，原文及有效状态仍在 MySQL。
+
+### 距离、相似度与近似最近邻
+
+余弦相似度为向量点积除以两向量长度乘积，衡量方向接近程度。教学上，`(1,0)` 与 `(2,0)` 的余弦为1，`(1,0)` 与 `(0,1)` 为0；它说明比例不改变方向，不表示任何文本答案“100%正确”。
+
+本项目 dense 使用 `COSINE`，数值越大越相似；不要套用L2距离“越小越好”的排序直觉。`HNSW` 用分层邻接图缩小搜索范围，属于近似最近邻：避免逐条扫描全部高维向量，但召回与延迟存在权衡。`M=16`、`efConstruction=200` 是建索引参数，查询 `ef` 影响候选探索；它们不是切块长度或最终返回条数。
+
+实现入口：[`knowledge_store.py`](../backend/app/persistence/milvus/knowledge_store.py) 的 `KnowledgeVectorStore.ensure_collection()` / `search()`。源码参数只是当前选型，不意味着所有规模都最优。
+
+### dense、BM25、RRF 和 rerank 是四个不同步骤
+
+1. **dense 召回**侧重语义近似，能帮助匹配不同说法，但可能把具体型号或条件混淆。
+2. **BM25 召回**基于词项匹配、词频饱和与文档长度归一化；精确型号和业务关键词常有价值，但同义表述未必共享词项。本项目使用Milvus中文analyzer和BM25 function，从 `text` 生成稀疏向量，不是客户端再用embedding模型编码一份关键词向量。
+3. **RRF 融合**用排名而不是直接相加不同量纲的分数。一个候选在每一路的贡献可理解为 `1/(60+名次)`，多路贡献相加；排名靠前且跨路出现的项更有优势。源码 `RRFRanker(60)` 的60是平滑参数，不是Top60。
+4. **rerank 精排**把问题和候选权威正文成对打分，再排序。它成本高于索引召回，因此只用于缩小后的候选集，不在全库逐条运行。
+
+教学例子：候选A在dense排第1、BM25排第20；B在两路均第3。RRF按排名累加，B可能优于只在单路很靠前的A；这不是声称B答案必然正确。COSINE、BM25、RRF分数不可混用阈值；本项目reranker的sigmoid分数也不是校准后的正确概率。
+
+默认链路为两路各最多Top50 → RRF融合最多50 → MySQL有效性回表 → rerank → 默认最多Top10。源码 [`retrieval.py`](../backend/app/services/rag/retrieval.py) 的 `semantic_search()` / `_rerank()`；三种Milvus入口为 `search()`、`search_bm25()`、`hybrid_search()`。
+
+### 为什么先过滤、再回表
+
+品类、来源、内容类型等标量条件在每路召回前精确过滤，避免不相关类别占据候选池。召回后仍要按主键回MySQL：Milvus可能残留作废向量或孤儿项，索引正文副本也不能替代当前权威正文。
+
+[`get_vectorized_chunks_by_ids()`](../backend/app/persistence/mysql/knowledge.py) 仅取仍为 `vectorized` 的块；先做这一步，再把有效正文交给reranker。最终还经过Agent证据充分性与引用校验，检索排名不直接成为业务结论。
+
+### 三级阅读路线
+
+| 层级 | 阅读目标 | 对应章节与源码 |
+| --- | --- | --- |
+| 入门 | 分清原文、向量、索引、候选与最终证据 | 本节与§1；先看RAG全景，不先执行写数据命令 |
+| 实现 | 看一个问题如何得到候选ID，再变成有效正文 | §4/§6；`KnowledgeVectorStore.hybrid_search` → `semantic_search` → `get_vectorized_chunks_by_ids` |
+| 进阶 | 理解建库幂等、索引迁移、召回权衡和失败边界 | §5/§7/§8；[`indexing.py`](../backend/app/services/rag/indexing.py) 的 `vectorize_pending` / `migrate_legacy_collection` / `cleanup_superseded_vectors` |
+
+先画读链路，再学写链路：MySQL pending → embedding → Milvus同主键upsert → MySQL vectorized。这不是跨库原子事务；中断补齐与作废过滤必须一起理解。下文保留原有部署步骤，示例中的写入/删除/迁移不应为了学习直接操作用户数据库。
+
 ## 1. Milvus 在项目中的职责
 
 **MySQL 保存权威知识和业务状态，Milvus 保存检索索引。** Milvus 不负责订单、会话、员工审核或模型生成。
@@ -646,4 +691,4 @@ rag_admin.milvus()
 | 建库 CLI | [scripts/build_knowledge_base.py](../backend/scripts/build_knowledge_base.py) |
 | 员工只读接口 | [api/routes/rag_admin.py](../backend/app/api/routes/rag_admin.py) / `GET /api/rag/milvus` |
 
-完整 RAG 链路、切分与评估见 [RAG.md](RAG.md)。本文部署配置是基于官方版本的本地部署示例，不代表本次已启动这些容器；插入、清理和迁移示例均有写操作，不应为写文档而对现有用户数据执行。··········
+完整 RAG 链路、切分与评估见 [RAG.md](RAG.md)。本文部署配置是基于官方版本的本地部署示例，不代表本次已启动这些容器；插入、清理和迁移示例均有写操作，不应为写文档而对现有用户数据执行。
