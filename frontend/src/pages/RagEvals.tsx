@@ -138,12 +138,12 @@ function Metadata({ report }: { report: RagEvalReport }) {
     { label: '评审独立性', value: judgeModel ? meta?.judge_independent : true },
   ].filter(({ value }) => value == null || value === '').map(({ label }) => label);
   return <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-    <Text type="secondary">以下配置来自本报告生成时的记录，不代表当前后端设置。</Text>
+    <Text type="secondary">报告生成时的配置快照</Text>
     {legacy
-      ? <Text type="secondary">历史报告未采集完整运行快照；这里只展示已有信息，完成新版评估后会更新。</Text>
-      : missing.length > 0 && <Alert showIcon type="warning" message="报告缺少关键运行记录" description={`本报告未提供：${missing.join('、')}。这些值不能由当前配置或旧报告推断。`} />}
+      ? <Text type="secondary">历史快照不完整；请运行新版评估获取完整记录。</Text>
+      : missing.length > 0 && <Alert showIcon type="warning" message="报告记录不完整" description={`缺少：${missing.join('、')}。请重新评估补全记录。`} />}
     <Descriptions bordered size="small" column={{ xs: 1, md: 2 }} items={configuration} />
-    {meta?.model_metadata_source === 'configured_not_independently_verified' && <Text type="secondary">模型名称来自当时配置，未独立核验服务返回的模型身份。</Text>}
+    {meta?.model_metadata_source === 'configured_not_independently_verified' && <Text type="secondary">模型名称：配置记录，身份待独立核验。</Text>}
     {evidence.length > 0 && <Collapse items={[{
       key: 'evidence', label: '版本指纹与来源明细',
       children: <Descriptions bordered size="small" column={1} items={evidence} />,
@@ -254,15 +254,15 @@ export function RagEvals() {
 
   return <StaffLayout actor={actor.data} className="rag-shell">
     <main className="rag-main eval-main staff-eval-main">
-      <div className="rag-heading"><div><Text className="section-kicker">RAG EVALUATION</Text><Title level={2}>客服 RAG 评估</Title><Paragraph type="secondary">离线策略检索与在线客服工作流分别评估；历史报告只读，不作为新版基线。</Paragraph></div><Space wrap><Link to="/staff/rag">返回建库控制台</Link><Button type="primary" disabled={apiMode !== 'remote' || !!workingJob || jobs.isLoading || jobs.isError || startEvaluation.isPending} onClick={() => setDecisionMode(mode)}>{isOnline ? '启动在线工作流评估' : '启动离线四策略评估'}</Button><Button icon={<ReloadOutlined />} disabled={apiMode !== 'remote'} onClick={() => void report.refetch()}>刷新报告</Button></Space></div>
+      <div className="rag-heading"><div><Title level={2}>客服 RAG 评估</Title><Paragraph type="secondary">分别评估离线检索策略与在线客服工作流，查看指标并逐题核对。</Paragraph></div><Space wrap><Link to="/staff/rag">返回建库控制台</Link><Button type="primary" disabled={apiMode !== 'remote' || !!workingJob || jobs.isLoading || jobs.isError || startEvaluation.isPending} onClick={() => setDecisionMode(mode)}>{isOnline ? '启动在线工作流评估' : '启动离线四策略评估'}</Button><Button icon={<ReloadOutlined />} disabled={apiMode !== 'remote'} onClick={() => void report.refetch()}>刷新报告</Button></Space></div>
       {activeEvalJob && apiMode === 'remote' && <Alert className="staff-eval-status" showIcon type="warning"
-        message={<Space wrap><Text strong>{activeEvalJob.kind === 'evaluate-online' ? '在线工作流' : '离线四策略'}评估{activeEvalJob.status === 'stopping' ? '正在终止' : '正在运行'}</Text><Text>{activeEvalJob.status === 'stopping' ? '后台正在完成停止流程；请等待确认。' : '评估仍在运行；如需终止，请确认后请求停止。'} 可切换到对应评估页查看进度。</Text><Button size="small" onClick={() => setMode(activeEvalJob.kind === 'evaluate-online' ? 'online' : 'offline')}>查看此评估</Button><Popconfirm title="终止当前评估？" description="当前一轮检索、生成与评审完成并保存后停止；不会关闭模型服务。停止期间仍占用任务锁。" okText="终止评估" cancelText="继续运行" onConfirm={() => stopEvaluation.mutate(activeEvalJob.id)}><Button size="small" danger disabled={activeEvalJob.status === 'stopping' || stopEvaluation.isPending} loading={stopEvaluation.isPending}>终止评估</Button></Popconfirm></Space>} />}
+        message={<Space wrap><Text strong>{activeEvalJob.kind === 'evaluate-online' ? '在线工作流' : '离线四策略'}评估{activeEvalJob.status === 'stopping' ? '正在终止' : '正在运行'}</Text><Text>{activeEvalJob.status === 'stopping' ? '请等待停止完成。' : '可查看进度或终止评估。'}</Text><Button size="small" onClick={() => setMode(activeEvalJob.kind === 'evaluate-online' ? 'online' : 'offline')}>查看此评估</Button><Popconfirm title="终止当前评估？" description="当前一轮完成并保存后停止，模型服务保持运行；停止完成后可启动新任务。" okText="终止评估" cancelText="继续运行" onConfirm={() => stopEvaluation.mutate(activeEvalJob.id)}><Button size="small" danger disabled={activeEvalJob.status === 'stopping' || stopEvaluation.isPending} loading={stopEvaluation.isPending}>终止评估</Button></Popconfirm></Space>} />}
       <Tabs className="staff-eval-mode-tabs" activeKey={mode} onChange={(key) => { setMode(key as EvalMode); setQuestionType('all'); setDifficulty('all'); setSplit('all'); }} items={[
         { key: 'offline', label: '离线检索策略' }, { key: 'online', label: '在线工作流' },
       ]} />
-      {apiMode === 'mock' ? <Alert showIcon type="warning" message="演示模式不提供真实评估报告" description="请切换 VITE_API_MODE=remote 并使用员工账号登录；mock 不生成评估结果。" /> : <>
+      {apiMode === 'mock' ? <Alert showIcon type="warning" message="演示模式：评估功能与真实报告不可用" description="请在正式服务中使用员工账号进行评估。" /> : <>
         {startError && <Alert showIcon type="error" message={startError} closable onClose={() => setStartError('')} />}
-        {jobs.isError && <Alert showIcon type="error" message="评估任务状态读取失败" description={jobs.error instanceof Error ? jobs.error.message : '请检查后端服务'} action={<Button size="small" onClick={() => void jobs.refetch()}>重试</Button>} />}
+        {jobs.isError && <Alert showIcon type="error" message="评估任务状态读取失败" description={jobs.error instanceof Error ? jobs.error.message : '请稍后重试'} action={<Button size="small" onClick={() => void jobs.refetch()}>重试</Button>} />}
         {checkpoints.isError && <Alert showIcon type="error" message="评估断点读取失败" description={checkpoints.error instanceof Error ? checkpoints.error.message : '无法读取持久评估状态；可重新开始，但不可继续。'} action={<Button size="small" onClick={() => void checkpoints.refetch()}>重试</Button>} />}
         {(currentCheckpoint || latestEvalJob) && <div className="staff-eval-task-state">
           {currentCheckpoint && <Alert className="staff-eval-status" showIcon
@@ -288,28 +288,28 @@ export function RagEvals() {
                     status={latestEvalJob.status === 'failed' ? 'exception' : latestEvalJob.status === 'completed' ? 'success' : latestEvalJob.status === 'cancelled' ? 'normal' : 'active'}
                   /></>}
               </Space>
-              {evaluationProgress && <Text type="secondary">每次检索、生成与评审完成后推进；次数达到总数后仍需等待报告写入完成。</Text>}
+              {evaluationProgress && <Text type="secondary">全部评估完成后，还需等待报告保存。</Text>}
             </div>}
           />}
         </div>}
         {report.isLoading && <Card><Spin /></Card>}
-        {report.isError && <Alert showIcon type="error" message="评估报告加载失败" description={report.error instanceof Error ? report.error.message : '请检查后端服务'} action={<Button size="small" onClick={() => void report.refetch()}>重试</Button>} />}
+        {report.isError && <Alert showIcon type="error" message="评估报告加载失败" description={report.error instanceof Error ? report.error.message : '请稍后重试'} action={<Button size="small" onClick={() => void report.refetch()}>重试</Button>} />}
         {data && <>
           <Space className="staff-eval-report-summary" wrap size={[12, 12]} aria-label="报告来源与重要限制">
             <Text strong>当前报告：</Text>
-            {legacy && <Text type="warning">历史 schema v1，仅供查阅，不能作为新题集基线</Text>}
-            {data.execution_environment === 'fixture' && <Text type="warning">Fixture：仅工作流验证，非真实模型/知识库/依赖验收</Text>}
-            {data.metadata?.judge_independent === false && <Text type="warning">非独立评审，有相关性偏差，不能作独立质量验收</Text>}
-            {!!data.metadata?.unobserved_sources?.length && <Text type="warning">来源有缺口，不能作完整在线验收（完整来源名单见下方）</Text>}
-            {data.execution_environment === 'historical_unverified' && <Text type="warning">历史环境未经核验，不能证明真实在线质量或新版基线</Text>}
-            {data.threshold_selection && <Text type="warning">阈值仅在验证集校准，不可继续用独立留出集调阈值</Text>}
+            {legacy && <Text type="warning">历史 v1 · 仅供查阅</Text>}
+            {data.execution_environment === 'fixture' && <Text type="warning">Fixture · 仅工作流验证</Text>}
+            {data.metadata?.judge_independent === false && <Text type="warning">非独立评审 · 需人工抽查</Text>}
+            {!!data.metadata?.unobserved_sources?.length && <Text type="warning">来源覆盖不完整 · 待补充验证</Text>}
+            {data.execution_environment === 'historical_unverified' && <Text type="warning">历史环境 · 未核验</Text>}
+            {data.threshold_selection && <Text type="warning">验证集调阈值 · 留出集独立验证</Text>}
             {data.execution_environment === 'real' && <Text>真实依赖环境</Text>}
           </Space>
           <Tabs className="staff-eval-report-tabs" defaultActiveKey="overview" items={[
             { key: 'overview', label: '总览', forceRender: true, children: <>
           {overall ? <Card className="rag-card staff-eval-overview" title={isOnline ? '在线工作流总体指标' : '离线总体指标'}>
             <Table size="small" rowKey="key" pagination={false} scroll={{ x: isOnline ? 2000 : 1450 }} columns={metricColumns(isOnline)} dataSource={Object.keys(strategies).length ? Object.entries(strategies).map(([key, value]) => ({ key, name: strategyNames[key] ?? key, metrics: value.overall })) : [{ key: 'online', name: '在线客服图', metrics: overall }]} />
-            <Paragraph type="secondary">{overall.count ?? '未记录'} 道题，按标注可答 {overall.answerable ?? '未知'}；有效评分 {overall.scored_count ?? '未记录'}，前置条件未满足 {overall.preconditions_unmet_count ?? '未记录'}。Recall/MRR 仅适用于有来源标签的离线检索题。指标缺失以「—」显示，不代表 0。</Paragraph>
+            <Paragraph type="secondary">{overall.count ?? '未记录'} 道题，按标注可答 {overall.answerable ?? '未知'}；有效评分 {overall.scored_count ?? '未记录'}，前置条件未满足 {overall.preconditions_unmet_count ?? '未记录'}。Recall/MRR 适用于有来源标签的离线检索题；「—」为指标缺失。</Paragraph>
           </Card> : <Empty description="报告未记录总体指标" />}
           </> },
             { key: 'groups', label: '分组对比', children: <>
@@ -371,7 +371,7 @@ export function RagEvals() {
             },
             { key: 'configuration', label: '运行配置', children: <>
               <Card className="rag-card" title="报告与运行配置"><Metadata report={data} /></Card>
-              <Collapse items={[{ key: 'judge-policy', label: '评审模型使用说明（允许同模型评审）', children: <Paragraph>未配置 EVAL_JUDGE_* 时复用客服 OPENAI_* 模型；配置了评审服务则优先使用该服务。同模型评审可能偏乐观，报告会标记是否独立，建议人工抽查。</Paragraph> }]} />
+              <Collapse items={[{ key: 'judge-policy', label: '评审可信度与人工抽查', children: <Paragraph>同模型评审可能偏乐观；请结合报告中的独立性标识进行人工抽查。</Paragraph> }]} />
               <Card className="rag-card" title="运行消耗">
                 <Table size="small" pagination={false} scroll={{ x: 750 }} rowKey="name" columns={[
                   { title: '策略', dataIndex: 'name', key: 'name' },
@@ -389,12 +389,12 @@ export function RagEvals() {
           {(legacy || data.execution_environment === 'fixture' || data.metadata?.judge_independent === false || !!data.metadata?.unobserved_sources?.length || data.execution_environment === 'historical_unverified' || data.threshold_selection) && <Alert className="staff-eval-report-state" showIcon type="warning"
             message="报告适用范围与限制"
             description={<ul className="staff-eval-limitations">
-              {legacy && <li><Text strong>历史报告（schema v1）：</Text>旧版 15 题，不含 v2 完整性、误拒答、应拒未拒、模型/token 与留出集指标；不能作为新题集基线。</li>}
-              {data.execution_environment === 'fixture' && <li><Text strong>Fixture 环境结果：</Text>仅用于确定性工作流验证，不代表真实模型、知识库或依赖环境验收。</li>}
-              {data.metadata?.judge_independent === false && <li><Text strong>非独立评审：</Text>评审与回答生成使用相同 provider/model，评分可能有相关性偏差，不能作为独立质量验收结论。</li>}
-              {!!data.metadata?.unobserved_sources?.length && <li><Text strong>题集来源覆盖不完整：</Text>未观察到 gold 来源：{data.metadata.unobserved_sources.join('、')}；不可表述为完整在线验收。</li>}
-              {data.execution_environment === 'historical_unverified' && <li><Text strong>历史环境未经核验：</Text>结果仅供查阅，不能证明真实在线质量或新版基线。</li>}
-              {data.threshold_selection && <li><Text strong>独立留出集不可继续调阈值：</Text>只能在验证集校准；分组保留验证/独立留出结果，历史运行或缺失指标不作质量证明。</li>}
+              {legacy && <li><Text strong>历史 v1：</Text>旧版 15 题，缺少新版指标与运行记录；新版基线需重新评估。</li>}
+              {data.execution_environment === 'fixture' && <li><Text strong>Fixture：</Text>仅验证确定性工作流；真实模型、知识库和依赖验收需使用真实环境评估。</li>}
+              {data.metadata?.judge_independent === false && <li><Text strong>非独立评审：</Text>生成与评审使用相同模型，评分存在相关性偏差；独立质量验收需补充独立评审。</li>}
+              {!!data.metadata?.unobserved_sources?.length && <li><Text strong>待验证来源：</Text>{data.metadata.unobserved_sources.join('、')}；完成来源覆盖后再进行完整在线验收。</li>}
+              {data.execution_environment === 'historical_unverified' && <li><Text strong>历史环境未核验：</Text>仅供查阅；在线质量验收与新版基线需重新评估。</li>}
+              {data.threshold_selection && <li><Text strong>阈值校准：</Text>仅使用验证集调阈值，留出集保持独立；质量判断需完整的本次指标。</li>}
             </ul>}
           />}
         </>}
@@ -416,7 +416,7 @@ export function RagEvals() {
           onClick={() => decisionMode && startEvaluation.mutate({ mode: decisionMode, action: 'resume' })}>继续上次评估</Button>,
       ]}
     >
-      <Paragraph>请选择本次启动方式。重新开始会替换该评估模式的断点，不会删除或覆盖现有报告；继续会从持久断点恢复已完成进度。</Paragraph>
+      <Paragraph>重新开始将替换本模式的断点，保留现有报告；继续上次评估将恢复已完成进度。</Paragraph>
       {decisionCheckpoint && <Space direction="vertical" size={4} style={{ display: 'flex', marginBottom: 16 }}>
         {decisionCheckpoint.evaluationProgress && <Text>已完成 {decisionCheckpoint.evaluationProgress.completed}/{decisionCheckpoint.evaluationProgress.total} 次评估</Text>}
         {decisionCheckpoint.updatedAt && <Text type="secondary">最后更新：{new Date(decisionCheckpoint.updatedAt).toLocaleString('zh-CN')}</Text>}

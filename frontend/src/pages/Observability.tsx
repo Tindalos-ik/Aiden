@@ -91,8 +91,8 @@ function Usage({ value }: { value: ObservabilityObservation }) {
       <Text strong>观测平台另有这些用量分项</Text>
       {details.map((item) => <Text type="secondary" key={item.key}>{item.label}：{numberText(item.amount)}</Text>)}
       <Text type="secondary">{value.usage_details_source?.includes('历史来源未核验')
-        ? '这些历史分项来源尚未核验，可能已包含在上方汇总；不会重复计入合计。'
-        : '这些分项可能已包含在上方汇总；不会重复计入合计。完整确认用量以页面汇总为准。'}</Text>
+        ? '历史分项来源未核验；分项可能包含在汇总中。'
+        : '分项可能包含在汇总中，用量以页面汇总为准。'}</Text>
     </>}
   </Space>;
 }
@@ -273,18 +273,17 @@ export function Observability() {
     <main className="rag-main observability-main">
       <section className="rag-heading">
         <div>
-          <Text type="secondary">员工工具 · 只读观测</Text>
           <Title level={2}>观测与用量</Title>
-          <Paragraph type="secondary">查看客服请求与模型用量；不展示原始聊天内容。</Paragraph>
+          <Paragraph type="secondary">查看客服请求、处理步骤与模型用量。</Paragraph>
         </div>
         <Space wrap><Text type="secondary">显示时区：{timezone}</Text><Button onClick={refresh} disabled={!remote} loading={overview.isFetching || traces.isFetching}>刷新数据</Button></Space>
       </section>
-    {!remote && <Alert type="warning" showIcon message="模拟模式不提供真实观测数据" description="此页不会填入模拟观测；切换到 remote 并使用已授权的员工账户。" />}
+    {!remote && <Alert type="warning" showIcon message="演示模式暂不提供观测数据" />}
     <Card size="small" className="rag-card staff-query" title="查询范围" extra={<Button onClick={clearOtherFilters}>清除其他筛选并查询</Button>}>
       <Space wrap>
         <Select aria-label="时间范围" value={preset} onChange={applyPreset} options={[{ value: '1h', label: '最近 1 小时' }, { value: '24h', label: '最近 24 小时' }, { value: '7d', label: '最近 7 天' }, { value: '31d', label: '最近 31 天（最大范围）' }, { value: 'custom', label: '自定义' }]} />
         {preset === 'custom' && <><DatePicker.RangePicker showTime value={customRange} onChange={(value) => setCustomRange(value)} /><Button onClick={applyCustom}>应用时间</Button></>}
-        <Select aria-label="数据源" value={source} onChange={setSource} options={[{ value: 'aiden_support', label: '仅在线客服（默认）' }, { value: 'other', label: '其他来源（与在线客服分开查询）' }]} />
+        <Select aria-label="数据源" value={source} onChange={setSource} options={[{ value: 'aiden_support', label: '在线客服（默认）' }, { value: 'other', label: '其他来源' }]} />
         <AutoComplete
           aria-label="模型全名筛选"
           placeholder="模型全名（可输入）"
@@ -308,16 +307,15 @@ export function Observability() {
         <Button type="primary" onClick={applyFilters}>应用筛选</Button>
       </Space>
       <Paragraph type="secondary" className="rag-hint">
-        当前显示 {dateText(applied.start, timezone)} — {dateText(applied.end, timezone)}（{timezone}）。模型和业务分类筛选会选择符合条件的整条请求，并保留其中全部模型调用；按模型或业务分类查看用量可使用下方分组和 Token 趋势。其他来源不会混入在线客服。
+        当前显示 {dateText(applied.start, timezone)} — {dateText(applied.end, timezone)}（{timezone}）。
         {rangeError && <Text type="danger"> {rangeError}</Text>}
       </Paragraph>
     </Card>
-    <Paragraph type="secondary">如无数据，可显式扩大到最近 7 天或 31 天、清除已应用筛选后点击“应用筛选”，或点击“刷新数据”；页面不会自行改变范围。</Paragraph>
     {overview.isLoading && <Spin tip="正在读取观测概览…" />}
     {overview.isError && <Alert type="error" showIcon message="概览读取失败" description={overview.error instanceof Error ? overview.error.message : '请求失败'} />}
-    {!overview.isError && overview.data?.state === 'ready' && <Alert type="success" showIcon message={`已读取真实观测数据 · 查询时间 ${dateText(overview.data.queried_at, timezone)}`} description={`查询来源：${sourceText(filters.source)}。以下数字来自当前查询范围的实际读取结果。`} />}
+    {!overview.isError && overview.data?.state === 'ready' && <Text type="secondary">来源：{sourceText(filters.source)} · 更新于 {dateText(overview.data.queried_at, timezone)}</Text>}
     {!overview.isError && overview.data?.state && !['ready', 'empty'].includes(overview.data.state) && <Alert type="warning" showIcon message={`观测读取状态：${stateText[overview.data.state] ?? '状态未知'}`} description={stateHint[overview.data.state] ?? '请管理员检查观测服务后重试。'} />}
-    {!overview.isError && overview.data?.coverage.truncated && <Alert type="warning" showIcon message="结果不完整" description={`上游读取 ${overview.data.coverage.observations_read}/${overview.data.coverage.limit} 条记录；数字只代表已读取部分，不能代表完整时间范围。`} />}
+    {!overview.isError && overview.data?.coverage.truncated && <Alert type="warning" showIcon message="结果不完整" description={`已读取 ${overview.data.coverage.observations_read}/${overview.data.coverage.limit} 条记录；统计仅覆盖已读取部分。`} />}
     {traces.isError && <Alert type="error" showIcon message="请求列表读取失败" description={traces.error instanceof Error ? traces.error.message : '请求失败'} />}
     {!traces.isError && traces.data?.state && !['ready', 'empty'].includes(traces.data.state) && <Alert type="warning" showIcon message={`请求列表状态：${stateText[traces.data.state] ?? '状态未知'}`} description={stateHint[traces.data.state] ?? '请管理员检查观测服务后重试。'} />}
     {!overview.isError && overview.data?.state === 'empty' && <Alert
@@ -327,16 +325,15 @@ export function Observability() {
       description={<Space direction="vertical">
         <Text>
           {overview.data.coverage.truncated
-            ? '本次已读取记录中未找到匹配请求。由于读取结果不完整，不能据此判断完整查询范围。'
+            ? '已读取部分没有匹配请求；完整范围尚未确认。'
             : overview.data.coverage.empty_reason === 'source_excluded'
-              ? `所选来源中没有匹配请求；另有 ${overview.data.coverage.excluded_by_source} 组其他来源请求未纳入。可手动切换来源，数据不会混算。`
+              ? `所选来源没有匹配请求；另有 ${overview.data.coverage.excluded_by_source} 组其他来源请求，可切换来源查看。`
               : overview.data.coverage.empty_reason === 'filters_excluded'
                 ? `${overview.data.coverage.source_matched_traces} 条来源请求被其他筛选条件排除（${overview.data.coverage.excluded_by_filters} 条）。`
                 : overview.data.coverage.empty_reason === 'no_observations'
                   ? `查询已完成，但在 ${sourceText(filters.source)} 中没有读取到记录。`
                   : '本次已读取记录中未找到匹配请求。'}
         </Text>
-        <Text>当前来源为“{sourceText(filters.source)}”；切换来源需要您手动选择，不会自动改为其他来源。</Text>
         <Space wrap>
           <Button onClick={() => applyPreset('1h')}>缩小到最近 1 小时</Button>
           <Button onClick={() => applyPreset('24h')}>查看最近 24 小时</Button>
@@ -357,22 +354,25 @@ export function Observability() {
           <Text type="secondary">基于 {numberText(data.duration.samples)} 条已记录耗时 · 中位耗时 {durationText(data.duration.p50_ms)} · 较慢请求参考 {durationText(data.duration.p95_ms)}</Text>
         </Card>
       </section>
-      <Paragraph type="secondary">这里的结果只表示后台客服处理是否正常完成，不代表订单问题已解决或退款已到账。</Paragraph>
       <section className="obs-counts">
         <Card className="rag-stat">
           <Statistic title="模型用量（Token）" value={data.tokens.total == null ? '未知' : numberText(data.tokens.total)} />
-          <Text type="secondary">输入 {numberText(data.tokens.input)} · 输出 {numberText(data.tokens.output)} · 合计 {numberText(data.tokens.total)}。未知表示数据未记录；已确认的 0 保持显示为 0。Token 是模型处理文本的计量单位，不等同于字数；缺失字段不补算，历史未核验数据不计入已确认汇总。完整覆盖：{data.tokens.known_generations}/{data.tokens.total_generations} 次。</Text>
+          <Text type="secondary">输入 {numberText(data.tokens.input)} · 输出 {numberText(data.tokens.output)} · 来源已核验且用量完整：{data.tokens.known_generations}/{data.tokens.total_generations} 次。未知表示用量缺失或来源未核验。</Text>
         </Card>
       </section>
-    <Collapse size="small" items={[{ key: 'facts', label: '本次查询事实', children: <Paragraph>{data.insights.facts.join(' ')}</Paragraph> }]} />
+    <Collapse size="small" items={[{ key: 'facts', label: '查询说明与数据限制', children: <>
+      <Paragraph>{data.insights.facts.join(' ')}</Paragraph>
+      <Paragraph>模型和业务分类筛选选择整条请求，包含其中全部模型调用；分项用量请查看“用量明细”。处理结果指后台运行状态，订单或退款进展请查看业务记录。</Paragraph>
+      <Paragraph>Token 是模型文本用量单位；汇总仅包含来源已核验的用量。缺失及历史未核验记录见“数据完整情况”。</Paragraph>
       {data.insights.limitations.map((item, index) => <Paragraph type="secondary" key={`limit-${index}`}>{item}</Paragraph>)}
-    <Paragraph type="secondary">这里只表示后台处理耗时；用户端总等待时间、首字响应时间未采集。知识查询只记录整体耗时，内部阶段未分别记录。</Paragraph>
+      <Paragraph>耗时为后台处理耗时；用户总等待、首字响应及知识查询内部阶段耗时未采集。</Paragraph>
+    </> }]} />
     </>}
     <Tabs className="staff-data-tabs" items={[
       { key: 'trends', label: '处理趋势', children: data ? <Card size="small" className="rag-card" title="每日处理趋势"><Trend points={data.trend} /></Card> : <Empty description="尚无可展示的趋势数据" /> },
       { key: 'requests', label: '请求与步骤', children: <>
     <Card className="rag-card" title="处理记录与请求列表">
-      <Paragraph type="secondary">列表展示当前范围内已读取的客服请求；更细的处理步骤仅按实际记录显示，不推测未采集的耗时。</Paragraph>
+      <Paragraph type="secondary">当前范围内已读取的请求；点击请求查看处理步骤。</Paragraph>
       <Table
         rowKey="id"
         columns={columns}
@@ -386,7 +386,7 @@ export function Observability() {
     </Card>
       {data && <>
     <Card className="rag-card" title="较慢的请求与步骤">
-      <Paragraph type="secondary">展示已记录的较慢处理步骤。步骤按真实父子关系追溯；并行处理不表示先后顺序。点击步骤后会打开所属请求详情并定位到该步骤。</Paragraph>
+      <Paragraph type="secondary">点击查看所属请求或定位步骤。处理树按父子关系展示，并行步骤请结合时间查看。</Paragraph>
       <Table
         size="small"
         scroll={{ x: 850 }}
@@ -423,7 +423,7 @@ export function Observability() {
       { key: 'usage', label: '用量明细', children: data ? <>
     <Card size="small" className="rag-card" title="模型与业务分类用量"><Space direction="vertical" style={{ width: '100%' }}><Table size="small" scroll={{ x: 650 }} rowKey="model" pagination={false} dataSource={data.models} locale={{ emptyText: '当前没有模型调用记录' }} columns={[{ title: '模型', dataIndex: 'model' }, { title: '调用数', dataIndex: 'generations' }, { title: '模型用量（Token）', render: (_, row) => tokenText(row.tokens) }]} /><Table size="small" scroll={{ x: 650 }} rowKey="bucket" pagination={false} dataSource={data.attribution} locale={{ emptyText: '当前没有业务分类记录' }} columns={[{ title: '业务分类', dataIndex: 'bucket', render: intentText }, { title: '调用数', dataIndex: 'generations' }, { title: '模型用量（Token）', render: (_, row) => tokenText(row.tokens) }]} /></Space></Card>
     {data && <Card className="rag-card obs-token-trend" title="Token 趋势">
-      <Paragraph type="secondary">按日期、模型和业务分类查看调用次数与 Token 用量。共享意图分类单独列出；此处筛选只改变本表，不改变上方请求总览。</Paragraph>
+      <Paragraph type="secondary">按日期、模型和业务分类查看用量；共享意图分类单列。以下筛选仅用于本表。</Paragraph>
       <Space wrap className="obs-token-filters">
         <Select aria-label="Token 趋势模型" value={tokenModel} onChange={setTokenModel} options={[{ value: 'all', label: '全部模型' }, ...Array.from(new Set((data.token_trend ?? []).map((row) => row.model))).map((model) => ({ value: model, label: model }))]} />
         <Select aria-label="Token 趋势业务分类" value={tokenBucket} onChange={setTokenBucket} options={[{ value: 'all', label: '全部业务分类' }, ...Array.from(new Set((data.token_trend ?? []).map((row) => row.bucket))).map((bucket) => ({ value: bucket, label: intentText(bucket) }))]} />
@@ -446,7 +446,7 @@ export function Observability() {
       />}
     </Card>}
     {data && <Card className="rag-card" title="数据完整情况">
-      <Paragraph type="secondary">这里只表示后台处理耗时；用户端总等待时间、首字响应时间未采集。知识查询只记录整体耗时，内部阶段未分别记录。</Paragraph>
+      <Paragraph type="secondary">用量缺失或来源未核验的调用单独列出。</Paragraph>
       <Descriptions column={{ xs: 1, md: 2 }} size="small">
         <Descriptions.Item label="模型调用总数">{numberText(data.data_quality.generations)}</Descriptions.Item>
         <Descriptions.Item label="来源已核验的完整用量">{numberText(data.data_quality.provider_verified)} / {numberText(data.data_quality.generations)} 次</Descriptions.Item>

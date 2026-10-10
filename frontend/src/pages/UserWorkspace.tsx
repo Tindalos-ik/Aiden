@@ -117,7 +117,7 @@ export function MessageBubble({ item, feedbackUserId, viewerRole = 'user', userN
         {item.orderCard && <OrderCardView order={item.orderCard} />}
         {item.toolStatuses && item.toolStatuses.length > 0 && <div className="tool-trail">{item.toolStatuses.map((status, index) => <div key={`${status}-${index}`}><CheckCircleFilled />{status}</div>)}</div>}
         {item.status === 'streaming' && <span className="stream-cursor" />}
-        {apiMode === 'remote' && item.role === 'assistant' && item.status !== 'complete' && item.content && <div className="message-state-note">{item.verified ? '回答已核验并保存 · 正在同步会话' : '生成草稿 · 尚未核验，最终回答可能替换此内容'}</div>}
+        {apiMode === 'remote' && item.role === 'assistant' && item.status !== 'complete' && item.content && <div className="message-state-note">{item.verified ? '正在完成回复…' : '正在生成，内容以最终回复为准'}</div>}
         {item.status === 'stopped' && <div className="message-state-note"><StopOutlined /> 已停止生成</div>}
         {item.status === 'error' && <div className="message-state-note message-state-error"><span /> 这条回复没有完成</div>}
       </div>
@@ -131,7 +131,7 @@ function ConversationList({ conversations, selectedId, onSelect, onCreate, compa
   conversations: Conversation[]; selectedId?: string; onSelect: (id: string) => void; onCreate: () => void; compact?: boolean;
 }) {
   return <div className={`conversation-list-pane ${compact ? 'conversation-list-compact' : ''}`}>
-    <div className="conversation-list-header"><div><span className="section-kicker">SUPPORT</span><h2>我的会话</h2></div><Tooltip title="新建会话"><Button type="primary" shape="circle" icon={<PlusOutlined />} onClick={onCreate} aria-label="新建会话" /></Tooltip></div>
+    <div className="conversation-list-header"><div><h2>我的会话</h2></div><Tooltip title="新建会话"><Button type="primary" shape="circle" icon={<PlusOutlined />} onClick={onCreate} aria-label="新建会话" /></Tooltip></div>
     <div className="conversation-list-scroll">
       {conversations.length ? conversations.map((conversation) => <button key={conversation.id} className={`conversation-item ${selectedId === conversation.id ? 'conversation-item-active' : ''}`} onClick={() => onSelect(conversation.id)}>
         <span className="conversation-icon"><span className="mini-brand-mark">a</span></span>
@@ -149,12 +149,10 @@ function WelcomePanel({ onAsk }: { onAsk: (text: string) => void }) {
     : ['我的订单到哪了？', '帮我查一下售后申请进度', '退货需要满足哪些条件？'];
   return <div className="welcome-panel">
     <div className="welcome-illustration"><div className="welcome-orbit orbit-one" /><div className="welcome-orbit orbit-two" /><div className="welcome-bubble"><span className="brand-mark"><span /><span /><span /><span /></span></div><span className="welcome-spark spark-one">✦</span><span className="welcome-spark spark-two">✳</span><span className="welcome-spark spark-three">·</span></div>
-    <div className="welcome-eyebrow">YOUR ORDER, IN GOOD HANDS</div>
     <h2>你好，我是 Aiden<span>。</span></h2>
-    <p>{apiMode === 'mock' ? <>我可以帮你查询订单、物流和退款进度。<br />需要更多帮助时，也可以随时转接人工客服。</> : <>我可以查询本人订单、物流和售后进度，依据已入库知识解答商品与政策问题。<br />需要人工协助时，可申请站内排队，客服接单后在本会话回复。</>}</p>
+    <p>我可以帮你查询订单、物流和售后进度，解答商品与政策问题。<br />需要更多帮助时，也可以联系人工客服。</p>
     <div className="suggestions-label">试着问我</div>
     <div className="suggestion-list">{visibleSuggestions.map((item, index) => <button key={item} className="suggestion-chip" onClick={() => onAsk(item)}><span className={`suggestion-index suggestion-index-${index}`}>0{index + 1}</span>{item}<ArrowUpOutlined /></button>)}</div>
-    <div className="welcome-demo-note"><span className="demo-footer-dot" />{apiMode === 'mock' ? '当前为本地演示数据，订单状态为模拟内容' : '远端模式读取当前账号的业务数据；无记录或服务故障会明确提示'}</div>
   </div>;
 }
 
@@ -360,7 +358,7 @@ export function UserWorkspace() {
           if (streamStateRef.current) streamStateRef.current.authoritative = true;
           updateAssistant(assistantId, (item) => ({ ...item, verified: true, content: event.text ?? '', citations: event.citations ?? [] }), true);
           setRetryTurn(null);
-          setStreamingText('回答已核验并保存，正在同步会话…');
+          setStreamingText('正在完成回复…');
         } else if (event.type === 'citations' && apiMode === 'mock' && event.citations) {
           updateAssistant(assistantId, (item) => ({ ...item, citations: event.citations }));
         } else if (event.type === 'handoff') {
@@ -452,16 +450,16 @@ export function UserWorkspace() {
             {conversation.status === 'staff' && <div className="staff-banner"><span className="staff-banner-icon"><CustomerServiceOutlined /></span><div><b>{conversation.assignedStaffName || '人工客服'}已接入</b><span>你可以在此继续与客服交流。</span></div></div>}
             {conversation.status === 'closed' && <div className="closed-banner"><span>本次人工服务已结束。</span><Button size="small" onClick={() => createConversation.mutate()}>新建咨询</Button></div>}
             <MessageTimeline messages={selectedMessages} loading={messagesQuery.isLoading} error={messagesQuery.error} retry={() => void messagesQuery.refetch()} feedbackUserId={actor.id} />
-            {apiMode === 'remote' && retryTurn && !isBusy && <Alert className="inline-alert" type="warning" showIcon message="本条回复未完成" description={<Button type="link" onClick={() => void send(retryTurn.text, retryTurn)}>使用同一消息编号重试</Button>} />}
+            {apiMode === 'remote' && retryTurn && !isBusy && <Alert className="inline-alert" type="warning" showIcon message="本条回复未完成" description={<Button type="link" onClick={() => void send(retryTurn.text, retryTurn)}>重试回复</Button>} />}
             {messages.length === 0 && !messagesQuery.isLoading && <WelcomePanel onAsk={(text) => void send(text)} />}
-            {isBusy && <div className="streaming-indicator"><span className="streaming-bars"><i /><i /><i /></span>{streamingText || '正在生成回复…'}{apiMode === 'mock' && <span className="streaming-mode">本地模拟</span>}</div>}
+            {isBusy && <div className="streaming-indicator"><span className="streaming-bars"><i /><i /><i /></span>{streamingText || '正在生成回复…'}</div>}
           </div>
           <div className="composer-wrap">
             {conversation.status === 'closed' ? <div className="composer-closed">此会话已结束。<Button type="link" onClick={() => createConversation.mutate()}>开始新的咨询</Button></div> : <div className="composer-box">
               <Input.TextArea value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={onInputKeyDown} autoSize={{ minRows: 1, maxRows: 5 }} placeholder={conversation.status === 'bot' ? '输入消息开始对话…' : '在原会话继续留言…'} disabled={isBusy || humanSending} aria-label="输入消息" />
               <div className="composer-toolbar"><span className="composer-hint">Enter 发送 · Shift + Enter 换行</span>{isBusy ? <Button className="stop-button" type="primary" danger icon={<StopOutlined />} onClick={() => abortRef.current?.abort()}>停止生成</Button> : <Button className="send-button" type="primary" icon={<ArrowUpOutlined />} loading={humanSending} disabled={!draft.trim()} onClick={() => void send(draft)}>发送</Button>}</div>
             </div>}
-            <div className="composer-disclaimer"><span className="composer-lock">◆</span>{apiMode === 'mock' ? '演示模式使用本地模拟数据，请勿输入真实个人信息' : '回答以查询结果和知识证据为准；售后审核通过不代表退款到账，不保证人工立即接入'}</div>
+            {apiMode === 'mock' && <div className="composer-disclaimer"><span className="composer-lock">◆</span>演示体验，请勿输入真实个人信息</div>}
           </div>
         </>}
       </section>

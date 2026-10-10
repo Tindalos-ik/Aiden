@@ -45,7 +45,7 @@ function ApplicationCard({ row, action }: { row: AfterSaleApplication; action?: 
     {row.policyEvidence && <p style={{ whiteSpace: 'pre-wrap' }}>政策证据：{row.policyEvidence}</p>}
     {row.decisionNote && <p>处理说明：{row.decisionNote}</p>}
     <Typography.Text type="secondary">提交：{new Date(row.createdAt).toLocaleString('zh-CN')} {row.reviewedAt && `· 审核：${new Date(row.reviewedAt).toLocaleString('zh-CN')}`}</Typography.Text>
-    {row.requestType === 'refund' && <Alert style={{ marginTop: 10 }} type="info" message="审核通过不代表款项已退；实际退款需外部支付系统执行。" />}
+    {row.requestType === 'refund' && <Typography.Paragraph type="secondary" style={{ marginTop: 10, marginBottom: 0 }}>退款到账请以支付账户记录为准。</Typography.Paragraph>}
   </Card>;
 }
 
@@ -140,7 +140,6 @@ export function UserServicePage() {
   if (!actor.data) return <Spin />;
   return <div className="workspace-shell"><PageHeader actor={actor.data} /><main style={{ width: '100%', maxWidth: 1000, margin: '28px auto', padding: 16 }}>
     <Typography.Title level={3}>我的售后与工单</Typography.Title>
-    {apiMode === 'mock' && <Alert type="info" showIcon message="本地演示模式：申请、政策和进度仅保存在浏览器，不代表真实订单或退款。" style={{ marginBottom: 16 }} />}
     <Tabs items={[
       { key: 'submit', label: '提交售后申请', children: <Card title="申请退款、退货或换货">
         <Space wrap style={{ marginBottom: 12 }}>
@@ -149,10 +148,10 @@ export function UserServicePage() {
           <Button loading={previewMutation.isPending} disabled={!orderNo || submit.isPending} onClick={() => requestPreview(orderNo, kind)}>核对订单与政策</Button>
         </Space><ErrorLine error={orders.error ?? previewMutation.error} />
         {preview && <>
-          <p>订单状态：{preview.orderStatus}。{preview.items.length > 1 ? '请选择本次申请涉及的具体商品（多商品订单不会自动选择）。' : '请选择本次申请涉及的商品：'}</p>
+          <p>订单状态：{preview.orderStatus}。请选择本次申请涉及的商品：</p>
           <Select disabled={submit.isPending} style={{ width: '100%', marginBottom: 12 }} placeholder="选择商品" value={itemId || undefined} options={preview.items.map((item) => ({ value: item.id, label: `${item.name} × ${item.quantity} · ¥${item.lineTotal}` }))} onChange={(value) => { setItemId(value); setConfirmed(false); }} />
           <p>适用政策：</p>
-          {!preview.policies.length && <Alert type="warning" showIcon message="当前没有可核验的有效政策，暂不能提交正式申请。可通过会话咨询客服。" />}
+          {!preview.policies.length && <Alert type="warning" showIcon message="暂无有效售后政策，请联系人工客服协助申请。" />}
           {preview.policies.map((policy) => <Card size="small" key={policy.id} style={{ marginBottom: 10 }}><Checkbox disabled={submit.isPending} checked={policyId === policy.id} onChange={() => { setPolicyId(policy.id); setConfirmed(false); }}>{policy.name}（{policy.version}）</Checkbox><p style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>{policy.content}</p></Card>)}
           <Input.TextArea disabled={submit.isPending} rows={3} value={reason} onChange={(event) => { setReason(event.target.value); setConfirmed(false); }} placeholder="请说明申请原因和商品问题" maxLength={2000} style={{ marginBottom: 12 }} />
           {(tickets.data ?? []).some((item) => !item.afterSaleRequestId) && <Select disabled={submit.isPending} allowClear placeholder="可选：关联已有工单" style={{ width: '100%', marginBottom: 12 }} value={sourceTicketNo || undefined} options={(tickets.data ?? []).filter((item) => !item.afterSaleRequestId).map((item) => ({ value: item.ticketNo, label: `${item.ticketNo} · ${item.description}` }))} onChange={(value) => setSourceTicketNo(value ?? '')} />}
@@ -185,8 +184,7 @@ export function StaffServicePage() {
   if (!actor.data) return <Spin />;
   return <StaffLayout actor={actor.data}><main className="staff-service-page">
     <Typography.Title level={3}>售后与工单处理</Typography.Title>
-    <Typography.Paragraph type="secondary">从列表查看完整记录，在详情中填写处理说明并执行操作。查看或切换记录不会提交处理。</Typography.Paragraph>
-    {apiMode === 'mock' && <Alert type="info" showIcon message="本地演示模式：处理状态仅保存在浏览器。" style={{ marginBottom: 16 }} />}
+    <Typography.Paragraph type="secondary">选择记录查看详情，填写处理说明后提交操作。</Typography.Paragraph>
     <ErrorLine error={requestMutation.error} />
     <ErrorLine error={ticketMutation.error} />
     <ErrorLine error={tickets.error} />

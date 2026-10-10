@@ -11,8 +11,8 @@ export function Brand({ compact = false }: { compact?: boolean }) {
 
 export function ModePill() {
   return apiMode === 'mock'
-    ? <Tag className="mode-tag mode-mock"><span className="mode-dot" />演示模式 · 模拟流式输出</Tag>
-    : <Tag className="mode-tag mode-remote"><span className="mode-dot" />真实 API · SSE 流式连接</Tag>;
+    ? <Tag className="mode-tag mode-mock"><span className="mode-dot" />演示模式</Tag>
+    : null;
 }
 
 export function StatusPill({ status }: { status: 'bot' | 'waiting' | 'staff' | 'closed' }) {
@@ -52,10 +52,9 @@ export function PageHeader({ actor }: { actor: Actor }) {
     <div className="topbar-right"><ModePill />
       {actor.role !== 'staff' && <Button type="text" onClick={() => navigate('/app/service')}>售后与工单</Button>}
       {actor.role !== 'staff' && location.pathname.includes('/service') && <Button type="text" onClick={() => navigate('/app')}>返回会话</Button>}
-      {apiMode === 'mock' && <Button className="reset-button" type="text" icon={<ReloadOutlined />} loading={busy} onClick={reset}>重置演示</Button>}
       <Dropdown menu={{ items: [
         { key: 'identity', label: <span>{actor.name} · {actor.role === 'staff' ? '客服专员' : '普通用户'}</span>, disabled: true },
-        ...(apiMode === 'mock' ? [{ key: 'reset', label: '重置演示数据', icon: <ReloadOutlined />, onClick: reset }] : []),
+        ...(apiMode === 'mock' ? [{ key: 'reset', label: '重置演示数据', icon: <ReloadOutlined />, disabled: busy, onClick: reset }] : []),
         { key: 'logout', label: '退出登录', icon: <LogoutOutlined />, onClick: logout },
       ] }} trigger={['click']}>
         <button className="account-trigger"><Avatar size={32} style={{ backgroundColor: actor.avatarColor || '#5b68c8' }}>{actor.name.slice(0, 1)}</Avatar><span className="account-name">{actor.name}</span><DownOutlined className="account-chevron" /></button>

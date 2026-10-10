@@ -11,7 +11,7 @@ import type { RagChunk, RagJob } from '../types';
 const { Text, Title, Paragraph } = Typography;
 
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : '请求失败，请检查后端服务';
+  return error instanceof Error ? error.message : '请求失败，请稍后重试';
 }
 
 function StatusCount({ title, count }: { title: string; count: number }) {
@@ -96,8 +96,8 @@ export function RagConsole() {
 
   return <StaffLayout actor={actorQuery.data} className="rag-shell">
     <main className="rag-main">
-      <div className="rag-heading"><div><Text className="section-kicker">KNOWLEDGE OPERATIONS</Text><Title level={2}>RAG 建库控制台</Title><Paragraph type="secondary">预览切块、导入来源、挖掘对话，再按 pending 状态补齐向量。</Paragraph></div><Space wrap><Link to="/staff/evals">查看 RAG 评估</Link>{apiMode === 'mock' && <Link to="/staff">返回员工工作台</Link>}<Button icon={<ReloadOutlined />} onClick={() => void refresh()} disabled={!enabled}>刷新</Button></Space></div>
-      {!enabled ? <Alert showIcon type="warning" message="演示模式不可建库" description="此页面不会模拟启动向量服务、写入 MySQL 或 Milvus。请切换 VITE_API_MODE=remote 并使用员工账号登录。" /> : <>
+      <div className="rag-heading"><div><Title level={2}>RAG 建库控制台</Title><Paragraph type="secondary">预览并导入知识文档、挖掘对话，再完成待处理知识的向量化。</Paragraph></div><Space wrap><Link to="/staff/evals">查看 RAG 评估</Link>{apiMode === 'mock' && <Link to="/staff">返回员工工作台</Link>}<Button icon={<ReloadOutlined />} onClick={() => void refresh()} disabled={!enabled}>刷新</Button></Space></div>
+      {!enabled ? <Alert showIcon type="warning" message="演示模式：建库功能不可用" description="请在正式服务中使用员工账号进行知识维护。" /> : <>
         {actionError && <Alert type="error" showIcon message={actionError} closable onClose={() => setActionError('')} />}
         {overview.isError && <Alert type="error" showIcon message="建库总览加载失败" description={errorText(overview.error)} action={<Button size="small" onClick={() => void overview.refetch()}>重试</Button>} />}
         {overview.data?.databaseError && <Alert type="error" showIcon message="MySQL 状态读取失败" description={overview.data.databaseError} />}
@@ -106,9 +106,8 @@ export function RagConsole() {
           <Space wrap>
             <Tag color={working ? 'blue' : 'default'}>{working ? '操作或任务进行中' : jobs.data ? '当前无运行任务' : '任务状态待读取'}</Tag>
             <Tag color={overview.data?.embedding.dimensionPending ? 'gold' : overview.data?.embedding.healthy ? 'green' : 'red'}>BGE {overview.data?.embedding.dimensionPending ? '维度待验证' : overview.data?.embedding.healthy ? '健康' : '未就绪'}</Tag>
-            <Text type="secondary">任务每 2 秒刷新 · 服务与挖掘每 5 秒刷新</Text>
           </Space>
-          {working && <Alert type="info" showIcon message="操作或任务进行中，暂不可启动新任务或本地服务；切换标签不会改变任务。" />}
+          {working && <Alert type="info" showIcon message="请等待当前操作或任务结束后，再启动新任务或本地服务。" />}
           <Space wrap className="rag-status-tags">{activeJobs.map((job) => <Space key={job.id} wrap><Tag color="blue">{job.kind} · {job.status}</Tag><Text code>{job.id}</Text>{job.progress && <Text>{job.progress}</Text>}{job.error && <Text type="danger">{job.error}</Text>}</Space>)}</Space>
           {historicalErrorCount > 0 && <Space wrap><Text type="danger">历史失败或错误任务 {historicalErrorCount} 个</Text><Button size="small" onClick={() => setActiveTab('jobs')}>查看任务及完整错误</Button></Space>}
         </Card>
@@ -127,14 +126,14 @@ export function RagConsole() {
                 {overview.data?.embedding.healthError && <Alert type="warning" showIcon message={overview.data.embedding.healthError} />}
                 {overview.data?.embedding.dimensionPending && <Alert type="info" showIcon message="服务已响应；首次编码后会确认向量维度" />}
                 <Space wrap><Button type="primary" icon={<RocketOutlined />} loading={action.isPending} disabled={working || !overview.data?.embedding.canStart || overview.data?.embedding.healthy} onClick={() => run(ragApi.startEmbedding)}>启动本地服务</Button><Button danger loading={action.isPending} disabled={!overview.data?.embedding.managed} onClick={() => run(ragApi.stopEmbedding)}>关闭本应用启动的服务</Button></Space>
-                <Paragraph type="secondary" className="rag-hint">启动后模型加载可能需要几分钟。外部运行的服务只能查看，不能从这里关闭。</Paragraph>
+                <Paragraph type="secondary" className="rag-hint">模型加载可能需要几分钟；此处仅可关闭本应用启动的服务。</Paragraph>
                 {!overview.data?.embedding.canStart && <Paragraph type="secondary">当前服务端不允许启动本地服务。</Paragraph>}
                 {overview.data?.embedding.healthy && <Paragraph type="secondary">服务已健康，无需重复启动。</Paragraph>}
                 {!overview.data?.embedding.managed && <Paragraph type="secondary">没有本应用管理的服务，关闭操作不可用。</Paragraph>}
               </Card>
               <Card className="rag-card" title="Milvus 集合配置" extra={<DatabaseOutlined />}>
                 <div className="rag-config"><span>集合 <b>{overview.data?.milvus.collection ?? '—'}</b></span><span>向量维度 <b>{overview.data?.milvus.dimension ?? '—'}</b></span><span>距离指标 <b>{overview.data?.milvus.metric ?? '—'}</b></span><span>索引 <b>{overview.data?.milvus.index ?? '—'}</b></span></div>
-                <Paragraph type="secondary" className="rag-hint">这里显示服务端配置；集合会在向量化时检查或创建。</Paragraph>
+                <Paragraph type="secondary" className="rag-hint">配置待向量化时核验，届时检查或创建集合。</Paragraph>
               </Card>
             </div>
           </div> },
@@ -142,8 +141,8 @@ export function RagConsole() {
             <Space wrap><Select className="rag-file-select" placeholder="选择知识文档" value={file} onChange={setFile} options={(overview.data?.documents ?? []).map((item) => ({ value: item, label: item }))} /><Button type="primary" disabled={!file || working} loading={action.isPending} onClick={() => run(() => ragApi.startJob('import-markdown', file))}>导入此文档到 MySQL</Button></Space>
             {overview.data?.documentsError && <Alert type="error" showIcon message="知识目录读取失败" description={overview.data.documentsError} />}
             {preview.isError && <Alert type="error" showIcon message="切块预览失败" description={errorText(preview.error)} />}
-            <Paragraph type="secondary">预览仅读取 backend/knowledge 内的 Markdown，不写数据库。导入后新块先处于 pending。</Paragraph>
-            {!file && <Alert type="info" showIcon message="请先选择知识文档；未选择时不可导入。" />}
+            <Paragraph type="secondary">预览知识文档后再导入；新知识块导入后待向量化。</Paragraph>
+            {!file && <Alert type="info" showIcon message="请选择要预览和导入的知识文档。" />}
             {preview.isLoading && file && <Spin />}
             {preview.data && <><Text strong>{preview.data.title} · {preview.data.chunks.length} 块</Text><div className="rag-stack rag-preview-list">{preview.data.chunks.map((chunk, index) => <ChunkCard key={`${chunk.sectionPath}-${index}`} chunk={chunk} />)}</div></>}
           </Card> },
@@ -170,7 +169,7 @@ export function RagConsole() {
             </Card>
             <Card className="rag-card" title="Milvus 实际数据（只读）">
               <Space wrap><Button disabled={milvusOffset === 0} onClick={() => setMilvusOffset(Math.max(0, milvusOffset - 20))}>上一页</Button><Text>第 {Math.floor(milvusOffset / 20) + 1} 页</Text><Button disabled={!milvus.data?.count || milvusOffset + 20 >= milvus.data.count} onClick={() => setMilvusOffset(milvusOffset + 20)}>下一页</Button></Space>
-              <Paragraph type="secondary">集合统计数可能短暂滞后；仅展示标量字段，不加载高维向量。MySQL 状态仍是知识是否有效的依据。</Paragraph>
+              <Paragraph type="secondary">集合统计数可能短暂滞后；知识有效状态以 MySQL 为准。</Paragraph>
               {milvus.isError && <Alert type="error" showIcon message="读取 Milvus 失败" description={errorText(milvus.error)} />}
               {milvus.data?.error && <Alert type="error" showIcon message="读取 Milvus 失败" description={milvus.data.error} />}
               {milvus.data?.mysqlError && <Alert type="warning" showIcon message="无法核对 MySQL 状态" description={milvus.data.mysqlError} />}

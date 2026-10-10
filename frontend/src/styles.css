@@ -39,10 +39,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .topbar-right { gap: 12px; }
 .mode-tag { display: inline-flex; align-items: center; gap: 7px; margin: 0; padding: 4px 10px; border-radius: 20px; border: 1px solid #e9e7d3; background: #fffcf2; color: #927337; font-size: 11px; line-height: 19px; }
 .mode-dot { width: 6px; height: 6px; border-radius: 50%; background: #d5a341; box-shadow: 0 0 0 3px #d5a34120; }
-.mode-remote { background: #f0faf7; color: #238269; border-color: #d9eee7; }
-.mode-remote .mode-dot { background: #28a381; box-shadow: 0 0 0 3px #28a38120; }
-.reset-button { color: #797e91; font-size: 12px; height: 32px; }
-.reset-button:hover { color: #515dc2 !important; background: #f3f4fc !important; }
 .account-trigger { display: inline-flex; align-items: center; gap: 9px; padding: 0 0 0 5px; border: 0; background: none; color: #33374d; cursor: pointer; }
 .account-name { font-size: 12px; font-weight: 600; }
 .account-chevron { margin-left: 1px; color: #9ca0b0; font-size: 10px; }
@@ -89,9 +85,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .login-mode { margin-bottom: 17px; }
 .login-heading .ant-typography h2, .login-heading h2.ant-typography { margin: 0 0 9px; color: #292d43; font-size: 25px; font-weight: 700; letter-spacing: -.5px; }
 .login-heading .ant-typography-secondary { display: block; max-width: 430px; margin: 0 0 25px; color: #83879a; font-size: 12px; line-height: 1.8; }
-.demo-alert { margin-bottom: 28px; padding: 11px 13px; border-radius: 10px; border-color: #e4e7fa; background: #f7f8fe; }
-.demo-alert .ant-alert-message { margin-bottom: 2px; color: #525ebc; font-size: 12px; font-weight: 600; }
-.demo-alert .ant-alert-description { color: #767b94; font-size: 11px; line-height: 1.65; }
 .demo-account-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; color: #4b5067; font-size: 12px; font-weight: 600; }
 .demo-account-hint { color: #9a9eae; font-size: 10px; font-weight: 400; }
 .demo-accounts { display: grid; gap: 9px; }
@@ -105,20 +98,15 @@ button { -webkit-tap-highlight-color: transparent; }
 .role-tag { height: auto; margin: 0; padding: 1px 6px; color: #6267bf; border: 0; border-radius: 5px; background: #f1f2fc; font-size: 9px; line-height: 16px; }
 .role-tag.staff-role { color: #16866e; background: #edf8f4; }
 .demo-desc { overflow: hidden; color: #84899b; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.demo-credentials { color: #a3a6b3; font: 10px/1.3 "DM Sans", Inter, sans-serif; }
-.demo-credentials i { margin: 0 3px; color: #d3d5dc; font-style: normal; }
 .demo-enter { color: #9297aa; }
 .demo-enter:hover { color: #5663cf !important; background: #f5f6fe !important; }
 .demo-account-staff { background: linear-gradient(100deg, #fff, #f9fcfb) !important; }
-.demo-footer { display: flex; align-items: center; gap: 8px; margin-top: 16px; color: #82879a; font-size: 10px; }
-.demo-footer-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: #2ba47f; box-shadow: 0 0 0 3px #2ba47f19; }
 .login-legal { margin-top: 33px; color: #aaadba; font-size: 10px; text-align: center; }
 .login-legal span { padding: 0 5px; color: #d0d1d8; }
 .remote-login-card.ant-card { border: 1px solid #eceef4; box-shadow: 0 12px 45px #282f5e0a; }
 .remote-login-card .ant-card-body { padding: 26px; }
 .role-selector { display: flex; width: 100%; margin-bottom: 23px; }
 .role-selector .ant-radio-button-wrapper { width: 50%; text-align: center; }
-.remote-note { display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 17px; color: #9599a8; font-size: 10px; }
 
 /* User chat workspace */
 .user-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 284px minmax(0, 1fr); padding: 16px 20px 19px; gap: 15px; }
@@ -171,7 +159,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .spark-one { top: 6px; right: 22px; color: #d5a14b; font-size: 19px; }
 .spark-two { left: 9px; bottom: 21px; color: #52ac9a; }
 .spark-three { right: 6px; bottom: 24px; color: #b2a2e8; font-size: 25px; }
-.welcome-eyebrow { color: #a1a5b9; font: 700 8px "DM Sans", sans-serif; letter-spacing: 1.8px; }
 .welcome-panel h2 { margin: 8px 0 7px; color: #31364d; font-size: 22px; font-weight: 650; letter-spacing: -.7px; }
 .welcome-panel h2 span { color: #7077db; }
 .welcome-panel > p { margin: 0; color: #9196a7; font-size: 11px; line-height: 1.8; }
@@ -183,7 +170,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .suggestion-index { color: #898ee0; font: 700 9px "DM Sans", sans-serif; }
 .suggestion-index-1 { color: #59a693; }
 .suggestion-index-2 { color: #c79456; }
-.welcome-demo-note { display: flex; align-items: center; gap: 8px; margin-top: 19px; color: #a4a7b2; font-size: 9px; }
 .message-timeline, .staff-message-timeline { display: grid; gap: 20px; padding: 26px max(28px, calc((100% - 790px)/2)) 26px; }
 .chat-row { display: flex; align-items: flex-start; gap: 9px; animation: appear .2s ease-out; }
 .chat-row-user { justify-content: flex-end; }
@@ -254,7 +240,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .closed-banner { justify-content: space-between; border-color: #e6e8ed; background: #fafbfc; color: #777c8e; font-size: 10px; }
 .streaming-indicator { position: absolute; bottom: 18px; left: 50%; display: flex; align-items: center; gap: 8px; padding: 6px 11px; color: #7e8397; border: 1px solid #eceef4; border-radius: 20px; background: #ffffffed; box-shadow: 0 4px 14px #1f2b4b0b; font-size: 9px; transform: translateX(-50%); white-space: nowrap; }
 .streaming-bars { display: flex; align-items: center; gap: 2px; height: 10px; }.streaming-bars i { width: 2px; height: 5px; border-radius: 2px; background: #6975d9; animation: bars .8s infinite ease-in-out; }.streaming-bars i:nth-child(2) { height: 9px; animation-delay: .13s; }.streaming-bars i:nth-child(3) { animation-delay: .26s; }
-.streaming-mode { padding-left: 7px; color: #aaaebe; border-left: 1px solid #e8e9ef; }
 .chat-load-state { min-height: 180px; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 25px; color: #999eae; font-size: 10px; }
 .chat-load-state .ant-alert { max-width: 430px; }
 .chat-empty-state { flex: 1; display: grid; place-items: center; }
@@ -316,7 +301,6 @@ button { -webkit-tap-highlight-color: transparent; }
 .inbox-empty-ring { width: 93px; height: 93px; position: absolute; border: 1px solid #e6e8f5; border-radius: 50%; box-shadow: 0 0 0 14px #f8f8fd; }
 .inbox-empty-icon { width: 48px; height: 48px; z-index: 1; display: grid; place-items: center; color: #6370d3; border: 5px solid #f3f4fd; border-radius: 17px; background: #fff; box-shadow: 0 6px 20px #6571d21c; font-size: 19px; }
 .inbox-empty-spark { position: absolute; top: 3px; right: 19px; color: #d4a357; font-size: 18px; font-style: normal; }
-.inbox-empty-eyebrow { color: #a4a7b5; font: 700 8px "DM Sans", sans-serif; letter-spacing: 1.7px; }
 .staff-inbox-empty h2 { margin: 8px 0 6px; color: #3d4259; font-size: 19px; font-weight: 650; }
 .staff-inbox-empty p { max-width: 360px; margin: 0; color: #989cac; font-size: 10px; line-height: 1.8; }
 .staff-inbox-empty .ant-btn { margin-top: 16px; font-size: 10px; }
@@ -346,7 +330,7 @@ button { -webkit-tap-highlight-color: transparent; }
   .workspace-shell { min-height: 480px; }
   .app-topbar { min-height: 56px; padding: 8px 13px; }
   .topbar-left, .topbar-right { gap: 9px; }
-  .topbar-divider, .workspace-label, .reset-button, .account-name, .account-chevron { display: none; }
+  .topbar-divider, .workspace-label, .account-name, .account-chevron { display: none; }
   .mode-tag { padding: 3px 7px; font-size: 9px; }
   .account-trigger { padding: 0; }
   .user-workspace, .staff-workspace { display: flex; padding: 0; gap: 0; }
@@ -369,7 +353,6 @@ button { -webkit-tap-highlight-color: transparent; }
   .welcome-panel h2 { font-size: 20px; }
   .suggestion-list { gap: 6px; }
   .suggestion-chip { min-height: 38px; }
-  .welcome-demo-note { font-size: 8px; }
   .handoff-banner { width: calc(100% - 26px); margin-top: 10px; padding: 9px; }
   .staff-user-id { display: none; }
   .staff-chat-header .ant-btn { padding: 0 8px; font-size: 9px; }
@@ -393,10 +376,8 @@ button { -webkit-tap-highlight-color: transparent; }
   .login-panel { width: 100%; }
   .login-heading .ant-typography h2, .login-heading h2.ant-typography { font-size: 21px; }
   .login-heading .ant-typography-secondary { margin-bottom: 17px; font-size: 11px; }
-  .demo-alert { margin-bottom: 18px; }
   .demo-account .ant-card-body { padding: 10px; }
   .demo-desc { max-width: 190px; }
-  .demo-credentials { font-size: 9px; }
   .login-legal { margin-top: 20px; }
 }
 @media (max-width: 420px) {

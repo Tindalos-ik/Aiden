@@ -14,7 +14,7 @@ function QueueList({ items, selectedId, onSelect, compact = false }: { items: Co
   const active = items.filter((item) => item.status === 'staff');
   const closed = items.filter((item) => item.status === 'closed');
   return <div className={`queue-pane ${compact ? 'queue-pane-compact' : ''}`}>
-    <div className="queue-pane-title"><span className="section-kicker">INBOX</span><h2>服务队列</h2><p>接入会话并提供及时协助</p></div>
+    <div className="queue-pane-title"><h2>服务队列</h2><p>接入会话并提供及时协助</p></div>
     <div className="queue-scroll">
       <div className="queue-group"><div className="queue-group-heading"><span>待接入</span><Tag className="queue-count">{waiting.length}</Tag></div>
         {!waiting.length ? <div className="queue-group-empty"><CheckOutlined /> 当前没有等待中的会话</div> : waiting.map((item) => <QueueItem key={item.id} item={item} selected={selectedId === item.id} onClick={() => onSelect(item)} />)}
@@ -26,7 +26,7 @@ function QueueList({ items, selectedId, onSelect, compact = false }: { items: Co
         {closed.map((item) => <QueueItem key={item.id} item={item} selected={selectedId === item.id} onClick={() => onSelect(item)} />)}
       </div>
     </div>
-    <div className="queue-pane-footer"><span className="queue-online-dot" />客服工作台在线<span className="queue-footer-divider">·</span>{apiMode === 'mock' ? '标签页实时同步' : '自动刷新中'}</div>
+    <div className="queue-pane-footer"><span className="queue-online-dot" />客服工作台</div>
   </div>;
 }
 
@@ -137,7 +137,7 @@ export function StaffWorkspace() {
         <div className="staff-mobile-queue-bar"><Button icon={<MessageOutlined />} onClick={() => setMobileQueueOpen(true)}>服务队列 <Tag className="queue-count">{waitingCount}</Tag></Button></div>
         {!conversation && !queueQuery.isLoading ? <div className="staff-inbox-empty">
           <div className="inbox-empty-art"><span className="inbox-empty-ring" /><span className="inbox-empty-icon"><CustomerServiceOutlined /></span><i className="inbox-empty-spark">✦</i></div>
-          <div className="inbox-empty-eyebrow">CUSTOMER CARE</div><h2>{queue.length ? '选择一段会话' : '此刻，一切从容'}</h2><p>{queue.length ? '打开左侧队列查看完整对话并接入服务。' : '当前没有待接入会话。用户申请转人工后，会实时出现在这里。'}</p>
+          <h2>{queue.length ? '选择一段会话' : '暂无待接入会话'}</h2><p>{queue.length ? '打开左侧队列查看对话并接入服务。' : '新会话将在左侧队列显示。'}</p>
           {waitingCount > 0 && <Button type="primary" onClick={() => choose(queue.find((item) => item.status === 'waiting')!)}>查看 {waitingCount} 个待接入会话</Button>}
           {queueQuery.isError && <Button onClick={() => void queueQuery.refetch()}>重新载入队列</Button>}
         </div> : queueQuery.isLoading && !conversation ? <div className="chat-load-state"><Spin /><span>正在连接客服队列…</span></div> : conversation && <>

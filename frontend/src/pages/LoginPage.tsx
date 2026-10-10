@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Button, Card, Form, Input, Radio, Tag, Typography, message } from 'antd';
+import { Button, Card, Form, Input, Radio, Tag, Typography, message } from 'antd';
 import { ArrowRightOutlined, CustomerServiceOutlined, LockOutlined, MailOutlined, RobotOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -30,34 +30,31 @@ export function LoginPage() {
         <div className="login-aside-copy">
           <div className="eyebrow"><span className="eyebrow-line" />订单服务 · 更懂你的每一步</div>
           <h1>让每一次<br /><span>服务都恰到好处。</span></h1>
-          <p>{apiMode === 'mock' ? 'Aiden 帮你看订单、追物流，也随时为你连接真人客服。' : '通过智能客服进行对话；需要时可申请站内人工客服。'}</p>
+          <p>Aiden 帮你看订单、追物流，也随时为你连接真人客服。</p>
           <div className="login-benefits">
-            <div><span className="benefit-icon"><RobotOutlined /></span><span><b>{apiMode === 'mock' ? '智能订单助手' : '智能对话客服'}</b><small>{apiMode === 'mock' ? '订单信息快速核对，进度一目了然' : '回答一般咨询，具体订单数据暂未接入'}</small></span></div>
-            <div><span className="benefit-icon benefit-human"><CustomerServiceOutlined /></span><span><b>人工客服接力</b><small>申请后进入队列，专员接单后在原会话交流</small></span></div>
+            <div><span className="benefit-icon"><RobotOutlined /></span><span><b>智能订单助手</b><small>查询订单、物流与售后进度</small></span></div>
+            <div><span className="benefit-icon benefit-human"><CustomerServiceOutlined /></span><span><b>人工客服接力</b><small>需要更多帮助时，在会话中联系专员</small></span></div>
           </div>
         </div>
-        <div className="login-aside-footer"><SafetyCertificateOutlined /> 订单隐私受保护 <span>·</span> {apiMode === 'mock' ? '服务记录可追溯' : '会话历史持久保存'}</div>
+        <div className="login-aside-footer"><SafetyCertificateOutlined /> 订单隐私受保护 <span>·</span> 服务记录可追溯</div>
       </div>
       <div className="aside-decoration aside-decoration-one" /><div className="aside-decoration aside-decoration-two" />
     </section>
     <section className="login-main">
       <div className="login-panel">
-        <div className="login-heading"><div className="login-mode"><ModePill /></div><Typography.Title level={2}>{apiMode === 'mock' ? '欢迎来到演示工作台' : '欢迎回来'}</Typography.Title><Typography.Paragraph type="secondary">{apiMode === 'mock' ? '选择一个演示身份，完整体验智能客服与人工协作流程。' : '普通用户可使用演示账号；员工使用单独初始化的账号进入客服工作台。'}</Typography.Paragraph></div>
+        <div className="login-heading">{apiMode === 'mock' && <div className="login-mode"><ModePill /></div>}<Typography.Title level={2}>欢迎回来</Typography.Title><Typography.Paragraph type="secondary">{apiMode === 'mock' ? '选择演示身份，体验智能客服服务。' : '登录账号，开始使用客服服务。'}</Typography.Paragraph></div>
         {apiMode === 'mock' ? <>
-          <Alert className="demo-alert" type="info" showIcon message="演示模式" description="此工作台使用本地模拟数据，不会连接真实订单系统。演示数据保存在此浏览器中，可随时重置。" />
           <div className="demo-account-heading"><span>选择演示身份</span><span className="demo-account-hint">点击即可进入</span></div>
           <div className="demo-accounts">
             {demoAccounts.map((account) => <Card key={account.id} className={`demo-account ${account.role === 'staff' ? 'demo-account-staff' : ''}`} bordered={false}>
               <div className="demo-account-main">
                 <span className="demo-avatar" style={{ background: `${account.color}15`, color: account.color }}>{account.role === 'staff' ? <CustomerServiceOutlined /> : <RobotOutlined />}</span>
-                <span className="demo-account-info"><span className="demo-name">{account.name}<Tag className={account.role === 'staff' ? 'role-tag staff-role' : 'role-tag'}>{account.role === 'staff' ? '人工客服' : '普通用户'}</Tag></span><span className="demo-desc">{account.description}</span><span className="demo-credentials">{account.email} <i>·</i> {account.password}</span></span>
+                <span className="demo-account-info"><span className="demo-name">{account.name}<Tag className={account.role === 'staff' ? 'role-tag staff-role' : 'role-tag'}>{account.role === 'staff' ? '人工客服' : '普通用户'}</Tag></span><span className="demo-desc">{account.description}</span></span>
                 <Button type="text" className="demo-enter" icon={<ArrowRightOutlined />} aria-label={`以${account.name}身份进入`} loading={login.isPending} onClick={() => signInDemo(account.id, account.password)} />
               </div>
             </Card>)}
           </div>
-          <div className="demo-footer"><span className="demo-footer-dot" /> 同一浏览器开两个标签页，可使用用户和客服身份演示转人工</div>
         </> : <Card className="remote-login-card" bordered={false}>
-          <Alert className="demo-alert" type="info" showIcon message="本地开发演示账号" description={<>普通用户：maya@aiden.demo / aiden123，或 chen@aiden.demo / aiden123。员工账号需在服务端显式初始化，登录后进入人工客服工作台。</>} />
           <Radio.Group value={role} onChange={(event) => setRole(event.target.value as Role)} optionType="button" buttonStyle="solid" className="role-selector">
             <Radio.Button value="user">普通用户</Radio.Button><Radio.Button value="staff">客服员工</Radio.Button>
           </Radio.Group>
@@ -66,7 +63,6 @@ export function LoginPage() {
             <Form.Item label="密码" name="password" rules={[{ required: true, message: '请输入密码' }]}><Input.Password size="large" prefix={<LockOutlined />} placeholder="请输入密码" autoComplete="current-password" /></Form.Item>
             <Button type="primary" htmlType="submit" size="large" block loading={login.isPending}>登录并继续</Button>
           </Form>
-          <div className="remote-note"><SafetyCertificateOutlined /> 登录凭证由服务端校验，身份由 HttpOnly Cookie 维护</div>
         </Card>}
         <div className="login-legal">Aiden 智能订单客服 <span>·</span> 为安心服务而设计</div>
       </div>
